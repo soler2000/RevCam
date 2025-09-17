@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>RevCam Settings</title>
+    <style>
+      body {
+        margin: 0;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background-color: #111;
+        color: #f5f5f5;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+      }
+      label {
+        display: block;
+        margin-bottom: 1rem;
+      }
+      select,
+      input[type="checkbox"] {
+        margin-top: 0.5rem;
+        font-size: 1rem;
+      }
+      button {
+        background: #0a84ff;
+        color: #fff;
+        border: none;
+        padding: 0.6rem 1.2rem;
+        border-radius: 999px;
+        font-size: 1rem;
+      }
+      #status {
+        margin-top: 1rem;
+        font-size: 0.95rem;
+        opacity: 0.85;
+      }
+      a {
+        color: #0a84ff;
+      }
+    </style>
+  </head>
+  <body>
+    <a href="/">← Back to live view</a>
+    <h1>Camera Orientation</h1>
+    <form id="orientation-form">
+      <label>
+        Rotation
+        <select name="rotation">
+          <option value="0">0°</option>
+          <option value="90">90°</option>
+          <option value="180">180°</option>
+          <option value="270">270°</option>
+        </select>
+      </label>
+      <label>
+        <input type="checkbox" name="flip_horizontal" /> Flip horizontally
+      </label>
+      <label>
+        <input type="checkbox" name="flip_vertical" /> Flip vertically
+      </label>
+      <button type="submit">Save</button>
+      <div id="status">Loading…</div>
+    </form>
+    <script>
+      const form = document.getElementById("orientation-form");
+      const statusLabel = document.getElementById("status");
+
+      async function loadOrientation() {
+        const response = await fetch("/api/orientation");
+        if (!response.ok) {
+          throw new Error("Unable to fetch current orientation");
+        }
+        const data = await response.json();
+        form.rotation.value = data.rotation;
+        form.flip_horizontal.checked = data.flip_horizontal;
+        form.flip_vertical.checked = data.flip_vertical;
+        statusLabel.textContent = "Orientation loaded";
+      }
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        statusLabel.textContent = "Saving…";
+        const payload = {
+          rotation: parseInt(form.rotation.value, 10),
+          flip_horizontal: form.flip_horizontal.checked,
+          flip_vertical: form.flip_vertical.checked,
+        };
+        const response = await fetch("/api/orientation", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (!response.ok) {
+          const error = await response.json();
+          statusLabel.textContent = "Error: " + (error.detail || "Unable to save");
+          return;
+        }
+        statusLabel.textContent = "Settings saved";
+      });
+
+      loadOrientation().catch((err) => {
+        console.error(err);
+        statusLabel.textContent = err.message;
+      });
+    </script>
+  </body>
+</html>
