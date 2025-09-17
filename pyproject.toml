@@ -19,9 +19,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-camera = [
-    "picamera2>=0.3; platform_machine=='armv7l' or platform_machine=='aarch64'"
-]
 dev = [
     "pytest>=7.4"
 ]
