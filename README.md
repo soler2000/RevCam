@@ -35,12 +35,25 @@ The project targets Python 3.11+. On development machines install the dependenci
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install -e .[camera]
+pip install -e .
 ```
 
-The optional `camera` extra pulls in `picamera2`, which is only available on ARM
-hardware. On non-ARM hosts you can run the stack with a mock camera by setting the
-`REVCAM_CAMERA=synthetic` environment variable (see `camera.py`).
+Camera support is pluggable:
+
+- **Raspberry Pi camera** – Install the system packages provided by Raspberry Pi
+  OS instead of pulling `picamera2` from PyPI. This avoids the `python-prctl`
+  build dependency on `libcap` headers. On a Pi run:
+
+  ```bash
+  sudo apt install python3-picamera2 python3-prctl
+  ```
+
+  The packaged build already bundles the compiled dependencies required by
+  Picamera2, so no additional Python packages are needed.
+- **OpenCV USB camera** – Install `opencv-python` manually and set
+  `REVCAM_CAMERA=opencv`.
+- **Synthetic frames** – For development without camera hardware set
+  `REVCAM_CAMERA=synthetic` (default when Picamera2 is unavailable).
 
 Run the server with
 
