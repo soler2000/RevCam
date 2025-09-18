@@ -57,7 +57,13 @@ building everything from PyPI. Follow these steps on the Pi:
 3. Install RevCam from the source tree. On Pi hardware some wheels still need to
    be built locally (`aiortc`, `pylibsrtp`, `av`), so this step can take several
    minutes. Seeing a long list ending with `Successfully installed ...` means
-   the step finished successfully:
+   the step finished successfully. You can either run the convenience script:
+
+   ```bash
+   ./scripts/install.sh --pi
+   ```
+
+   or execute `pip` manually:
 
    ```bash
    pip install --prefer-binary --extra-index-url https://www.piwheels.org/simple -e .
@@ -72,9 +78,16 @@ For local development on non-Pi machines a regular virtual environment is
 sufficient:
 
 ```bash
+./scripts/install.sh --dev
+```
+
+Under the hood the script creates a `.venv` virtual environment and installs the
+project in editable mode. If you prefer to perform the steps manually, run:
+
+```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install -e .
+pip install -e .[dev]
 ```
 
 ### Camera back-ends
