@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import time
 from abc import ABC, abstractmethod
@@ -116,6 +117,9 @@ def _normalise_choice(raw_choice: str | None) -> str:
     return choice or "auto"
 
 
+logger = logging.getLogger(__name__)
+
+
 def create_camera() -> BaseCamera:
     """Create the camera specified by the environment."""
 
@@ -129,19 +133,33 @@ def create_camera() -> BaseCamera:
     if choice in {"picamera", "picamera2"}:
         return Picamera2Camera()
     if choice == "auto":
+        errors: list[str] = []
+
         try:
             return Picamera2Camera()
         except CameraError as exc:
-            # Picamera2 import errors mean we are not running on Pi hardware or
-            # the dependency is missing. Fall back to OpenCV if available before
-            # using the synthetic test pattern so that USB cameras work out of
-            # the box on development machines.
-            if not isinstance(exc.__cause__, ImportError):
-                raise
+            detail = str(exc)
+            errors.append(f"Picamera2: {detail}")
+            logger.info("Picamera2 backend unavailable in auto mode: %s", detail)
+
         try:
-            return OpenCVCamera()
-        except CameraError:
+            camera = OpenCVCamera()
+        except CameraError as exc:
+            detail = str(exc)
+            errors.append(f"OpenCV: {detail}")
+            if errors:
+                logger.warning(
+                    "All hardware camera backends failed (%s); using synthetic feed",
+                    "; ".join(errors),
+                )
             return SyntheticCamera()
+        else:
+            if errors:
+                logger.info(
+                    "Using OpenCV camera after previous failures: %s",
+                    "; ".join(errors),
+                )
+            return camera
     raise CameraError(f"Unknown camera backend: {raw_choice!r}")
 
 

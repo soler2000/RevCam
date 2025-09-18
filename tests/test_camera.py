@@ -102,10 +102,10 @@ def test_create_camera_uses_opencv_when_picamera_missing(monkeypatch: pytest.Mon
     assert isinstance(camera, OpenCVCamera)
 
 
-def test_create_camera_raises_when_picamera_initialisation_fails(
+def test_create_camera_auto_falls_back_when_picamera_initialisation_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Surface Picamera2 initialisation failures instead of silently falling back."""
+    """Auto mode should fall back to OpenCV when Picamera2 initialisation fails."""
 
     class BrokenCamera:
         def __init__(self) -> None:
@@ -114,6 +114,48 @@ def test_create_camera_raises_when_picamera_initialisation_fails(
     module = types.SimpleNamespace(Picamera2=BrokenCamera)
     monkeypatch.setitem(sys.modules, "picamera2", module)
     monkeypatch.delenv("REVCAM_CAMERA", raising=False)
+
+    class DummyCapture:
+        def __init__(self, index: int) -> None:
+            self.index = index
+
+        def isOpened(self) -> bool:
+            return True
+
+        def read(self) -> tuple[bool, str]:
+            return True, "frame"
+
+        def release(self) -> None:
+            return None
+
+    def dummy_video_capture(index: int) -> DummyCapture:
+        return DummyCapture(index)
+
+    def dummy_cvt_color(frame: str, _: object) -> str:
+        return frame
+
+    cv2_module = types.SimpleNamespace(
+        VideoCapture=dummy_video_capture,
+        COLOR_BGR2RGB=1,
+        cvtColor=dummy_cvt_color,
+    )
+    monkeypatch.setitem(sys.modules, "cv2", cv2_module)
+
+    camera = create_camera()
+
+    assert isinstance(camera, OpenCVCamera)
+
+
+def test_create_camera_raises_when_picamera_explicit(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Explicit Picamera2 configuration should surface initialisation failures."""
+
+    class BrokenCamera:
+        def __init__(self) -> None:
+            raise RuntimeError("picamera unavailable")
+
+    module = types.SimpleNamespace(Picamera2=BrokenCamera)
+    monkeypatch.setitem(sys.modules, "picamera2", module)
+    monkeypatch.setenv("REVCAM_CAMERA", "picamera")
 
     with pytest.raises(CameraError):
         create_camera()
