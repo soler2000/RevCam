@@ -114,6 +114,37 @@ pip install --upgrade pip
 pip install -e .[dev]
 ```
 
+### Copy-paste branch runner
+
+Need to try out a feature branch from GitHub? The snippet below checks out the
+branch, ensures the virtual environment exists, installs dependencies, and
+launches the development server. Replace `REVCAM_BRANCH` with the branch you
+want to test.
+
+```bash
+REVCAM_REPO="https://github.com/soler2000/RevCam.git"
+REVCAM_BRANCH="main"  # e.g. "feature/my-pr-branch"
+
+set -euo pipefail
+
+if [ ! -d RevCam ]; then
+  git clone "$REVCAM_REPO" RevCam
+fi
+
+cd RevCam
+git fetch origin "$REVCAM_BRANCH"
+git checkout "$REVCAM_BRANCH"
+
+if [ ! -d .venv ]; then
+  python3 -m venv .venv
+fi
+source .venv/bin/activate
+pip install --upgrade pip
+pip install -e .[dev]
+
+uvicorn rev_cam.app:create_app --factory --host 0.0.0.0 --port 8000
+```
+
 ### Camera back-ends
 
 Camera support is pluggable:
