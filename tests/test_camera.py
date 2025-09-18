@@ -83,6 +83,26 @@ def test_explicit_picamera_failure_surfaces(monkeypatch: pytest.MonkeyPatch) -> 
         create_camera("picamera")
 
 
+def test_import_failure_surface_details(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Import errors should include the underlying message for diagnostics."""
+
+    import builtins
+
+    original_import = builtins.__import__
+
+    def raising_import(name: str, *args: object, **kwargs: object):
+        if name == "picamera2":
+            raise ImportError("numpy ABI mismatch")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", raising_import)
+
+    with pytest.raises(CameraError) as excinfo:
+        Picamera2Camera()
+
+    assert "numpy ABI mismatch" in str(excinfo.value)
+
+
 def test_identify_camera_returns_source() -> None:
     camera = SyntheticCamera()
     assert identify_camera(camera) == "synthetic"

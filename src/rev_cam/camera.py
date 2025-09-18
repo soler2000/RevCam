@@ -48,7 +48,11 @@ class Picamera2Camera(BaseCamera):
         try:
             from picamera2 import Picamera2
         except ImportError as exc:  # pragma: no cover - hardware dependent
-            raise CameraError("picamera2 is not available") from exc
+            message = "picamera2 is not available"
+            detail = str(exc).strip()
+            if detail:
+                message = f"{message}: {detail}"
+            raise CameraError(message) from exc
 
         self._camera = None
         started = False
@@ -71,7 +75,11 @@ class Picamera2Camera(BaseCamera):
                     camera.close()
                 except Exception:
                     pass
-            raise CameraError("Failed to initialise Picamera2 camera") from exc
+            detail = str(exc).strip()
+            message = "Failed to initialise Picamera2 camera"
+            if detail:
+                message = f"{message}: {detail}"
+            raise CameraError(message) from exc
 
     async def get_frame(self) -> np.ndarray:  # pragma: no cover - hardware dependent
         return await asyncio.to_thread(self._camera.capture_array)
