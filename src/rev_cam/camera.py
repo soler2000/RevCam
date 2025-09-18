@@ -107,19 +107,45 @@ class SyntheticCamera(BaseCamera):
         return frame.astype(np.uint8)
 
 
-def create_camera() -> BaseCamera:
-    """Create the camera specified by the environment."""
+def _create_opencv_camera(config: str | None = None) -> BaseCamera:
+    """Return an OpenCV camera instance for the supplied config string."""
 
-    choice = os.getenv("REVCAM_CAMERA", "picamera").lower()
-    if choice == "synthetic":
-        return SyntheticCamera()
-    if choice == "opencv":
+    if not config or config == "opencv":
         return OpenCVCamera()
+
+    _, _, suffix = config.partition(":")
+    if not suffix:
+        raise CameraError(f"Invalid OpenCV camera configuration: {config!r}")
     try:
-        return Picamera2Camera()
-    except CameraError:
-        # Fall back to synthetic frames when running on development machines.
-        return SyntheticCamera()
+        index = int(suffix)
+    except ValueError as exc:
+        raise CameraError(f"Invalid OpenCV camera index: {suffix!r}") from exc
+    return OpenCVCamera(index=index)
+
+
+def create_camera() -> BaseCamera:
+    """Create the camera specified by the environment or via auto detection."""
+
+    choice_raw = os.getenv("REVCAM_CAMERA")
+    choice = choice_raw.lower().strip() if choice_raw else None
+
+    if choice and choice not in {"auto", ""}:
+        if choice == "synthetic":
+            return SyntheticCamera()
+        if choice.startswith("opencv"):
+            return _create_opencv_camera(choice)
+        if choice == "picamera":
+            return Picamera2Camera()
+        raise CameraError(f"Unknown camera type: {choice_raw}")
+
+    for factory in (Picamera2Camera, OpenCVCamera):
+        try:
+            return factory()
+        except CameraError:
+            continue
+
+    # Fall back to synthetic frames when running on development machines.
+    return SyntheticCamera()
 
 
 __all__ = [

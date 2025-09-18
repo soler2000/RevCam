@@ -7,7 +7,13 @@ import types
 
 import pytest
 
-from rev_cam.camera import CameraError, Picamera2Camera, SyntheticCamera, create_camera
+from rev_cam.camera import (
+    BaseCamera,
+    CameraError,
+    Picamera2Camera,
+    SyntheticCamera,
+    create_camera,
+)
 
 
 def test_picamera_initialisation_failure_is_wrapped(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -61,4 +67,26 @@ def test_create_camera_falls_back_when_picamera_fails(monkeypatch: pytest.Monkey
     camera = create_camera()
 
     assert isinstance(camera, SyntheticCamera)
+
+
+def test_create_camera_prefers_opencv_when_available(monkeypatch: pytest.MonkeyPatch) -> None:
+    """If Picamera2 fails but OpenCV works we should use the OpenCV camera."""
+
+    def broken_picamera() -> BaseCamera:
+        raise CameraError("picamera unavailable")
+
+    class DummyOpenCVCamera(BaseCamera):
+        def __init__(self, index: int = 0) -> None:
+            self.index = index
+
+        async def get_frame(self):  # pragma: no cover - not used in test
+            return [[0]]
+
+    monkeypatch.setattr("rev_cam.camera.Picamera2Camera", broken_picamera)
+    monkeypatch.setattr("rev_cam.camera.OpenCVCamera", DummyOpenCVCamera)
+    monkeypatch.delenv("REVCAM_CAMERA", raising=False)
+
+    camera = create_camera()
+
+    assert isinstance(camera, DummyOpenCVCamera)
 
