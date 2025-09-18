@@ -25,6 +25,41 @@ def reset_camera_status(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(camera_module, "_LAST_SELECTION", None)
 
 
+def test_load_picamera2_extends_search_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Adding known system paths should allow importing Picamera2."""
+
+    monkeypatch.setattr(camera_module, "_picamera2_candidate_paths", lambda: ["/opt/picamera"])
+    monkeypatch.setattr(camera_module.os.path, "isdir", lambda path: True)
+
+    added: list[str] = []
+    monkeypatch.setattr(camera_module.site, "addsitedir", lambda path: added.append(path))
+
+    real_import_module = camera_module.importlib.import_module
+    attempts = {"count": 0}
+    dummy_class = type("DummyPicamera", (), {})
+
+    def fake_import(name: str, package: str | None = None):
+        if name == "picamera2":
+            attempts["count"] += 1
+            if attempts["count"] == 1:
+                raise ImportError("picamera2 missing")
+            module = types.SimpleNamespace(Picamera2=dummy_class)
+            sys.modules["picamera2"] = module
+            return module
+        return real_import_module(name, package)
+
+    monkeypatch.setattr(camera_module.importlib, "import_module", fake_import)
+    sys.modules.pop("picamera2", None)
+
+    try:
+        loaded = camera_module._load_picamera2()
+    finally:
+        sys.modules.pop("picamera2", None)
+
+    assert loaded is dummy_class
+    assert added == ["/opt/picamera"]
+
+
 def test_picamera_initialisation_failure_is_wrapped(monkeypatch: pytest.MonkeyPatch) -> None:
     """Picamera setup errors should raise CameraError and close the device."""
 

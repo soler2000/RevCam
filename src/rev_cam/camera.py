@@ -2,11 +2,15 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 import logging
 import os
+import site
+import sys
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 
@@ -26,15 +30,89 @@ class BaseCamera(ABC):
         return None
 
 
+logger = logging.getLogger(__name__)
+
+
+def _picamera2_candidate_paths() -> list[str]:
+    """Return directories that may contain the Picamera2 module."""
+
+    candidates: list[str] = []
+    seen: set[str] = set()
+
+    extra_paths = os.getenv("REVCAM_PICAMERA2_PATH")
+    if extra_paths:
+        for raw_path in extra_paths.split(os.pathsep):
+            path = raw_path.strip()
+            if not path or path in seen:
+                continue
+            candidates.append(path)
+            seen.add(path)
+
+    defaults: list[str] = [
+        "/usr/lib/python3/dist-packages",
+        "/usr/local/lib/python3/dist-packages",
+    ]
+
+    for root in (Path("/usr/lib"), Path("/usr/local/lib")):
+        if not root.is_dir():
+            continue
+        for entry in sorted(root.glob("python3*/dist-packages")):
+            if entry.is_dir():
+                defaults.append(str(entry))
+
+    for path in defaults:
+        if path in seen:
+            continue
+        candidates.append(path)
+        seen.add(path)
+
+    return candidates
+
+
+def _extend_picamera2_search_path() -> list[str]:
+    """Add known Picamera2 locations to ``sys.path`` if necessary."""
+
+    added: list[str] = []
+    existing = {os.path.abspath(path) for path in sys.path}
+
+    for path in _picamera2_candidate_paths():
+        if not os.path.isdir(path):
+            continue
+        absolute = os.path.abspath(path)
+        if absolute in existing:
+            continue
+        site.addsitedir(path)
+        added.append(path)
+        existing.add(absolute)
+
+    if added:
+        logger.info("Added Picamera2 search paths: %s", ", ".join(added))
+
+    return added
+
+
+def _load_picamera2() -> type:
+    """Import the Picamera2 class, extending the module search path if needed."""
+
+    try:
+        module = importlib.import_module("picamera2")
+    except ImportError:
+        _extend_picamera2_search_path()
+        try:
+            module = importlib.import_module("picamera2")
+        except ImportError as exc:
+            raise CameraError("picamera2 is not available") from exc
+    try:
+        return module.Picamera2
+    except AttributeError as exc:  # pragma: no cover - defensive programming
+        raise CameraError("picamera2 is not available") from exc
+
+
 class Picamera2Camera(BaseCamera):
     """Camera implementation using the Picamera2 stack."""
 
     def __init__(self) -> None:
-        try:
-            from picamera2 import Picamera2
-        except ImportError as exc:  # pragma: no cover - hardware dependent
-            raise CameraError("picamera2 is not available") from exc
-
+        Picamera2 = _load_picamera2()
         self._camera = None
         started = False
         try:
@@ -138,10 +216,6 @@ def _normalise_choice(raw_choice: str | None) -> str:
         return "auto"
     choice = raw_choice.strip().lower()
     return choice or "auto"
-
-
-logger = logging.getLogger(__name__)
-
 
 def create_camera() -> BaseCamera:
     """Create the camera specified by the environment."""
