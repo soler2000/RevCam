@@ -32,11 +32,29 @@ src/
 
 RevCam targets Python 3.11+.
 
+### Automated installation script
+
+An install helper is available for both Raspberry Pi targets and regular
+development machines:
+
+```bash
+# For a local development environment
+./scripts/install.sh --dev
+
+# On Raspberry Pi hardware (installs apt dependencies and reuses system packages)
+./scripts/install.sh --pi
+```
+
+Use `--venv` to change the virtual environment location and `--python` to point to
+an alternative interpreter. Passing `--dev` installs the optional development
+dependencies (`pytest`).
+
 ### Raspberry Pi installation
 
 The Raspberry Pi wheels for Picamera2 and its native dependencies are shipped
 through Raspberry Pi OS. Using them is much faster and more reliable than
-building everything from PyPI. Follow these steps on the Pi:
+building everything from PyPI. The install script above automates the steps, but
+the manual process is included below for reference:
 
 1. Install the packaged Picamera2 stack and its helpers:
 
