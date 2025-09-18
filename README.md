@@ -144,7 +144,7 @@ source .venv/bin/activate
 pip install --upgrade pip
 pip install -e .[dev]
 
-uvicorn rev_cam.app:create_app --factory --host 0.0.0.0 --port 8000
+uvicorn rev_cam.app:create_app --factory --host 0.0.0.0 --port 9000
 ```
 
 ### Camera back-ends
