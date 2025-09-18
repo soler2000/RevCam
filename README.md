@@ -97,7 +97,7 @@ update) the repository and prepare a development virtual environment. Replace
 the `REVCAM_REPO` value if you use a different remote.
 
 ```bash
-REVCAM_REPO="https://github.com/your-org/RevCam.git"
+REVCAM_REPO="https://github.com/soler2000/RevCam.git"
 
 set -euo pipefail
 
