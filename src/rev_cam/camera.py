@@ -110,16 +110,22 @@ class SyntheticCamera(BaseCamera):
 def create_camera() -> BaseCamera:
     """Create the camera specified by the environment."""
 
-    choice = os.getenv("REVCAM_CAMERA", "picamera").lower()
+    raw_choice = os.getenv("REVCAM_CAMERA")
+    choice = (raw_choice or "picamera").strip().lower()
     if choice == "synthetic":
         return SyntheticCamera()
     if choice == "opencv":
         return OpenCVCamera()
     try:
         return Picamera2Camera()
-    except CameraError:
-        # Fall back to synthetic frames when running on development machines.
-        return SyntheticCamera()
+    except CameraError as exc:
+        # Match the README promise: default to synthetic frames only when
+        # Picamera2 is unavailable. Any other initialisation error should surface
+        # so that misconfigured hardware does not appear to work.
+        is_import_error = isinstance(exc.__cause__, ImportError)
+        if raw_choice is None and is_import_error:
+            return SyntheticCamera()
+        raise
 
 
 __all__ = [

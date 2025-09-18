@@ -1,6 +1,7 @@
 """FastAPI application wiring together the RevCam services."""
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Literal
 
@@ -8,7 +9,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
-from .camera import BaseCamera, create_camera
+from .camera import BaseCamera, CameraError, create_camera
 from .config import ConfigManager
 from .pipeline import FramePipeline
 from .webrtc import WebRTCManager
@@ -38,16 +39,38 @@ class OrientationPayload(BaseModel):
 def create_app(config_path: Path | str = Path("data/config.json")) -> FastAPI:
     app = FastAPI(title="RevCam", version="0.1.0")
 
+    logger = logging.getLogger(__name__)
+
     config_manager = ConfigManager(Path(config_path))
     pipeline = FramePipeline(lambda: config_manager.get_orientation())
     camera: BaseCamera | None = None
     webrtc_manager: WebRTCManager | None = None
+    camera_error: CameraError | None = None
+
+    app.state.camera = None
+    app.state.webrtc_manager = None
+    app.state.camera_error = None
 
     @app.on_event("startup")
     async def startup() -> None:  # pragma: no cover - framework hook
-        nonlocal camera, webrtc_manager
-        camera = create_camera()
-        webrtc_manager = WebRTCManager(camera=camera, pipeline=pipeline)
+        nonlocal camera, webrtc_manager, camera_error
+        try:
+            camera = create_camera()
+        except CameraError as exc:
+            camera = None
+            camera_error = exc
+            logger.exception("Failed to initialise camera: %s", exc)
+        else:
+            camera_error = None
+
+        app.state.camera = camera
+        app.state.camera_error = camera_error
+
+        if camera is not None:
+            webrtc_manager = WebRTCManager(camera=camera, pipeline=pipeline)
+        else:
+            webrtc_manager = None
+        app.state.webrtc_manager = webrtc_manager
 
     @app.on_event("shutdown")
     async def shutdown() -> None:  # pragma: no cover - framework hook
@@ -87,6 +110,8 @@ def create_app(config_path: Path | str = Path("data/config.json")) -> FastAPI:
 
     @app.post("/api/offer")
     async def webrtc_offer(payload: OfferPayload) -> dict[str, str]:
+        if camera_error is not None:
+            raise HTTPException(status_code=503, detail=f"Camera unavailable: {camera_error}")
         if webrtc_manager is None:
             raise HTTPException(status_code=503, detail="WebRTC service unavailable")
         offer = RTCSessionDescription(sdp=payload.sdp, type=payload.type)

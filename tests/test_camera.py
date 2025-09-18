@@ -47,8 +47,21 @@ def test_picamera_initialisation_failure_is_wrapped(monkeypatch: pytest.MonkeyPa
     assert getattr(dummy, "stop_called") is False
 
 
-def test_create_camera_falls_back_when_picamera_fails(monkeypatch: pytest.MonkeyPatch) -> None:
-    """create_camera should fall back to the synthetic camera when Picamera2 fails."""
+def test_create_camera_falls_back_when_picamera_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Synthetic frames are used when Picamera2 cannot be imported."""
+
+    monkeypatch.delenv("REVCAM_CAMERA", raising=False)
+    sys.modules.pop("picamera2", None)
+
+    camera = create_camera()
+
+    assert isinstance(camera, SyntheticCamera)
+
+
+def test_create_camera_raises_when_picamera_initialisation_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Surface Picamera2 initialisation failures instead of silently falling back."""
 
     class BrokenCamera:
         def __init__(self) -> None:
@@ -58,7 +71,6 @@ def test_create_camera_falls_back_when_picamera_fails(monkeypatch: pytest.Monkey
     monkeypatch.setitem(sys.modules, "picamera2", module)
     monkeypatch.delenv("REVCAM_CAMERA", raising=False)
 
-    camera = create_camera()
-
-    assert isinstance(camera, SyntheticCamera)
+    with pytest.raises(CameraError):
+        create_camera()
 
