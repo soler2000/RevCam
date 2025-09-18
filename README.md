@@ -152,6 +152,36 @@ pip install -e .[dev]
 uvicorn rev_cam.app:create_app --factory --host 0.0.0.0 --port 9000
 ```
 
+### Fast branch updates without rebuilding dependencies
+
+If you frequently test branches that rebuild heavy packages like `aiortc`,
+`pylibsrtp`, or `av`, use `git worktree` to reuse the same repository clone and
+virtual environment. Build the dependencies once on your main checkout, then
+create lightweight worktrees for feature branches:
+
+```bash
+cd RevCam
+source .venv/bin/activate
+git fetch origin my-feature
+git worktree add ../RevCam-my-feature origin/my-feature
+```
+
+The new directory (`../RevCam-my-feature`) shares the original `.git` folder, so
+you can activate the already-initialised virtual environment instead of
+rebuilding wheels:
+
+```bash
+cd ../RevCam-my-feature
+source ../RevCam/.venv/bin/activate
+pip install --no-deps -e .
+uvicorn rev_cam.app:create_app --factory --host 0.0.0.0 --port 9000
+```
+
+Use `pip install -e .[dev]` only when `pyproject.toml` changes; otherwise
+`--no-deps` reuses the compiled dependencies from the shared virtual
+environment. When you're finished with a branch, clean up the worktree with
+`git worktree remove ../RevCam-my-feature`.
+
 ### Camera back-ends
 
 Camera support is pluggable:
