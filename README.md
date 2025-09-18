@@ -30,7 +30,46 @@ src/
 
 ## Getting started
 
-The project targets Python 3.11+. On development machines install the dependencies with
+RevCam targets Python 3.11+.
+
+### Raspberry Pi installation
+
+The Raspberry Pi wheels for Picamera2 and its native dependencies are shipped
+through Raspberry Pi OS. Using them is much faster and more reliable than
+building everything from PyPI. Follow these steps on the Pi:
+
+1. Install the packaged Picamera2 stack and its helpers:
+
+   ```bash
+   sudo apt update
+   sudo apt install python3-picamera2 python3-prctl
+   ```
+
+2. Create a virtual environment that can see the system packages you just
+   installed (this prevents `pip` from trying to rebuild Picamera2 and PiDNG):
+
+   ```bash
+   python3 -m venv --system-site-packages .venv
+   source .venv/bin/activate
+   python -m pip install --upgrade pip
+   ```
+
+3. Install RevCam from the source tree. On Pi hardware some wheels still need to
+   be built locally (`aiortc`, `pylibsrtp`, `av`), so this step can take several
+   minutes. Seeing a long list ending with `Successfully installed ...` means
+   the step finished successfully:
+
+   ```bash
+   pip install --prefer-binary --extra-index-url https://www.piwheels.org/simple -e .
+   ```
+
+   The `--prefer-binary` flag asks `pip` to fetch pre-built wheels when
+   available, and the PiWheels index provides ARM builds for most dependencies.
+
+### Development machine installation
+
+For local development on non-Pi machines a regular virtual environment is
+sufficient:
 
 ```bash
 python -m venv .venv
@@ -38,18 +77,13 @@ source .venv/bin/activate
 pip install -e .
 ```
 
+### Camera back-ends
+
 Camera support is pluggable:
 
-- **Raspberry Pi camera** – Install the system packages provided by Raspberry Pi
-  OS instead of pulling `picamera2` from PyPI. This avoids the `python-prctl`
-  build dependency on `libcap` headers. On a Pi run:
-
-  ```bash
-  sudo apt install python3-picamera2 python3-prctl
-  ```
-
-  The packaged build already bundles the compiled dependencies required by
-  Picamera2, so no additional Python packages are needed.
+- **Raspberry Pi camera** – With the apt packages installed above the Picamera2
+  backend is available inside the virtual environment (thanks to
+  `--system-site-packages`). No additional Python packages are required.
 - **OpenCV USB camera** – Install `opencv-python` manually and set
   `REVCAM_CAMERA=opencv`.
 - **Synthetic frames** – For development without camera hardware set
