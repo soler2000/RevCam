@@ -72,8 +72,18 @@
         pc = new RTCPeerConnection();
         pc.addTransceiver("video", { direction: "recvonly" });
         pc.ontrack = (event) => {
-          if (event.streams && event.streams[0]) {
-            video.srcObject = event.streams[0];
+          let stream = event.streams && event.streams[0];
+          if (!stream) {
+            stream = new MediaStream([event.track]);
+          }
+          if (video.srcObject !== stream) {
+            video.srcObject = stream;
+          }
+          const playPromise = video.play();
+          if (playPromise !== undefined) {
+            playPromise.catch((err) => {
+              console.warn("Autoplay failed", err);
+            });
           }
         };
         pc.onconnectionstatechange = () => {
