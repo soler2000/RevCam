@@ -123,8 +123,10 @@ want to test.
 
 ```bash
 REVCAM_REPO="https://github.com/soler2000/RevCam.git"
-REVCAM_BRANCH="main"  # e.g. "feature/my-pr-branch"
+REVCAM_BRANCH="main"
+```
 
+```bash
 set -euo pipefail
 
 if [ ! -d RevCam ]; then
