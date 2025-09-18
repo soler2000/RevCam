@@ -33,6 +33,13 @@ class BaseCamera(ABC):
 logger = logging.getLogger(__name__)
 
 
+_CAMERA_ALIASES = {
+    "picamera": "picamera2",
+}
+
+CAMERA_MODES: tuple[str, ...] = ("auto", "picamera2", "opencv", "synthetic")
+
+
 def _picamera2_candidate_paths() -> list[str]:
     """Return directories that may contain the Picamera2 module."""
 
@@ -227,69 +234,79 @@ def _normalise_choice(raw_choice: str | None) -> str:
     choice = raw_choice.strip().lower()
     return choice or "auto"
 
-def create_camera() -> BaseCamera:
-    """Create the camera specified by the environment."""
 
-    raw_choice = os.getenv("REVCAM_CAMERA")
-    selection = _remember_selection(_select_camera(raw_choice))
-
-    if selection.error is not None or selection.camera is None:
-        assert selection.error is not None  # nosec - internal consistency
-        raise selection.error
-
-    return selection.camera
+def _resolve_backend(choice: str) -> str:
+    return _CAMERA_ALIASES.get(choice, choice)
 
 
-def _select_camera(raw_choice: str | None) -> CameraSelection:
+def get_available_camera_modes() -> list[str]:
+    """Return the list of supported camera configuration options."""
+
+    return list(CAMERA_MODES)
+
+
+def select_camera(raw_choice: str | None = None) -> CameraSelection:
     """Select the most appropriate camera backend for the given configuration."""
 
-    choice = _normalise_choice(raw_choice)
+    env_choice = raw_choice if raw_choice is not None else os.getenv("REVCAM_CAMERA")
+    choice = _normalise_choice(env_choice)
 
     if choice == "synthetic":
-        return CameraSelection(
-            requested=choice,
-            active_backend="synthetic",
-            camera=SyntheticCamera(),
-            fallbacks=[],
-            error=None,
+        return _remember_selection(
+            CameraSelection(
+                requested=choice,
+                active_backend="synthetic",
+                camera=SyntheticCamera(),
+                fallbacks=[],
+                error=None,
+            )
         )
 
     if choice == "opencv":
         try:
             camera = OpenCVCamera()
         except CameraError as exc:
-            return CameraSelection(
-                requested=choice,
-                active_backend=None,
-                camera=None,
-                fallbacks=[],
-                error=exc,
+            return _remember_selection(
+                CameraSelection(
+                    requested=choice,
+                    active_backend=None,
+                    camera=None,
+                    fallbacks=[],
+                    error=exc,
+                )
             )
-        return CameraSelection(
-            requested=choice,
-            active_backend="opencv",
-            camera=camera,
-            fallbacks=[],
-            error=None,
+        return _remember_selection(
+            CameraSelection(
+                requested=choice,
+                active_backend="opencv",
+                camera=camera,
+                fallbacks=[],
+                error=None,
+            )
         )
 
     if choice in {"picamera", "picamera2"}:
+        backend = _resolve_backend(choice)
         try:
             camera = Picamera2Camera()
         except CameraError as exc:
-            return CameraSelection(
-                requested=choice,
-                active_backend=None,
-                camera=None,
-                fallbacks=[],
-                error=exc,
+            return _remember_selection(
+                CameraSelection(
+                    requested=choice,
+                    active_backend=None,
+                    camera=None,
+                    fallbacks=[],
+                    error=exc,
+                )
             )
-        return CameraSelection(
-            requested=choice,
-            active_backend="picamera2",
-            camera=camera,
-            fallbacks=[],
-            error=None,
+        return _remember_selection(
+            CameraSelection(
+                requested=choice,
+                active_backend=backend,
+                camera=camera,
+                fallbacks=[],
+                error=None,
+            )
         )
 
     if choice == "auto":
@@ -302,12 +319,14 @@ def _select_camera(raw_choice: str | None) -> CameraSelection:
             fallbacks.append(f"Picamera2: {detail}")
             logger.info("Picamera2 backend unavailable in auto mode: %s", detail)
         else:
-            return CameraSelection(
-                requested=choice,
-                active_backend="picamera2",
-                camera=camera,
-                fallbacks=fallbacks,
-                error=None,
+            return _remember_selection(
+                CameraSelection(
+                    requested=choice,
+                    active_backend="picamera2",
+                    camera=camera,
+                    fallbacks=fallbacks,
+                    error=None,
+                )
             )
 
         try:
@@ -320,12 +339,14 @@ def _select_camera(raw_choice: str | None) -> CameraSelection:
                     "All hardware camera backends failed (%s); using synthetic feed",
                     "; ".join(fallbacks),
                 )
-            return CameraSelection(
-                requested=choice,
-                active_backend="synthetic",
-                camera=SyntheticCamera(),
-                fallbacks=fallbacks,
-                error=None,
+            return _remember_selection(
+                CameraSelection(
+                    requested=choice,
+                    active_backend="synthetic",
+                    camera=SyntheticCamera(),
+                    fallbacks=fallbacks,
+                    error=None,
+                )
             )
         else:
             if fallbacks:
@@ -333,21 +354,38 @@ def _select_camera(raw_choice: str | None) -> CameraSelection:
                     "Using OpenCV camera after previous failures: %s",
                     "; ".join(fallbacks),
                 )
-            return CameraSelection(
-                requested=choice,
-                active_backend="opencv",
-                camera=camera,
-                fallbacks=fallbacks,
-                error=None,
+            return _remember_selection(
+                CameraSelection(
+                    requested=choice,
+                    active_backend="opencv",
+                    camera=camera,
+                    fallbacks=fallbacks,
+                    error=None,
+                )
             )
 
-    return CameraSelection(
-        requested=choice,
-        active_backend=None,
-        camera=None,
-        fallbacks=[],
-        error=CameraError(f"Unknown camera backend: {raw_choice!r}"),
+    original = env_choice if env_choice is not None else raw_choice
+    return _remember_selection(
+        CameraSelection(
+            requested=choice,
+            active_backend=None,
+            camera=None,
+            fallbacks=[],
+            error=CameraError(f"Unknown camera backend: {original!r}"),
+        )
     )
+
+
+def create_camera(choice: str | None = None) -> BaseCamera:
+    """Create the camera specified by the environment or provided choice."""
+
+    selection = select_camera(choice)
+
+    if selection.error is not None or selection.camera is None:
+        assert selection.error is not None  # nosec - internal consistency
+        raise selection.error
+
+    return selection.camera
 
 
 def get_camera_status() -> dict[str, str | list[str] | None]:
@@ -377,6 +415,9 @@ __all__ = [
     "Picamera2Camera",
     "OpenCVCamera",
     "SyntheticCamera",
+    "CAMERA_MODES",
     "create_camera",
+    "get_available_camera_modes",
     "get_camera_status",
+    "select_camera",
 ]

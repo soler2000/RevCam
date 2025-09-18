@@ -1,6 +1,7 @@
 """FastAPI application wiring together the RevCam services."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 from typing import Literal
@@ -9,11 +10,20 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
-from .camera import BaseCamera, CameraError, create_camera, get_camera_status
+from aiortc import RTCSessionDescription
+
+from .camera import (
+    BaseCamera,
+    CameraError,
+    CameraSelection,
+    get_available_camera_modes,
+    get_camera_status,
+    select_camera,
+)
 from .config import ConfigManager
 from .pipeline import FramePipeline
+from .video import VideoSource
 from .webrtc import WebRTCManager
-from aiortc import RTCSessionDescription
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -36,6 +46,10 @@ class OrientationPayload(BaseModel):
     flip_vertical: bool = False
 
 
+class CameraUpdatePayload(BaseModel):
+    mode: str
+
+
 def create_app(config_path: Path | str = Path("data/config.json")) -> FastAPI:
     app = FastAPI(title="RevCam", version="0.1.0")
 
@@ -43,46 +57,80 @@ def create_app(config_path: Path | str = Path("data/config.json")) -> FastAPI:
 
     config_manager = ConfigManager(Path(config_path))
     pipeline = FramePipeline(lambda: config_manager.get_orientation())
+    video_source = VideoSource(pipeline)
     camera: BaseCamera | None = None
     webrtc_manager: WebRTCManager | None = None
     camera_error: CameraError | None = None
+    camera_mode = config_manager.get_camera_mode()
+    camera_lock = asyncio.Lock()
 
     app.state.camera = None
     app.state.webrtc_manager = None
     app.state.camera_error = None
     app.state.camera_status = None
+    app.state.video_source = video_source
+    app.state.available_camera_modes = get_available_camera_modes()
 
-    @app.on_event("startup")
-    async def startup() -> None:  # pragma: no cover - framework hook
-        nonlocal camera, webrtc_manager, camera_error
-        try:
-            camera = create_camera()
-        except CameraError as exc:
-            camera = None
-            camera_error = exc
-            logger.exception("Failed to initialise camera: %s", exc)
-        else:
-            camera_error = None
-
-        app.state.camera = camera
-        app.state.camera_error = camera_error
-        status = get_camera_status()
-        if camera_error is not None:
-            status = {**status, "error": str(camera_error)}
-        app.state.camera_status = status
-
-        if camera is not None:
-            webrtc_manager = WebRTCManager(camera=camera, pipeline=pipeline)
-        else:
+    async def _shutdown_webrtc() -> None:
+        nonlocal webrtc_manager
+        if webrtc_manager is not None:
+            await webrtc_manager.shutdown()
             webrtc_manager = None
         app.state.webrtc_manager = webrtc_manager
 
+    async def _start_webrtc() -> None:
+        nonlocal webrtc_manager
+        await _shutdown_webrtc()
+        webrtc_manager = WebRTCManager(video_source=video_source)
+        app.state.webrtc_manager = webrtc_manager
+
+    def _update_state(selection) -> None:
+        status = get_camera_status()
+        if camera_error is not None:
+            status = {**status, "error": str(camera_error)}
+        app.state.camera = camera
+        app.state.camera_error = camera_error
+        app.state.camera_status = status
+        app.state.camera_mode = camera_mode
+
+    async def _apply_camera_mode(mode: str) -> CameraSelection:
+        nonlocal camera, camera_error, camera_mode
+
+        selection = select_camera(mode)
+        if selection.error is not None and selection.camera is None and camera is not None:
+            await video_source.set_camera(None)
+            camera = None
+            await _shutdown_webrtc()
+            selection = select_camera(mode)
+
+        if selection.camera is not None:
+            await video_source.set_camera(selection.camera)
+            camera = selection.camera
+            camera_error = None
+            await _start_webrtc()
+        else:
+            camera = None
+            camera_error = selection.error
+            await video_source.set_camera(None)
+            await _shutdown_webrtc()
+
+        camera_mode = mode
+        _update_state(selection)
+        return selection
+
+    @app.on_event("startup")
+    async def startup() -> None:  # pragma: no cover - framework hook
+        nonlocal camera_mode
+        await video_source.start()
+        async with camera_lock:
+            selection = await _apply_camera_mode(camera_mode)
+        if selection.error is not None:
+            logger.error("Failed to initialise camera: %s", selection.error)
+
     @app.on_event("shutdown")
     async def shutdown() -> None:  # pragma: no cover - framework hook
-        if webrtc_manager:
-            await webrtc_manager.shutdown()
-        if camera:
-            await camera.close()
+        await _shutdown_webrtc()
+        await video_source.stop()
 
     @app.get("/", response_class=HTMLResponse)
     async def index() -> str:
@@ -128,6 +176,33 @@ def create_app(config_path: Path | str = Path("data/config.json")) -> FastAPI:
         status = get_camera_status()
         if camera_error is not None:
             status = {**status, "error": str(camera_error)}
+        return {
+            **status,
+            "modes": get_available_camera_modes(),
+            "mode": camera_mode,
+        }
+
+    @app.post("/api/camera")
+    async def update_camera(payload: CameraUpdatePayload) -> dict[str, str | list[str] | None]:
+        requested = (payload.mode or "").strip().lower() or "auto"
+        if requested not in get_available_camera_modes() and requested != "picamera":
+            raise HTTPException(status_code=400, detail=f"Unknown camera mode: {payload.mode!r}")
+        canonical = "picamera2" if requested == "picamera" else requested
+
+        async with camera_lock:
+            persisted = config_manager.set_camera_mode(canonical)
+            selection = await _apply_camera_mode(persisted)
+            status = get_camera_status()
+            if camera_error is not None:
+                status = {**status, "error": str(camera_error)}
+            status = {
+                **status,
+                "modes": get_available_camera_modes(),
+                "mode": persisted,
+            }
+
+        if selection.error is not None:
+            raise HTTPException(status_code=503, detail=str(selection.error))
         return status
 
     return app

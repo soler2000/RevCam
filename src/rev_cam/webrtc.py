@@ -5,28 +5,26 @@ import asyncio
 from dataclasses import dataclass
 from fractions import Fraction
 from typing import Set
+
 from aiortc import RTCPeerConnection, RTCSessionDescription
 from aiortc.mediastreams import VideoStreamTrack
 from av import VideoFrame
 
-from .camera import BaseCamera
-from .pipeline import FramePipeline
+from .video import VideoSource
 
 
 class PipelineVideoTrack(VideoStreamTrack):
     """Video track that pulls frames from a camera via the processing pipeline."""
 
-    def __init__(self, camera: BaseCamera, pipeline: FramePipeline, fps: int = 30) -> None:
+    def __init__(self, video_source: VideoSource, fps: int = 30) -> None:
         super().__init__()
-        self._camera = camera
-        self._pipeline = pipeline
+        self._video_source = video_source
         self._frame_time = Fraction(1, fps)
 
     async def recv(self) -> VideoFrame:
         pts, time_base = await self.next_timestamp()
-        frame = await self._camera.get_frame()
-        processed = self._pipeline.process(frame)
-        video_frame = VideoFrame.from_ndarray(processed, format="rgb24")
+        frame = await self._video_source.get_frame()
+        video_frame = VideoFrame.from_ndarray(frame, format="rgb24")
         video_frame.pts = pts
         video_frame.time_base = time_base
         return video_frame
@@ -36,8 +34,7 @@ class PipelineVideoTrack(VideoStreamTrack):
 class WebRTCManager:
     """Manage WebRTC peer connections."""
 
-    camera: BaseCamera
-    pipeline: FramePipeline
+    video_source: VideoSource
     connections: Set[RTCPeerConnection] = None
 
     def __post_init__(self) -> None:
@@ -46,7 +43,7 @@ class WebRTCManager:
 
     async def handle_offer(self, offer: RTCSessionDescription) -> RTCSessionDescription:
         pc = RTCPeerConnection()
-        track = PipelineVideoTrack(self.camera, self.pipeline)
+        track = PipelineVideoTrack(self.video_source)
         pc.addTrack(track)
 
         @pc.on("connectionstatechange")

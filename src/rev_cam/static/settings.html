@@ -43,6 +43,26 @@
         margin-top: 0;
         margin-bottom: 0.75rem;
       }
+      .camera-form {
+        margin-top: 1rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+      }
+      .camera-form label {
+        font-size: 0.95rem;
+      }
+      .camera-form select {
+        width: 100%;
+        max-width: 320px;
+      }
+      .camera-form button {
+        align-self: flex-start;
+      }
+      .form-status {
+        font-size: 0.9rem;
+        color: #8ab4ff;
+      }
       h1 {
         font-size: 1.4rem;
       }
@@ -113,6 +133,19 @@
           <p>Unavailable sources:</p>
           <ul id="camera-fallbacks" class="fallback-list"></ul>
         </div>
+        <form id="camera-form" class="camera-form">
+          <label for="camera-mode-select">
+            Camera mode
+            <select id="camera-mode-select" name="mode">
+              <option value="auto">Auto (prefer Picamera2)</option>
+              <option value="picamera2">Picamera2 only</option>
+              <option value="opencv">OpenCV (USB)</option>
+              <option value="synthetic">Synthetic test feed</option>
+            </select>
+          </label>
+          <button type="submit">Apply</button>
+          <div id="camera-form-status" class="form-status" hidden></div>
+        </form>
       </section>
       <section class="card">
         <h2>Camera Orientation</h2>
@@ -146,6 +179,9 @@
         "camera-fallbacks-wrapper"
       );
       const cameraFallbacksList = document.getElementById("camera-fallbacks");
+      const cameraForm = document.getElementById("camera-form");
+      const cameraSelect = document.getElementById("camera-mode-select");
+      const cameraFormStatus = document.getElementById("camera-form-status");
 
       async function loadOrientation() {
         const response = await fetch("/api/orientation");
@@ -205,14 +241,61 @@
         }
       }
 
-      async function loadCameraStatus() {
-        const response = await fetch("/api/camera");
-        if (!response.ok) {
-          throw new Error("Unable to fetch camera status");
+      function populateCameraModes(modes) {
+        if (!cameraSelect || !Array.isArray(modes)) {
+          return;
         }
-        const data = await response.json();
-        const requested = modeLabel(data.requested);
-        cameraModeLabel.textContent = requested;
+        const seen = new Set();
+        cameraSelect.innerHTML = "";
+        for (const mode of modes) {
+          const value = (mode || "").toLowerCase();
+          if (!value || seen.has(value)) {
+            continue;
+          }
+          const option = document.createElement("option");
+          option.value = value;
+          switch (value) {
+            case "auto":
+              option.textContent = "Auto (prefer Picamera2)";
+              break;
+            case "picamera2":
+              option.textContent = "Picamera2 only";
+              break;
+            case "opencv":
+              option.textContent = "OpenCV (USB)";
+              break;
+            case "synthetic":
+              option.textContent = "Synthetic test feed";
+              break;
+            default:
+              option.textContent = value;
+          }
+          cameraSelect.appendChild(option);
+          seen.add(value);
+        }
+      }
+
+      function applyCameraStatus(data) {
+        const configured = (data.mode || data.requested || "auto").toLowerCase();
+        const requested = (data.requested || configured || "auto").toLowerCase();
+        cameraModeLabel.textContent = modeLabel(configured);
+
+        if (cameraSelect) {
+          if (Array.isArray(data.modes)) {
+            populateCameraModes(data.modes);
+          }
+          if (
+            configured &&
+            cameraSelect.querySelector(`option[value="${configured}"]`)
+          ) {
+            cameraSelect.value = configured;
+          }
+        }
+
+        if (cameraFormStatus) {
+          cameraFormStatus.hidden = true;
+          cameraFormStatus.textContent = "";
+        }
 
         if (data.error) {
           cameraStatusText.textContent = `Camera unavailable: ${data.error}`;
@@ -254,6 +337,15 @@
         }
       }
 
+      async function loadCameraStatus() {
+        const response = await fetch("/api/camera");
+        if (!response.ok) {
+          throw new Error("Unable to fetch camera status");
+        }
+        const data = await response.json();
+        applyCameraStatus(data);
+      }
+
       loadOrientation().catch((err) => {
         console.error(err);
         statusLabel.textContent = err.message;
@@ -265,6 +357,55 @@
         cameraFallbacksWrapper.hidden = true;
         cameraFallbacksList.innerHTML = "";
       });
+
+      if (cameraForm) {
+        cameraForm.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          if (!cameraSelect) {
+            return;
+          }
+          if (cameraFormStatus) {
+            cameraFormStatus.hidden = false;
+            cameraFormStatus.textContent = "Saving…";
+          }
+          const payload = {
+            mode: cameraSelect.value,
+          };
+          try {
+            const response = await fetch("/api/camera", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload),
+            });
+            if (!response.ok) {
+              let detail = "Unable to update camera";
+              try {
+                const error = await response.json();
+                detail = error.detail || detail;
+              } catch (jsonError) {
+                console.error(jsonError);
+              }
+              if (cameraFormStatus) {
+                cameraFormStatus.hidden = false;
+                cameraFormStatus.textContent = `Error: ${detail}`;
+              }
+              return;
+            }
+            const data = await response.json();
+            applyCameraStatus(data);
+            if (cameraFormStatus) {
+              cameraFormStatus.hidden = false;
+              cameraFormStatus.textContent = "Camera mode updated";
+            }
+          } catch (err) {
+            console.error(err);
+            if (cameraFormStatus) {
+              cameraFormStatus.hidden = false;
+              cameraFormStatus.textContent = err.message;
+            }
+          }
+        });
+      }
     </script>
   </body>
 </html>
