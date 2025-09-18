@@ -90,6 +90,30 @@ source .venv/bin/activate
 pip install -e .[dev]
 ```
 
+### Copy-paste bootstrap script
+
+Need a single snippet you can drop into a terminal? The commands below clone (or
+update) the repository and prepare a development virtual environment. Replace
+the `REVCAM_REPO` value if you use a different remote.
+
+```bash
+REVCAM_REPO="https://github.com/your-org/RevCam.git"
+
+set -euo pipefail
+
+if [ ! -d RevCam ]; then
+  git clone "$REVCAM_REPO" RevCam
+else
+  git -C RevCam pull --ff-only
+fi
+
+cd RevCam
+python3 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+pip install -e .[dev]
+```
+
 ### Camera back-ends
 
 Camera support is pluggable:
