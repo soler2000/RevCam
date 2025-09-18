@@ -19,6 +19,23 @@
         padding: 0.75rem 1rem;
         background: rgba(0, 0, 0, 0.6);
       }
+      header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+      }
+      header strong {
+        font-size: 1.15rem;
+      }
+      header .meta {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        font-size: 0.9rem;
+        opacity: 0.85;
+      }
       main {
         flex: 1 1 auto;
         display: flex;
@@ -49,7 +66,10 @@
   <body>
     <header>
       <strong>RevCam</strong>
-      <div id="status">Initialising…</div>
+      <div class="meta">
+        <div id="status">Initialising…</div>
+        <div id="battery">Battery: Loading…</div>
+      </div>
     </header>
     <main>
       <video id="video" autoplay playsinline muted></video>
@@ -62,7 +82,9 @@
       const statusLabel = document.getElementById("status");
       const reconnectButton = document.getElementById("reconnect");
       const video = document.getElementById("video");
+      const batteryLabel = document.getElementById("battery");
       let pc;
+      let batteryTimer;
 
       async function startStream() {
         statusLabel.textContent = "Connecting to camera…";
@@ -95,6 +117,38 @@
         statusLabel.textContent = "Streaming";
       }
 
+      async function refreshBattery() {
+        try {
+          const response = await fetch("/api/battery");
+          if (response.status === 404) {
+            batteryLabel.textContent = "Battery: unavailable";
+            if (batteryTimer) {
+              clearInterval(batteryTimer);
+              batteryTimer = undefined;
+            }
+            return;
+          }
+          if (!response.ok) {
+            throw new Error("Unable to read battery status");
+          }
+          const data = await response.json();
+          const parts = [];
+          if (typeof data.voltage === "number") {
+            parts.push(`${data.voltage.toFixed(2)} V`);
+          }
+          if (typeof data.percentage === "number") {
+            parts.push(`${data.percentage.toFixed(0)}%`);
+          }
+          if (typeof data.estimated_capacity_mah === "number") {
+            parts.push(`${data.estimated_capacity_mah.toFixed(0)} mAh`);
+          }
+          batteryLabel.textContent = `Battery: ${parts.join(" • ") || "No data"}`;
+        } catch (error) {
+          console.error(error);
+          batteryLabel.textContent = "Battery: error";
+        }
+      }
+
       reconnectButton.addEventListener("click", () => {
         startStream().catch((err) => {
           console.error(err);
@@ -106,6 +160,13 @@
         console.error(err);
         statusLabel.textContent = "Error: " + err.message;
       });
+
+      refreshBattery().catch((err) => {
+        console.error(err);
+      });
+      batteryTimer = setInterval(() => {
+        refreshBattery().catch((err) => console.error(err));
+      }, 15000);
     </script>
   </body>
 </html>

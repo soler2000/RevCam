@@ -8,6 +8,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
+from .battery import BaseBatteryMonitor, BatteryMonitorError, create_battery_monitor
 from .camera import BaseCamera, create_camera
 from .config import ConfigManager
 from .pipeline import FramePipeline
@@ -41,18 +42,22 @@ def create_app(config_path: Path | str = Path("data/config.json")) -> FastAPI:
     config_manager = ConfigManager(Path(config_path))
     pipeline = FramePipeline(lambda: config_manager.get_orientation())
     camera: BaseCamera | None = None
+    battery_monitor: BaseBatteryMonitor | None = None
     webrtc_manager: WebRTCManager | None = None
 
     @app.on_event("startup")
     async def startup() -> None:  # pragma: no cover - framework hook
-        nonlocal camera, webrtc_manager
+        nonlocal camera, battery_monitor, webrtc_manager
         camera = create_camera()
+        battery_monitor = create_battery_monitor()
         webrtc_manager = WebRTCManager(camera=camera, pipeline=pipeline)
 
     @app.on_event("shutdown")
     async def shutdown() -> None:  # pragma: no cover - framework hook
         if webrtc_manager:
             await webrtc_manager.shutdown()
+        if battery_monitor:
+            await battery_monitor.close()
         if camera:
             await camera.close()
 
@@ -92,6 +97,17 @@ def create_app(config_path: Path | str = Path("data/config.json")) -> FastAPI:
         offer = RTCSessionDescription(sdp=payload.sdp, type=payload.type)
         answer = await webrtc_manager.handle_offer(offer)
         return {"sdp": answer.sdp, "type": answer.type}
+
+    @app.get("/api/battery")
+    async def get_battery_status() -> dict[str, float]:
+        monitor = battery_monitor
+        if monitor is None:
+            raise HTTPException(status_code=404, detail="Battery monitor unavailable")
+        try:
+            status = await monitor.get_status()
+        except BatteryMonitorError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        return status.to_payload()
 
     return app
 
