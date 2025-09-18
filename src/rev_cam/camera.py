@@ -107,19 +107,42 @@ class SyntheticCamera(BaseCamera):
         return frame.astype(np.uint8)
 
 
+def _normalise_choice(raw_choice: str | None) -> str:
+    """Return the canonical camera choice string."""
+
+    if raw_choice is None:
+        return "auto"
+    choice = raw_choice.strip().lower()
+    return choice or "auto"
+
+
 def create_camera() -> BaseCamera:
     """Create the camera specified by the environment."""
 
-    choice = os.getenv("REVCAM_CAMERA", "picamera").lower()
+    raw_choice = os.getenv("REVCAM_CAMERA")
+    choice = _normalise_choice(raw_choice)
+
     if choice == "synthetic":
         return SyntheticCamera()
     if choice == "opencv":
         return OpenCVCamera()
-    try:
+    if choice in {"picamera", "picamera2"}:
         return Picamera2Camera()
-    except CameraError:
-        # Fall back to synthetic frames when running on development machines.
-        return SyntheticCamera()
+    if choice == "auto":
+        try:
+            return Picamera2Camera()
+        except CameraError as exc:
+            # Picamera2 import errors mean we are not running on Pi hardware or
+            # the dependency is missing. Fall back to OpenCV if available before
+            # using the synthetic test pattern so that USB cameras work out of
+            # the box on development machines.
+            if not isinstance(exc.__cause__, ImportError):
+                raise
+        try:
+            return OpenCVCamera()
+        except CameraError:
+            return SyntheticCamera()
+    raise CameraError(f"Unknown camera backend: {raw_choice!r}")
 
 
 __all__ = [

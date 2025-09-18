@@ -7,7 +7,13 @@ import types
 
 import pytest
 
-from rev_cam.camera import CameraError, Picamera2Camera, SyntheticCamera, create_camera
+from rev_cam.camera import (
+    CameraError,
+    OpenCVCamera,
+    Picamera2Camera,
+    SyntheticCamera,
+    create_camera,
+)
 
 
 def test_picamera_initialisation_failure_is_wrapped(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -47,8 +53,59 @@ def test_picamera_initialisation_failure_is_wrapped(monkeypatch: pytest.MonkeyPa
     assert getattr(dummy, "stop_called") is False
 
 
-def test_create_camera_falls_back_when_picamera_fails(monkeypatch: pytest.MonkeyPatch) -> None:
-    """create_camera should fall back to the synthetic camera when Picamera2 fails."""
+def test_create_camera_falls_back_when_picamera_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Synthetic frames are used when Picamera2 and OpenCV are unavailable."""
+
+    monkeypatch.delenv("REVCAM_CAMERA", raising=False)
+    sys.modules.pop("picamera2", None)
+    sys.modules.pop("cv2", None)
+
+    camera = create_camera()
+
+    assert isinstance(camera, SyntheticCamera)
+
+
+def test_create_camera_uses_opencv_when_picamera_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fallback to OpenCV when Picamera2 cannot be imported but cv2 is installed."""
+
+    monkeypatch.delenv("REVCAM_CAMERA", raising=False)
+    sys.modules.pop("picamera2", None)
+
+    class DummyCapture:
+        def __init__(self, index: int) -> None:
+            self.index = index
+
+        def isOpened(self) -> bool:
+            return True
+
+        def read(self) -> tuple[bool, str]:
+            return True, "frame"
+
+        def release(self) -> None:
+            return None
+
+    def dummy_video_capture(index: int) -> DummyCapture:
+        return DummyCapture(index)
+
+    def dummy_cvt_color(frame: str, _: object) -> str:
+        return frame
+
+    module = types.SimpleNamespace(
+        VideoCapture=dummy_video_capture,
+        COLOR_BGR2RGB=1,
+        cvtColor=dummy_cvt_color,
+    )
+    monkeypatch.setitem(sys.modules, "cv2", module)
+
+    camera = create_camera()
+
+    assert isinstance(camera, OpenCVCamera)
+
+
+def test_create_camera_raises_when_picamera_initialisation_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Surface Picamera2 initialisation failures instead of silently falling back."""
 
     class BrokenCamera:
         def __init__(self) -> None:
@@ -58,7 +115,17 @@ def test_create_camera_falls_back_when_picamera_fails(monkeypatch: pytest.Monkey
     monkeypatch.setitem(sys.modules, "picamera2", module)
     monkeypatch.delenv("REVCAM_CAMERA", raising=False)
 
-    camera = create_camera()
+    with pytest.raises(CameraError):
+        create_camera()
 
-    assert isinstance(camera, SyntheticCamera)
+
+def test_create_camera_rejects_unknown_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Invalid configuration values surface as camera errors."""
+
+    monkeypatch.setenv("REVCAM_CAMERA", "unknown")
+
+    with pytest.raises(CameraError) as excinfo:
+        create_camera()
+
+    assert "unknown" in str(excinfo.value)
 
