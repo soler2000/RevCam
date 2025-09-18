@@ -7,7 +7,13 @@ import types
 
 import pytest
 
-from rev_cam.camera import CameraError, Picamera2Camera, SyntheticCamera, create_camera
+from rev_cam.camera import (
+    CameraDependencyError,
+    CameraError,
+    Picamera2Camera,
+    SyntheticCamera,
+    create_camera,
+)
 
 
 def test_picamera_initialisation_failure_is_wrapped(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -47,18 +53,31 @@ def test_picamera_initialisation_failure_is_wrapped(monkeypatch: pytest.MonkeyPa
     assert getattr(dummy, "stop_called") is False
 
 
-def test_create_camera_falls_back_when_picamera_fails(monkeypatch: pytest.MonkeyPatch) -> None:
-    """create_camera should fall back to the synthetic camera when Picamera2 fails."""
+def test_create_camera_falls_back_when_dependency_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Missing Picamera2 dependency should trigger the synthetic fallback."""
 
-    class BrokenCamera:
+    class MissingDependencyCamera:
         def __init__(self) -> None:
-            raise RuntimeError("picamera unavailable")
+            raise CameraDependencyError("picamera2 missing")
 
-    module = types.SimpleNamespace(Picamera2=BrokenCamera)
-    monkeypatch.setitem(sys.modules, "picamera2", module)
+    monkeypatch.setattr("rev_cam.camera.Picamera2Camera", MissingDependencyCamera)
     monkeypatch.delenv("REVCAM_CAMERA", raising=False)
 
     camera = create_camera()
 
     assert isinstance(camera, SyntheticCamera)
+
+
+def test_create_camera_propagates_runtime_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Picamera2 runtime errors should not be hidden behind the fallback."""
+
+    class BrokenCamera:
+        def __init__(self) -> None:
+            raise CameraError("picamera runtime failure")
+
+    monkeypatch.setattr("rev_cam.camera.Picamera2Camera", BrokenCamera)
+    monkeypatch.delenv("REVCAM_CAMERA", raising=False)
+
+    with pytest.raises(CameraError):
+        create_camera()
 

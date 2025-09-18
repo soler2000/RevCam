@@ -13,6 +13,10 @@ class CameraError(RuntimeError):
     """Raised when the camera cannot be initialised."""
 
 
+class CameraDependencyError(CameraError):
+    """Raised when a required camera dependency is missing."""
+
+
 class BaseCamera(ABC):
     """Abstract camera capable of producing RGB frames."""
 
@@ -31,7 +35,7 @@ class Picamera2Camera(BaseCamera):
         try:
             from picamera2 import Picamera2
         except ImportError as exc:  # pragma: no cover - hardware dependent
-            raise CameraError("picamera2 is not available") from exc
+            raise CameraDependencyError("picamera2 is not available") from exc
 
         self._camera = None
         started = False
@@ -117,14 +121,16 @@ def create_camera() -> BaseCamera:
         return OpenCVCamera()
     try:
         return Picamera2Camera()
-    except CameraError:
-        # Fall back to synthetic frames when running on development machines.
+    except CameraDependencyError:
+        # Fall back to synthetic frames when running on development machines
+        # where the Picamera2 stack is not installed.
         return SyntheticCamera()
 
 
 __all__ = [
     "BaseCamera",
     "CameraError",
+    "CameraDependencyError",
     "Picamera2Camera",
     "OpenCVCamera",
     "SyntheticCamera",
