@@ -119,6 +119,26 @@ set -x
 "$VENV_DIR/bin/python" -m pip install "${PIP_FLAGS[@]}" -e "$INSTALL_TARGET"
 set +x
 
+# Ensure critical runtime dependencies that are imported at module load time are
+# present in the environment even when the editable install is reused.
+if ! "$VENV_DIR/bin/python" - <<'PY'
+import importlib
+import sys
+
+try:
+    importlib.import_module("numpy")
+except ModuleNotFoundError:
+    sys.exit(1)
+else:
+    sys.exit(0)
+PY
+then
+    echo "Installing missing runtime dependency: numpy"
+    set -x
+    "$VENV_DIR/bin/python" -m pip install "${PIP_FLAGS[@]}" "numpy>=1.24"
+    set +x
+fi
+
 trap - EXIT
 popd >/dev/null
 
