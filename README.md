@@ -127,6 +127,11 @@ REVCAM_BRANCH="main"
 ```
 
 ```bash
+git pull REVCAM_REPO REVCAM_BRANCH
+uvicorn rev_cam.app:create_app --factory --host 0.0.0.0 --port 9000
+```
+
+```bash
 set -euo pipefail
 
 if [ ! -d RevCam ]; then
