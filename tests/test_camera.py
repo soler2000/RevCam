@@ -7,7 +7,13 @@ import types
 
 import pytest
 
-from rev_cam.camera import CameraError, Picamera2Camera, SyntheticCamera, create_camera
+from rev_cam.camera import (
+    CameraError,
+    Picamera2Camera,
+    SyntheticCamera,
+    create_camera,
+    identify_camera,
+)
 
 
 def test_picamera_initialisation_failure_is_wrapped(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -61,4 +67,23 @@ def test_create_camera_falls_back_when_picamera_fails(monkeypatch: pytest.Monkey
     camera = create_camera()
 
     assert isinstance(camera, SyntheticCamera)
+
+
+def test_explicit_picamera_failure_surfaces(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Explicit PiCamera selection should bubble up initialisation errors."""
+
+    class BrokenCamera:
+        def __init__(self) -> None:
+            raise RuntimeError("picamera unavailable")
+
+    module = types.SimpleNamespace(Picamera2=BrokenCamera)
+    monkeypatch.setitem(sys.modules, "picamera2", module)
+
+    with pytest.raises(CameraError):
+        create_camera("picamera")
+
+
+def test_identify_camera_returns_source() -> None:
+    camera = SyntheticCamera()
+    assert identify_camera(camera) == "synthetic"
 

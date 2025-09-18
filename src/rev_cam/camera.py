@@ -8,6 +8,23 @@ from abc import ABC, abstractmethod
 
 import numpy as np
 
+# User visible identifiers for camera backends. The order controls how they are
+# presented in the settings UI.
+CAMERA_SOURCES: dict[str, str] = {
+    "auto": "Automatic (PiCamera2 with synthetic fallback)",
+    "picamera": "PiCamera2",  # Native Pi camera module
+    "opencv": "OpenCV (USB webcam)",
+    "synthetic": "Synthetic test pattern",
+}
+
+# Default camera selection when no explicit configuration is provided.
+DEFAULT_CAMERA_CHOICE = "auto"
+
+_CAMERA_ALIASES = {
+    "picamera2": "picamera",
+    "picamera2camera": "picamera",
+}
+
 
 class CameraError(RuntimeError):
     """Raised when the camera cannot be initialised."""
@@ -107,24 +124,56 @@ class SyntheticCamera(BaseCamera):
         return frame.astype(np.uint8)
 
 
-def create_camera() -> BaseCamera:
-    """Create the camera specified by the environment."""
+def _normalise_choice(choice: str | None) -> str:
+    if choice is None:
+        choice = os.getenv("REVCAM_CAMERA", DEFAULT_CAMERA_CHOICE)
+    normalised = choice.strip().lower()
+    return _CAMERA_ALIASES.get(normalised, normalised)
 
-    choice = os.getenv("REVCAM_CAMERA", "picamera").lower()
-    if choice == "synthetic":
+
+def create_camera(choice: str | None = None) -> BaseCamera:
+    """Create the camera specified by *choice* or the environment.
+
+    When ``choice`` is ``"auto"`` the function attempts to construct a
+    :class:`Picamera2Camera` and falls back to :class:`SyntheticCamera` if the
+    dependency stack is unavailable. Explicit selections raise
+    :class:`CameraError` on failure so callers can surface a helpful message to
+    users.
+    """
+
+    resolved_choice = _normalise_choice(choice)
+    if resolved_choice == "synthetic":
         return SyntheticCamera()
-    if choice == "opencv":
+    if resolved_choice == "opencv":
         return OpenCVCamera()
-    try:
+    if resolved_choice == "picamera":
         return Picamera2Camera()
-    except CameraError:
-        # Fall back to synthetic frames when running on development machines.
-        return SyntheticCamera()
+    if resolved_choice == "auto":
+        try:
+            return Picamera2Camera()
+        except CameraError:
+            return SyntheticCamera()
+    raise CameraError(f"Unknown camera choice: {choice}")
+
+
+def identify_camera(camera: BaseCamera) -> str:
+    """Return the canonical identifier for a camera instance."""
+
+    if isinstance(camera, Picamera2Camera):
+        return "picamera"
+    if isinstance(camera, OpenCVCamera):
+        return "opencv"
+    if isinstance(camera, SyntheticCamera):
+        return "synthetic"
+    return "unknown"
 
 
 __all__ = [
+    "CAMERA_SOURCES",
+    "DEFAULT_CAMERA_CHOICE",
     "BaseCamera",
     "CameraError",
+    "identify_camera",
     "Picamera2Camera",
     "OpenCVCamera",
     "SyntheticCamera",
