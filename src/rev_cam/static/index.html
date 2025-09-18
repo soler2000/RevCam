@@ -19,6 +19,18 @@
         padding: 0.75rem 1rem;
         background: rgba(0, 0, 0, 0.6);
       }
+      header {
+        display: flex;
+        flex-direction: column;
+        gap: 0.35rem;
+      }
+      .header-top {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 1rem;
+        flex-wrap: wrap;
+      }
       main {
         flex: 1 1 auto;
         display: flex;
@@ -44,11 +56,18 @@
         font-size: 0.9rem;
         opacity: 0.8;
       }
+      #battery {
+        font-size: 0.9rem;
+        opacity: 0.8;
+      }
     </style>
   </head>
   <body>
     <header>
-      <strong>RevCam</strong>
+      <div class="header-top">
+        <strong>RevCam</strong>
+        <div id="battery">Battery: Loading…</div>
+      </div>
       <div id="status">Initialising…</div>
     </header>
     <main>
@@ -62,7 +81,34 @@
       const statusLabel = document.getElementById("status");
       const reconnectButton = document.getElementById("reconnect");
       const video = document.getElementById("video");
+      const batteryLabel = document.getElementById("battery");
       let pc;
+
+      async function updateBatteryStatus() {
+        try {
+          const response = await fetch("/api/power");
+          if (!response.ok) {
+            throw new Error("Bad response");
+          }
+          const data = await response.json();
+          const parts = [];
+          if (typeof data.voltage === "number") {
+            parts.push(`${data.voltage.toFixed(2)} V`);
+          }
+          if (typeof data.percentage === "number") {
+            parts.push(`${Math.round(data.percentage)}%`);
+          }
+          if (typeof data.current === "number") {
+            const sign = data.current >= 0 ? "" : "−";
+            parts.push(`${sign}${Math.abs(data.current).toFixed(2)} A`);
+          }
+          batteryLabel.textContent = parts.length
+            ? `Battery: ${parts.join(" · ")}`
+            : "Battery: Data unavailable";
+        } catch (err) {
+          batteryLabel.textContent = "Battery: Unavailable";
+        }
+      }
 
       async function startStream() {
         statusLabel.textContent = "Connecting to camera…";
@@ -106,6 +152,8 @@
         console.error(err);
         statusLabel.textContent = "Error: " + err.message;
       });
+      updateBatteryStatus();
+      setInterval(updateBatteryStatus, 10000);
     </script>
   </body>
 </html>

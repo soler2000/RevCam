@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from .camera import BaseCamera, create_camera
 from .config import ConfigManager
 from .pipeline import FramePipeline
+from .power import BaseBatteryMonitor, BatteryMonitorError, create_battery_monitor
 from .webrtc import WebRTCManager
 from aiortc import RTCSessionDescription
 
@@ -42,12 +43,14 @@ def create_app(config_path: Path | str = Path("data/config.json")) -> FastAPI:
     pipeline = FramePipeline(lambda: config_manager.get_orientation())
     camera: BaseCamera | None = None
     webrtc_manager: WebRTCManager | None = None
+    battery_monitor: BaseBatteryMonitor | None = None
 
     @app.on_event("startup")
     async def startup() -> None:  # pragma: no cover - framework hook
-        nonlocal camera, webrtc_manager
+        nonlocal camera, webrtc_manager, battery_monitor
         camera = create_camera()
         webrtc_manager = WebRTCManager(camera=camera, pipeline=pipeline)
+        battery_monitor = create_battery_monitor()
 
     @app.on_event("shutdown")
     async def shutdown() -> None:  # pragma: no cover - framework hook
@@ -55,6 +58,8 @@ def create_app(config_path: Path | str = Path("data/config.json")) -> FastAPI:
             await webrtc_manager.shutdown()
         if camera:
             await camera.close()
+        if battery_monitor:
+            await battery_monitor.close()
 
     @app.get("/", response_class=HTMLResponse)
     async def index() -> str:
@@ -92,6 +97,16 @@ def create_app(config_path: Path | str = Path("data/config.json")) -> FastAPI:
         offer = RTCSessionDescription(sdp=payload.sdp, type=payload.type)
         answer = await webrtc_manager.handle_offer(offer)
         return {"sdp": answer.sdp, "type": answer.type}
+
+    @app.get("/api/power")
+    async def get_power_status() -> dict[str, float | None]:
+        if battery_monitor is None:
+            raise HTTPException(status_code=503, detail="Battery monitor unavailable")
+        try:
+            status = await battery_monitor.read()
+        except BatteryMonitorError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        return status.to_dict()
 
     return app
 

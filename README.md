@@ -10,6 +10,7 @@ overlays can be injected on the server without major changes.
 - Fast WebRTC video delivery optimised for mobile Safari (iPhone/iPad).
 - Camera orientation controls (rotation and horizontal/vertical flips).
 - Modular frame processing pipeline ready for future overlays (e.g. guidelines).
+- Battery telemetry read from an INA219 power monitor with on-device dashboards.
 - REST API for orientation control and WebRTC signalling.
 
 ## Project layout
@@ -98,6 +99,22 @@ uvicorn rev_cam.app:create_app --factory --host 0.0.0.0 --port 8000
 Then open `http://<pi-address>:8000` on the iOS device to view the stream. Access the
 settings panel at `/settings` to adjust the camera orientation. Changes are persisted
 and applied immediately to the outgoing WebRTC stream.
+
+## Battery monitoring
+
+RevCam can surface battery information from an INA219 sensor. By default the
+application attempts to initialise the sensor and, when unavailable, falls back
+to a synthetic data source useful for development. Configure the behaviour via
+environment variables:
+
+- `REVCAM_BATTERY` – set to `ina219` (default), `synthetic`, or `none` to
+  disable telemetry entirely.
+- `REVCAM_BATTERY_MIN_VOLTAGE` / `REVCAM_BATTERY_MAX_VOLTAGE` – define the
+  expected voltage range so that the reported percentage can be derived
+  correctly (defaults to 11.0–12.6 V).
+
+Battery telemetry is available through the `/api/power` endpoint and displayed
+on both the live view and settings pages.
 
 ## Testing
 

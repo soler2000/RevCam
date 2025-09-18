@@ -40,6 +40,15 @@
       a {
         color: #0a84ff;
       }
+      .panel {
+        margin-top: 2rem;
+        padding: 1rem;
+        border-radius: 0.75rem;
+        background: rgba(255, 255, 255, 0.05);
+      }
+      .panel h2 {
+        margin-top: 0;
+      }
     </style>
   </head>
   <body>
@@ -64,9 +73,14 @@
       <button type="submit">Save</button>
       <div id="status">Loading…</div>
     </form>
+    <section class="panel">
+      <h2>Battery</h2>
+      <p id="battery-status">Loading…</p>
+    </section>
     <script>
       const form = document.getElementById("orientation-form");
       const statusLabel = document.getElementById("status");
+      const batteryStatusLabel = document.getElementById("battery-status");
 
       async function loadOrientation() {
         const response = await fetch("/api/orientation");
@@ -105,6 +119,35 @@
         console.error(err);
         statusLabel.textContent = err.message;
       });
+
+      async function loadBatteryStatus() {
+        try {
+          const response = await fetch("/api/power");
+          if (!response.ok) {
+            throw new Error("Unable to read battery telemetry");
+          }
+          const data = await response.json();
+          const pieces = [];
+          if (typeof data.voltage === "number") {
+            pieces.push(`${data.voltage.toFixed(2)} V`);
+          }
+          if (typeof data.percentage === "number") {
+            pieces.push(`${Math.round(data.percentage)}%`);
+          }
+          if (typeof data.current === "number") {
+            const prefix = data.current >= 0 ? "" : "−";
+            pieces.push(`${prefix}${Math.abs(data.current).toFixed(2)} A`);
+          }
+          batteryStatusLabel.textContent = pieces.length
+            ? pieces.join(" · ")
+            : "Battery data unavailable";
+        } catch (err) {
+          batteryStatusLabel.textContent = err.message;
+        }
+      }
+
+      loadBatteryStatus();
+      setInterval(loadBatteryStatus, 10000);
     </script>
   </body>
 </html>
