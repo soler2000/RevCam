@@ -94,7 +94,7 @@ def test_camera_status_endpoint_reports_fallbacks(
     """Expose the fallback chain when the synthetic feed is in use."""
 
     def broken_picamera() -> None:
-        raise CameraError("picamera offline")
+        raise CameraError("picamera2 is not available")
 
     def broken_opencv(*_: object, **__: object) -> None:
         raise CameraError("opencv offline")
@@ -118,7 +118,7 @@ def test_camera_status_endpoint_reports_fallbacks(
         assert status["active_backend"] == "synthetic"
         assert status["error"] is None
         assert status["fallbacks"] == [
-            "Picamera2: picamera offline",
+            "Picamera2: picamera2 is not available",
             "OpenCV: opencv offline",
         ]
 
@@ -134,6 +134,60 @@ def test_camera_status_endpoint_reports_fallbacks(
             "mode": "auto",
         }
         assert payload == expected
+
+        for handler in application.router.on_shutdown:
+            loop.run_until_complete(handler())
+    finally:
+        asyncio.set_event_loop(None)
+        loop.close()
+
+
+def test_camera_status_endpoint_reports_picamera_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Expose Picamera2 errors when no fallback camera is available."""
+
+    def broken_picamera() -> None:
+        raise CameraError("picamera driver crashed")
+
+    def broken_opencv(*_: object, **__: object) -> None:
+        raise CameraError("opencv offline")
+
+    monkeypatch.setattr(camera_module, "Picamera2Camera", broken_picamera)
+    monkeypatch.setattr(camera_module, "OpenCVCamera", broken_opencv)
+    monkeypatch.delenv("REVCAM_CAMERA", raising=False)
+
+    application = app_module.create_app(tmp_path / "config.json")
+
+    loop = asyncio.new_event_loop()
+    try:
+        asyncio.set_event_loop(loop)
+
+        for handler in application.router.on_startup:
+            loop.run_until_complete(handler())
+
+        status = application.state.camera_status
+        assert status is not None
+        assert status["requested"] == "auto"
+        assert status["active_backend"] is None
+        assert status["error"] == "picamera driver crashed"
+        assert status["fallbacks"] == [
+            "Picamera2: picamera driver crashed",
+            "OpenCV: opencv offline",
+        ]
+
+        camera_route = next(
+            route
+            for route in application.router.routes
+            if getattr(route, "path", None) == "/api/camera" and "GET" in getattr(route, "methods", set())
+        )
+        payload = loop.run_until_complete(camera_route.endpoint())
+        assert payload["error"] == "picamera driver crashed"
+        assert payload["fallbacks"] == [
+            "Picamera2: picamera driver crashed",
+            "OpenCV: opencv offline",
+        ]
+        assert payload["mode"] == "auto"
 
         for handler in application.router.on_shutdown:
             loop.run_until_complete(handler())

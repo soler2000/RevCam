@@ -299,12 +299,7 @@
 
         if (data.error) {
           cameraStatusText.textContent = `Camera unavailable: ${data.error}`;
-          cameraFallbacksWrapper.hidden = true;
-          cameraFallbacksList.innerHTML = "";
-          return;
-        }
-
-        if (data.active_backend) {
+        } else if (data.active_backend) {
           const backendText = backendLabel(data.active_backend);
           if (requested === "auto") {
             if (data.active_backend === "synthetic") {

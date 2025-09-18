@@ -311,12 +311,16 @@ def select_camera(raw_choice: str | None = None) -> CameraSelection:
 
     if choice == "auto":
         fallbacks: list[str] = []
+        picamera_error: CameraError | None = None
+        picamera_missing = False
 
         try:
             camera = Picamera2Camera()
         except CameraError as exc:
             detail = str(exc)
             fallbacks.append(f"Picamera2: {detail}")
+            picamera_error = exc
+            picamera_missing = detail == "picamera2 is not available"
             logger.info("Picamera2 backend unavailable in auto mode: %s", detail)
         else:
             return _remember_selection(
@@ -334,18 +338,47 @@ def select_camera(raw_choice: str | None = None) -> CameraSelection:
         except CameraError as exc:
             detail = str(exc)
             fallbacks.append(f"OpenCV: {detail}")
-            if fallbacks:
+            if picamera_missing:
                 logger.warning(
                     "All hardware camera backends failed (%s); using synthetic feed",
                     "; ".join(fallbacks),
                 )
+                return _remember_selection(
+                    CameraSelection(
+                        requested=choice,
+                        active_backend="synthetic",
+                        camera=SyntheticCamera(),
+                        fallbacks=fallbacks,
+                        error=None,
+                    )
+                )
+
+            if picamera_error is not None:
+                logger.error(
+                    "Picamera2 failed to initialise and no fallback succeeded: %s",
+                    picamera_error,
+                )
+                return _remember_selection(
+                    CameraSelection(
+                        requested=choice,
+                        active_backend=None,
+                        camera=None,
+                        fallbacks=fallbacks,
+                        error=picamera_error,
+                    )
+                )
+
+            logger.error(
+                "OpenCV backend failed without Picamera2 error context: %s",
+                detail,
+            )
             return _remember_selection(
                 CameraSelection(
                     requested=choice,
-                    active_backend="synthetic",
-                    camera=SyntheticCamera(),
+                    active_backend=None,
+                    camera=None,
                     fallbacks=fallbacks,
-                    error=None,
+                    error=exc,
                 )
             )
         else:

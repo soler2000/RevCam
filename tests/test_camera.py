@@ -286,6 +286,40 @@ def test_create_camera_auto_handles_picamera_import_runtime_error(
     )
 
 
+def test_create_camera_auto_raises_when_picamera_runtime_error_and_no_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Without OpenCV, Picamera2 runtime errors should surface to the caller."""
+
+    monkeypatch.delenv("REVCAM_CAMERA", raising=False)
+
+    real_import_module = camera_module.importlib.import_module
+
+    def fake_import(name: str, package: str | None = None):
+        if name == "picamera2":
+            raise ValueError("numpy dtype size changed")
+        return real_import_module(name, package)
+
+    monkeypatch.setattr(camera_module.importlib, "import_module", fake_import)
+    sys.modules.pop("picamera2", None)
+    sys.modules.pop("cv2", None)
+
+    with pytest.raises(CameraError) as excinfo:
+        create_camera()
+
+    message = str(excinfo.value)
+    assert "Failed to import picamera2: numpy dtype size changed" in message
+
+    status = get_camera_status()
+    assert status["requested"] == "auto"
+    assert status["active_backend"] is None
+    assert status["error"] == message
+    assert status["fallbacks"] == [
+        "Picamera2: Failed to import picamera2: numpy dtype size changed",
+        "OpenCV: OpenCV is not installed",
+    ]
+
+
 def test_create_camera_raises_when_picamera_explicit(monkeypatch: pytest.MonkeyPatch) -> None:
     """Explicit Picamera2 configuration should surface initialisation failures."""
 
