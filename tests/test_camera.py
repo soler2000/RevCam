@@ -7,13 +7,22 @@ import types
 
 import pytest
 
+from rev_cam import camera as camera_module
 from rev_cam.camera import (
     CameraError,
     OpenCVCamera,
     Picamera2Camera,
     SyntheticCamera,
     create_camera,
+    get_camera_status,
 )
+
+
+@pytest.fixture(autouse=True)
+def reset_camera_status(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ensure the cached camera selection is cleared between tests."""
+
+    monkeypatch.setattr(camera_module, "_LAST_SELECTION", None)
 
 
 def test_picamera_initialisation_failure_is_wrapped(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -63,6 +72,14 @@ def test_create_camera_falls_back_when_picamera_missing(monkeypatch: pytest.Monk
     camera = create_camera()
 
     assert isinstance(camera, SyntheticCamera)
+    status = get_camera_status()
+    assert status["requested"] == "auto"
+    assert status["active_backend"] == "synthetic"
+    assert status["error"] is None
+    assert status["fallbacks"] == [
+        "Picamera2: picamera2 is not available",
+        "OpenCV: OpenCV is not installed",
+    ]
 
 
 def test_create_camera_uses_opencv_when_picamera_missing(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -100,6 +117,11 @@ def test_create_camera_uses_opencv_when_picamera_missing(monkeypatch: pytest.Mon
     camera = create_camera()
 
     assert isinstance(camera, OpenCVCamera)
+    status = get_camera_status()
+    assert status["requested"] == "auto"
+    assert status["active_backend"] == "opencv"
+    assert status["error"] is None
+    assert status["fallbacks"] == ["Picamera2: picamera2 is not available"]
 
 
 def test_create_camera_auto_falls_back_when_picamera_initialisation_fails(
@@ -144,6 +166,13 @@ def test_create_camera_auto_falls_back_when_picamera_initialisation_fails(
     camera = create_camera()
 
     assert isinstance(camera, OpenCVCamera)
+    status = get_camera_status()
+    assert status["requested"] == "auto"
+    assert status["active_backend"] == "opencv"
+    assert status["error"] is None
+    assert status["fallbacks"] == [
+        "Picamera2: Failed to initialise Picamera2 camera",
+    ]
 
 
 def test_create_camera_raises_when_picamera_explicit(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -160,6 +189,12 @@ def test_create_camera_raises_when_picamera_explicit(monkeypatch: pytest.MonkeyP
     with pytest.raises(CameraError):
         create_camera()
 
+    status = get_camera_status()
+    assert status["requested"] == "picamera"
+    assert status["active_backend"] is None
+    assert status["error"] == "Failed to initialise Picamera2 camera"
+    assert status["fallbacks"] == []
+
 
 def test_create_camera_rejects_unknown_backend(monkeypatch: pytest.MonkeyPatch) -> None:
     """Invalid configuration values surface as camera errors."""
@@ -170,4 +205,9 @@ def test_create_camera_rejects_unknown_backend(monkeypatch: pytest.MonkeyPatch) 
         create_camera()
 
     assert "unknown" in str(excinfo.value)
+    status = get_camera_status()
+    assert status["requested"] == "unknown"
+    assert status["active_backend"] is None
+    assert status["error"] == "Unknown camera backend: 'unknown'"
+    assert status["fallbacks"] == []
 

@@ -9,7 +9,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
-from .camera import BaseCamera, CameraError, create_camera
+from .camera import BaseCamera, CameraError, create_camera, get_camera_status
 from .config import ConfigManager
 from .pipeline import FramePipeline
 from .webrtc import WebRTCManager
@@ -50,6 +50,7 @@ def create_app(config_path: Path | str = Path("data/config.json")) -> FastAPI:
     app.state.camera = None
     app.state.webrtc_manager = None
     app.state.camera_error = None
+    app.state.camera_status = None
 
     @app.on_event("startup")
     async def startup() -> None:  # pragma: no cover - framework hook
@@ -65,6 +66,10 @@ def create_app(config_path: Path | str = Path("data/config.json")) -> FastAPI:
 
         app.state.camera = camera
         app.state.camera_error = camera_error
+        status = get_camera_status()
+        if camera_error is not None:
+            status = {**status, "error": str(camera_error)}
+        app.state.camera_status = status
 
         if camera is not None:
             webrtc_manager = WebRTCManager(camera=camera, pipeline=pipeline)
@@ -117,6 +122,13 @@ def create_app(config_path: Path | str = Path("data/config.json")) -> FastAPI:
         offer = RTCSessionDescription(sdp=payload.sdp, type=payload.type)
         answer = await webrtc_manager.handle_offer(offer)
         return {"sdp": answer.sdp, "type": answer.type}
+
+    @app.get("/api/camera")
+    async def camera_status_endpoint() -> dict[str, str | list[str] | None]:
+        status = get_camera_status()
+        if camera_error is not None:
+            status = {**status, "error": str(camera_error)}
+        return status
 
     return app
 
