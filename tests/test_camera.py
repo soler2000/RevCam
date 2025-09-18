@@ -42,7 +42,7 @@ def test_load_picamera2_extends_search_path(monkeypatch: pytest.MonkeyPatch) -> 
         if name == "picamera2":
             attempts["count"] += 1
             if attempts["count"] == 1:
-                raise ImportError("picamera2 missing")
+                raise ModuleNotFoundError("picamera2 missing")
             module = types.SimpleNamespace(Picamera2=dummy_class)
             sys.modules["picamera2"] = module
             return module
@@ -58,6 +58,27 @@ def test_load_picamera2_extends_search_path(monkeypatch: pytest.MonkeyPatch) -> 
 
     assert loaded is dummy_class
     assert added == ["/opt/picamera"]
+
+
+def test_load_picamera2_wraps_runtime_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Non-ImportError failures during import should surface as CameraErrors."""
+
+    real_import_module = camera_module.importlib.import_module
+
+    def fake_import(name: str, package: str | None = None):
+        if name == "picamera2":
+            sys.modules["picamera2"] = types.ModuleType("picamera2")
+            raise ValueError("numpy dtype size changed")
+        return real_import_module(name, package)
+
+    monkeypatch.setattr(camera_module.importlib, "import_module", fake_import)
+    sys.modules.pop("picamera2", None)
+
+    with pytest.raises(CameraError) as excinfo:
+        camera_module._load_picamera2()
+
+    assert "Failed to import picamera2: numpy dtype size changed" in str(excinfo.value)
+    assert "picamera2" not in sys.modules
 
 
 def test_picamera_initialisation_failure_is_wrapped(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -208,6 +229,61 @@ def test_create_camera_auto_falls_back_when_picamera_initialisation_fails(
     assert status["fallbacks"] == [
         "Picamera2: Failed to initialise Picamera2 camera",
     ]
+
+
+def test_create_camera_auto_handles_picamera_import_runtime_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Auto mode should fall back when Picamera2 import raises runtime errors."""
+
+    monkeypatch.delenv("REVCAM_CAMERA", raising=False)
+    real_import_module = camera_module.importlib.import_module
+
+    def fake_import(name: str, package: str | None = None):
+        if name == "picamera2":
+            raise ValueError("numpy dtype size changed")
+        return real_import_module(name, package)
+
+    monkeypatch.setattr(camera_module.importlib, "import_module", fake_import)
+    sys.modules.pop("picamera2", None)
+
+    class DummyCapture:
+        def __init__(self, index: int) -> None:
+            self.index = index
+
+        def isOpened(self) -> bool:
+            return True
+
+        def read(self) -> tuple[bool, str]:
+            return True, "frame"
+
+        def release(self) -> None:
+            return None
+
+    def dummy_video_capture(index: int) -> DummyCapture:
+        return DummyCapture(index)
+
+    def dummy_cvt_color(frame: str, _: object) -> str:
+        return frame
+
+    cv2_module = types.SimpleNamespace(
+        VideoCapture=dummy_video_capture,
+        COLOR_BGR2RGB=1,
+        cvtColor=dummy_cvt_color,
+    )
+    monkeypatch.setitem(sys.modules, "cv2", cv2_module)
+
+    camera = create_camera()
+
+    assert isinstance(camera, OpenCVCamera)
+    status = get_camera_status()
+    assert status["requested"] == "auto"
+    assert status["active_backend"] == "opencv"
+    assert status["error"] is None
+    assert status["fallbacks"]
+    assert status["fallbacks"][0].startswith(
+        "Picamera2: Failed to import picamera2: numpy dtype size changed"
+    )
 
 
 def test_create_camera_raises_when_picamera_explicit(monkeypatch: pytest.MonkeyPatch) -> None:

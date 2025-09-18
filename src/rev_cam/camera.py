@@ -94,14 +94,24 @@ def _extend_picamera2_search_path() -> list[str]:
 def _load_picamera2() -> type:
     """Import the Picamera2 class, extending the module search path if needed."""
 
-    try:
-        module = importlib.import_module("picamera2")
-    except ImportError:
-        _extend_picamera2_search_path()
+    def _import_picamera2() -> object:
         try:
-            module = importlib.import_module("picamera2")
-        except ImportError as exc:
-            raise CameraError("picamera2 is not available") from exc
+            return importlib.import_module("picamera2")
+        except ModuleNotFoundError:
+            _extend_picamera2_search_path()
+            try:
+                return importlib.import_module("picamera2")
+            except ModuleNotFoundError as exc:
+                raise CameraError("picamera2 is not available") from exc
+            except Exception as exc:  # pragma: no cover - unexpected import error
+                sys.modules.pop("picamera2", None)
+                raise CameraError(f"Failed to import picamera2: {exc}") from exc
+        except Exception as exc:  # pragma: no cover - unexpected import error
+            sys.modules.pop("picamera2", None)
+            raise CameraError(f"Failed to import picamera2: {exc}") from exc
+
+    module = _import_picamera2()
+
     try:
         return module.Picamera2
     except AttributeError as exc:  # pragma: no cover - defensive programming
