@@ -50,22 +50,51 @@ def create_app(config_path: Path | str = Path("data/config.json")) -> FastAPI:
     camera: BaseCamera | None = None
     webrtc_manager: WebRTCManager | None = None
     active_camera_choice: str = "unknown"
+    camera_errors: dict[str, str] = {}
     logger = logging.getLogger(__name__)
+
+    def _record_camera_error(source: str, message: str | None) -> None:
+        if message:
+            camera_errors[source] = message
+        else:
+            camera_errors.pop(source, None)
+
+    def _build_camera(selection: str, *, fallback_to_synthetic: bool) -> tuple[BaseCamera, str]:
+        normalised = selection.strip().lower()
+        if normalised == "auto":
+            try:
+                camera_instance = create_camera("picamera")
+            except CameraError as exc:
+                reason = str(exc)
+                logger.warning("Picamera unavailable, using synthetic camera: %s", reason)
+                _record_camera_error("picamera", reason)
+                fallback_camera, fallback_active = _build_camera("synthetic", fallback_to_synthetic=False)
+                return fallback_camera, fallback_active
+            else:
+                _record_camera_error("picamera", None)
+                return camera_instance, identify_camera(camera_instance)
+
+        try:
+            camera_instance = create_camera(normalised)
+        except CameraError as exc:
+            reason = str(exc)
+            _record_camera_error(normalised, reason)
+            if fallback_to_synthetic and normalised != "synthetic":
+                logger.warning(
+                    "Failed to initialise camera '%s': %s; falling back to synthetic", selection, reason
+                )
+                fallback_camera, fallback_active = _build_camera("synthetic", fallback_to_synthetic=False)
+                return fallback_camera, fallback_active
+            raise
+        else:
+            _record_camera_error(normalised, None)
+            return camera_instance, identify_camera(camera_instance)
 
     @app.on_event("startup")
     async def startup() -> None:  # pragma: no cover - framework hook
         nonlocal camera, webrtc_manager, active_camera_choice
         selection = config_manager.get_camera()
-        try:
-            camera = create_camera(selection)
-        except CameraError as exc:
-            logger.warning("Failed to initialise camera '%s': %s", selection, exc)
-            try:
-                camera = create_camera("synthetic")
-            except CameraError as fallback_exc:  # pragma: no cover - synthetic should always succeed
-                logger.error("Synthetic camera initialisation failed: %s", fallback_exc)
-                raise
-        active_camera_choice = identify_camera(camera)
+        camera, active_camera_choice = _build_camera(selection, fallback_to_synthetic=True)
         try:
             webrtc_manager = WebRTCManager(camera=camera, pipeline=pipeline)
         except RuntimeError as exc:
@@ -111,10 +140,12 @@ def create_app(config_path: Path | str = Path("data/config.json")) -> FastAPI:
     @app.get("/api/camera")
     async def get_camera_config() -> dict[str, object]:
         options = [{"value": value, "label": label} for value, label in CAMERA_SOURCES.items()]
+        errors = {source: message for source, message in camera_errors.items() if message}
         return {
             "selected": config_manager.get_camera(),
             "active": active_camera_choice,
             "options": options,
+            "errors": errors,
         }
 
     @app.post("/api/camera")
@@ -124,12 +155,13 @@ def create_app(config_path: Path | str = Path("data/config.json")) -> FastAPI:
         if selection not in CAMERA_SOURCES:
             raise HTTPException(status_code=400, detail="Unknown camera source")
         try:
-            new_camera = create_camera(selection)
+            new_camera, active_camera_choice = _build_camera(
+                selection, fallback_to_synthetic=(selection == "auto")
+            )
         except CameraError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         old_camera = camera
         camera = new_camera
-        active_camera_choice = identify_camera(new_camera)
         config_manager.set_camera(selection)
         if webrtc_manager is None:
             try:

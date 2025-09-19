@@ -74,6 +74,21 @@
       const statusLabel = document.getElementById("status");
       const cameraLabels = new Map();
 
+      function describeCameraErrors(camera) {
+        if (!camera || !camera.errors) {
+          return [];
+        }
+        const descriptions = [];
+        for (const [source, detail] of Object.entries(camera.errors)) {
+          if (!detail) {
+            continue;
+          }
+          const label = cameraLabels.get(source) || source;
+          descriptions.push(`${label}: ${detail}`);
+        }
+        return descriptions;
+      }
+
       function applySettings(orientation, camera, message = "Settings loaded") {
         form.rotation.value = orientation.rotation;
         form.flip_horizontal.checked = orientation.flip_horizontal;
@@ -104,6 +119,10 @@
         ) {
           const activeLabel = cameraLabels.get(camera.active) || camera.active;
           status += ` (active: ${activeLabel})`;
+        }
+        const errorMessages = describeCameraErrors(camera);
+        if (errorMessages.length) {
+          status += ` • ${errorMessages.join(" • ")}`;
         }
         statusLabel.textContent = status;
       }

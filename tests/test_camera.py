@@ -100,7 +100,26 @@ def test_import_failure_surface_details(monkeypatch: pytest.MonkeyPatch) -> None
     with pytest.raises(CameraError) as excinfo:
         Picamera2Camera()
 
-    assert "numpy ABI mismatch" in str(excinfo.value)
+    message = str(excinfo.value)
+    assert "numpy ABI mismatch" in message
+    assert "python3-picamera2" in message
+
+
+def test_picamera_initialisation_error_includes_cause(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Nested errors should be surfaced when Picamera2 initialisation fails."""
+
+    class ExplodingCamera:
+        def __init__(self) -> None:
+            raise RuntimeError("outer failure") from ValueError("inner detail")
+
+    module = types.SimpleNamespace(Picamera2=ExplodingCamera)
+    monkeypatch.setitem(sys.modules, "picamera2", module)
+
+    with pytest.raises(CameraError) as excinfo:
+        Picamera2Camera()
+
+    assert "outer failure" in str(excinfo.value)
+    assert "inner detail" in str(excinfo.value)
 
 
 def test_identify_camera_returns_source() -> None:

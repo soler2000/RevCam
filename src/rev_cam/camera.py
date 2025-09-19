@@ -5,6 +5,7 @@ import asyncio
 import os
 import time
 from abc import ABC, abstractmethod
+from typing import Iterable
 
 import numpy as np
 
@@ -41,6 +42,26 @@ class BaseCamera(ABC):
         return None
 
 
+def _summarise_exception(exc: BaseException) -> str:
+    """Collect the unique error messages from an exception chain."""
+
+    details: list[str] = []
+    seen: set[str] = set()
+    to_consider: Iterable[BaseException | None] = (
+        exc,
+        getattr(exc, "__cause__", None),
+        getattr(exc, "__context__", None),
+    )
+    for candidate in to_consider:
+        if candidate is None:
+            continue
+        text = str(candidate).strip()
+        if text and text not in seen:
+            details.append(text)
+            seen.add(text)
+    return " | ".join(details)
+
+
 class Picamera2Camera(BaseCamera):
     """Camera implementation using the Picamera2 stack."""
 
@@ -48,10 +69,13 @@ class Picamera2Camera(BaseCamera):
         try:
             from picamera2 import Picamera2
         except ImportError as exc:  # pragma: no cover - hardware dependent
-            message = "picamera2 is not available"
-            detail = str(exc).strip()
+            detail = _summarise_exception(exc)
+            message = (
+                "picamera2 is not available. Install the 'python3-picamera2' package "
+                "and ensure the application can access system packages"
+            )
             if detail:
-                message = f"{message}: {detail}"
+                message = f"{message} ({detail})"
             raise CameraError(message) from exc
 
         self._camera = None
@@ -75,7 +99,7 @@ class Picamera2Camera(BaseCamera):
                     camera.close()
                 except Exception:
                     pass
-            detail = str(exc).strip()
+            detail = _summarise_exception(exc)
             message = "Failed to initialise Picamera2 camera"
             if detail:
                 message = f"{message}: {detail}"
