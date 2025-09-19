@@ -279,6 +279,28 @@ def test_import_failure_surface_details(monkeypatch: pytest.MonkeyPatch) -> None
     assert "scripts/install.sh --pi" in message
 
 
+def test_import_failure_numpy_hint(monkeypatch: pytest.MonkeyPatch) -> None:
+    """NumPy ABI mismatches should provide remediation guidance."""
+
+    import builtins
+
+    original_import = builtins.__import__
+
+    def raising_import(name: str, *args: object, **kwargs: object):
+        if name == "picamera2":
+            raise ValueError("numpy.dtype size changed, may indicate binary incompatibility")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", raising_import)
+
+    with pytest.raises(CameraError) as excinfo:
+        Picamera2Camera()
+
+    message = str(excinfo.value)
+    assert "numpy.dtype size changed" in message
+    assert "sudo apt install --reinstall python3-numpy python3-picamera2 simplejpeg" in message
+
+
 def test_picamera_initialisation_error_includes_cause(monkeypatch: pytest.MonkeyPatch) -> None:
     """Nested errors should be surfaced when Picamera2 initialisation fails."""
 

@@ -248,7 +248,7 @@ class Picamera2Camera(BaseCamera):
     def __init__(self) -> None:
         try:
             from picamera2 import Picamera2
-        except ImportError as exc:  # pragma: no cover - hardware dependent
+        except Exception as exc:  # pragma: no cover - hardware dependent
             detail = _summarise_exception(exc)
             message = (
                 "picamera2 is not available. Install the 'python3-picamera2' package "
@@ -256,8 +256,19 @@ class Picamera2Camera(BaseCamera):
                 "recreate the virtual environment with `python3 -m venv --system-"
                 "site-packages .venv` or run `./scripts/install.sh --pi`)."
             )
+            hints: list[str] = []
             if detail:
+                lower_detail = detail.lower()
+                if "numpy" in lower_detail and ("abi" in lower_detail or "dtype size changed" in lower_detail):
+                    hints.append(
+                        "Detected a NumPy ABI mismatch. Reinstall the Raspberry Pi OS packages so NumPy and Picamera2 "
+                        "share compatible binaries (for example `sudo apt install --reinstall python3-numpy python3-"
+                        "picamera2 simplejpeg`). If NumPy was upgraded inside a virtual environment, recreate it with "
+                        "`python3 -m venv --system-site-packages .venv`."
+                    )
                 message = f"{message} ({detail})"
+            if hints:
+                message = f"{message} {' '.join(hints)}"
             logger.exception("Failed to import Picamera2: %s", detail or exc)
             raise CameraError(message) from exc
 
