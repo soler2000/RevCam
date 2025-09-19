@@ -164,6 +164,19 @@
           }
           return true;
         });
+        if (camera.webrtc && camera.webrtc.error) {
+          const webrtcDetail = String(camera.webrtc.error).trim();
+          if (webrtcDetail) {
+            const webrtcMessage = `WebRTC disabled: ${webrtcDetail}`;
+            const webrtcLower = webrtcMessage.toLowerCase();
+            const alreadyIncluded =
+              statusLower.includes(webrtcLower) ||
+              errorMessages.some((detail) => detail.toLowerCase() === webrtcLower);
+            if (!alreadyIncluded) {
+              errorMessages.push(webrtcMessage);
+            }
+          }
+        }
         if (errorMessages.length) {
           status += ` • ${errorMessages.join(" • ")}`;
         }

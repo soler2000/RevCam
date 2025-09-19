@@ -39,6 +39,8 @@ def test_camera_endpoint_reports_picamera_error(client: TestClient) -> None:
     assert "picamera" in payload["errors"]
     assert "picamera backend unavailable" in payload["errors"]["picamera"]
     assert payload["version"] == APP_VERSION
+    assert payload["webrtc"]["enabled"] is False
+    assert "aiortc" in payload["webrtc"]["error"].lower()
 
 
 def test_camera_update_surfaces_failure(client: TestClient) -> None:
@@ -50,3 +52,5 @@ def test_camera_update_surfaces_failure(client: TestClient) -> None:
     refreshed = client.get("/api/camera").json()
     assert "picamera backend unavailable" in refreshed["errors"]["picamera"]
     assert refreshed["version"] == APP_VERSION
+    assert refreshed["webrtc"]["enabled"] is False
+    assert "aiortc" in refreshed["webrtc"]["error"].lower()

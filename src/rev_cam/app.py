@@ -50,6 +50,7 @@ def create_app(config_path: Path | str = Path("data/config.json")) -> FastAPI:
     pipeline = FramePipeline(lambda: config_manager.get_orientation())
     camera: BaseCamera | None = None
     webrtc_manager: WebRTCManager | None = None
+    webrtc_error: str | None = None
     active_camera_choice: str = "unknown"
     camera_errors: dict[str, str] = {}
     logger = logging.getLogger(__name__)
@@ -91,16 +92,27 @@ def create_app(config_path: Path | str = Path("data/config.json")) -> FastAPI:
             _record_camera_error(normalised, None)
             return camera_instance, identify_camera(camera_instance)
 
+    def _ensure_webrtc(current_camera: BaseCamera) -> None:
+        nonlocal webrtc_manager, webrtc_error
+        if webrtc_manager is None:
+            try:
+                webrtc_manager = WebRTCManager(camera=current_camera, pipeline=pipeline)
+            except RuntimeError as exc:
+                logger.warning("WebRTC disabled: %s", exc)
+                webrtc_manager = None
+                webrtc_error = str(exc)
+            else:
+                webrtc_error = None
+        else:
+            webrtc_manager.camera = current_camera
+            webrtc_error = None
+
     @app.on_event("startup")
     async def startup() -> None:  # pragma: no cover - framework hook
-        nonlocal camera, webrtc_manager, active_camera_choice
+        nonlocal camera, active_camera_choice
         selection = config_manager.get_camera()
         camera, active_camera_choice = _build_camera(selection, fallback_to_synthetic=True)
-        try:
-            webrtc_manager = WebRTCManager(camera=camera, pipeline=pipeline)
-        except RuntimeError as exc:
-            logger.warning("WebRTC disabled: %s", exc)
-            webrtc_manager = None
+        _ensure_webrtc(camera)
 
     @app.on_event("shutdown")
     async def shutdown() -> None:  # pragma: no cover - framework hook
@@ -142,17 +154,21 @@ def create_app(config_path: Path | str = Path("data/config.json")) -> FastAPI:
     async def get_camera_config() -> dict[str, object]:
         options = [{"value": value, "label": label} for value, label in CAMERA_SOURCES.items()]
         errors = {source: message for source, message in camera_errors.items() if message}
+        webrtc_info = {"enabled": webrtc_manager is not None}
+        if webrtc_error:
+            webrtc_info["error"] = webrtc_error
         return {
             "selected": config_manager.get_camera(),
             "active": active_camera_choice,
             "options": options,
             "errors": errors,
             "version": APP_VERSION,
+            "webrtc": webrtc_info,
         }
 
     @app.post("/api/camera")
     async def update_camera(payload: CameraPayload) -> dict[str, object]:
-        nonlocal camera, webrtc_manager, active_camera_choice
+        nonlocal camera, active_camera_choice
         selection = payload.source.strip().lower()
         if selection not in CAMERA_SOURCES:
             raise HTTPException(status_code=400, detail="Unknown camera source")
@@ -165,17 +181,18 @@ def create_app(config_path: Path | str = Path("data/config.json")) -> FastAPI:
         old_camera = camera
         camera = new_camera
         config_manager.set_camera(selection)
-        if webrtc_manager is None:
-            try:
-                webrtc_manager = WebRTCManager(camera=camera, pipeline=pipeline)
-            except RuntimeError as exc:
-                logger.warning("WebRTC disabled: %s", exc)
-                webrtc_manager = None
-        else:
-            webrtc_manager.camera = camera
+        _ensure_webrtc(camera)
         if old_camera is not None:
             await old_camera.close()
-        return {"selected": selection, "active": active_camera_choice, "version": APP_VERSION}
+        webrtc_info = {"enabled": webrtc_manager is not None}
+        if webrtc_error:
+            webrtc_info["error"] = webrtc_error
+        return {
+            "selected": selection,
+            "active": active_camera_choice,
+            "version": APP_VERSION,
+            "webrtc": webrtc_info,
+        }
 
     @app.post("/api/offer")
     async def webrtc_offer(payload: OfferPayload) -> dict[str, str]:
