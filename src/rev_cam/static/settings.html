@@ -44,8 +44,16 @@
   </head>
   <body>
     <a href="/">← Back to live view</a>
-    <h1>Camera Orientation</h1>
+    <h1>Camera Settings</h1>
+    <p id="app-version" style="margin-top: -0.5rem; opacity: 0.75;">
+      Version <span id="version-value">Loading…</span>
+    </p>
     <form id="orientation-form">
+      <label>
+        Camera source
+        <select name="camera"></select>
+      </label>
+      <h2 style="margin-bottom: 0.5rem; margin-top: 1.5rem;">Orientation</h2>
       <label>
         Rotation
         <select name="rotation">
@@ -67,17 +75,135 @@
     <script>
       const form = document.getElementById("orientation-form");
       const statusLabel = document.getElementById("status");
+      const versionValue = document.getElementById("version-value");
+      const cameraLabels = new Map();
 
-      async function loadOrientation() {
-        const response = await fetch("/api/orientation");
-        if (!response.ok) {
+      function describeCameraErrors(camera) {
+        if (!camera || !camera.errors) {
+          return [];
+        }
+        const descriptions = [];
+        const seen = new Set();
+        for (const [source, detail] of Object.entries(camera.errors)) {
+          if (!detail) {
+            continue;
+          }
+          const label = cameraLabels.get(source) || source;
+          const combined = `${label}: ${detail}`;
+          const dedupeKey = detail.trim().toLowerCase();
+          if (dedupeKey && seen.has(dedupeKey)) {
+            continue;
+          }
+          if (dedupeKey) {
+            seen.add(dedupeKey);
+          }
+          descriptions.push(combined);
+        }
+        return descriptions;
+      }
+
+      function updateVersion(camera) {
+        if (!versionValue) {
+          return;
+        }
+        const version = camera && camera.version ? String(camera.version).trim() : "";
+        versionValue.textContent = version || "Unknown";
+      }
+
+      function applySettings(orientation, camera, message = "Settings loaded") {
+        form.rotation.value = orientation.rotation;
+        form.flip_horizontal.checked = orientation.flip_horizontal;
+        form.flip_vertical.checked = orientation.flip_vertical;
+
+        updateVersion(camera);
+
+        const cameraSelect = form.elements.namedItem("camera");
+        if (!(cameraSelect instanceof HTMLSelectElement)) {
+          throw new Error("Camera select element missing");
+        }
+        cameraSelect.innerHTML = "";
+        cameraLabels.clear();
+        for (const option of camera.options || []) {
+          const opt = document.createElement("option");
+          opt.value = option.value;
+          opt.textContent = option.label;
+          cameraSelect.appendChild(opt);
+          cameraLabels.set(option.value, option.label);
+        }
+        if (camera.selected && cameraLabels.has(camera.selected)) {
+          cameraSelect.value = camera.selected;
+        }
+
+        let status = message;
+        if (
+          !status.toLowerCase().startsWith("error") &&
+          camera.active &&
+          camera.active !== camera.selected
+        ) {
+          const activeLabel = cameraLabels.get(camera.active) || camera.active;
+          status += ` (active: ${activeLabel})`;
+        }
+        const statusLower = typeof status === "string" ? status.toLowerCase() : "";
+        const errorMessages = describeCameraErrors(camera).filter((detail) => {
+          if (!statusLower) {
+            return true;
+          }
+          const detailLower = detail.toLowerCase();
+          if (statusLower.includes(detailLower)) {
+            return false;
+          }
+          const colonIndex = detail.indexOf(":");
+          if (colonIndex !== -1) {
+            const tail = detail
+              .slice(colonIndex + 1)
+              .trim()
+              .toLowerCase();
+            if (tail && statusLower.includes(tail)) {
+              return false;
+            }
+          }
+          return true;
+        });
+        if (camera.webrtc && camera.webrtc.error) {
+          const webrtcDetail = String(camera.webrtc.error).trim();
+          if (webrtcDetail) {
+            const webrtcMessage = `WebRTC disabled: ${webrtcDetail}`;
+            const webrtcLower = webrtcMessage.toLowerCase();
+            const alreadyIncluded =
+              statusLower.includes(webrtcLower) ||
+              errorMessages.some((detail) => detail.toLowerCase() === webrtcLower);
+            if (!alreadyIncluded) {
+              errorMessages.push(webrtcMessage);
+            }
+          }
+        }
+        if (errorMessages.length) {
+          status += ` • ${errorMessages.join(" • ")}`;
+        }
+        statusLabel.textContent = status;
+      }
+
+      async function fetchSettings() {
+        const [orientationResponse, cameraResponse] = await Promise.all([
+          fetch("/api/orientation"),
+          fetch("/api/camera"),
+        ]);
+        if (!orientationResponse.ok) {
           throw new Error("Unable to fetch current orientation");
         }
-        const data = await response.json();
-        form.rotation.value = data.rotation;
-        form.flip_horizontal.checked = data.flip_horizontal;
-        form.flip_vertical.checked = data.flip_vertical;
-        statusLabel.textContent = "Orientation loaded";
+        if (!cameraResponse.ok) {
+          throw new Error("Unable to fetch camera configuration");
+        }
+        const [orientationData, cameraData] = await Promise.all([
+          orientationResponse.json(),
+          cameraResponse.json(),
+        ]);
+        return { orientation: orientationData, camera: cameraData };
+      }
+
+      async function loadSettings() {
+        const data = await fetchSettings();
+        applySettings(data.orientation, data.camera);
       }
 
       form.addEventListener("submit", async (event) => {
@@ -88,20 +214,59 @@
           flip_horizontal: form.flip_horizontal.checked,
           flip_vertical: form.flip_vertical.checked,
         };
-        const response = await fetch("/api/orientation", {
+        const orientationResponse = await fetch("/api/orientation", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         });
-        if (!response.ok) {
-          const error = await response.json();
-          statusLabel.textContent = "Error: " + (error.detail || "Unable to save");
+        if (!orientationResponse.ok) {
+          let errorDetail = "Unable to save orientation";
+          try {
+            const error = await orientationResponse.json();
+            errorDetail = error.detail || errorDetail;
+          } catch (err) {
+            console.error(err);
+          }
+          statusLabel.textContent = "Error: " + errorDetail;
           return;
         }
-        statusLabel.textContent = "Settings saved";
+        const cameraSelect = form.elements.namedItem("camera");
+        if (!(cameraSelect instanceof HTMLSelectElement)) {
+          statusLabel.textContent = "Error: camera selector missing";
+          return;
+        }
+        const cameraResponse = await fetch("/api/camera", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ source: cameraSelect.value }),
+        });
+        if (!cameraResponse.ok) {
+          let errorDetail = "Unable to update camera";
+          try {
+            const error = await cameraResponse.json();
+            errorDetail = error.detail || errorDetail;
+          } catch (err) {
+            console.error(err);
+          }
+          statusLabel.textContent = "Error: " + errorDetail;
+          try {
+            const data = await fetchSettings();
+            applySettings(data.orientation, data.camera, statusLabel.textContent);
+          } catch (err) {
+            console.error(err);
+          }
+          return;
+        }
+        try {
+          const data = await fetchSettings();
+          applySettings(data.orientation, data.camera, "Settings saved");
+        } catch (err) {
+          console.error(err);
+          statusLabel.textContent = "Settings saved";
+        }
       });
 
-      loadOrientation().catch((err) => {
+      loadSettings().catch((err) => {
         console.error(err);
         statusLabel.textContent = err.message;
       });
