@@ -341,6 +341,51 @@ def test_picamera_busy_error_includes_conflicting_process_details(
     assert "libcamera-hello" in message
 
 
+def test_detect_camera_conflicts_reports_legacy_camera_hint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Kernel worker processes should add guidance for disabling the legacy stack."""
+
+    monkeypatch.setattr(camera_module, "_is_service_active", lambda name: False)
+    monkeypatch.setattr(
+        camera_module,
+        "_list_camera_processes",
+        lambda: ["319 ([kworker/R-mmal-vchiq])"],
+    )
+
+    hints = camera_module._detect_camera_conflicts()
+
+    assert any("legacy camera interface" in hint for hint in hints)
+
+
+def test_picamera_busy_error_includes_legacy_camera_hint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Busy errors should include legacy camera remediation when detected."""
+
+    class BusyCamera:
+        def __init__(self) -> None:
+            raise RuntimeError("Camera __init__ sequence did not complete.") from RuntimeError(
+                "Failed to acquire camera: Device or resource busy"
+            )
+
+    module = types.SimpleNamespace(Picamera2=BusyCamera)
+    monkeypatch.setitem(sys.modules, "picamera2", module)
+    legacy_hint = (
+        "Kernel threads named kworker/R-mmal-vchiq indicate the legacy camera interface is still enabled."
+    )
+    monkeypatch.setattr(
+        camera_module,
+        "_detect_camera_conflicts",
+        lambda: [legacy_hint],
+    )
+
+    with pytest.raises(CameraError) as excinfo:
+        Picamera2Camera()
+
+    assert legacy_hint in str(excinfo.value)
+
+
 def test_identify_camera_returns_source() -> None:
     camera = SyntheticCamera()
     assert identify_camera(camera) == "synthetic"

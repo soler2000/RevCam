@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rev-cam"
-version = "0.1.2"
+version = "0.1.3"
 description = "Low-latency Raspberry Pi reversing camera WebRTC server"
 readme = "README.md"
 authors = [{name = "RevCam Team"}]

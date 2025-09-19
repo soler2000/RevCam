@@ -228,6 +228,11 @@ def _detect_camera_conflicts() -> list[str]:
         hints.append(
             f"Processes currently using the camera: {formatted}. Stop these processes to free the device."
         )
+        lower_processes = [process.lower() for process in processes]
+        if any("kworker" in text and "mmal" in text for text in lower_processes):
+            hints.append(
+                "Kernel threads named kworker/R-mmal-vchiq indicate the legacy camera interface is still enabled. Disable the legacy camera (e.g. via `sudo raspi-config` -> Interface Options -> Legacy Camera, or remove `start_x=1` from `/boot/config.txt`) and reboot to free the device."
+            )
     return hints
 
 
