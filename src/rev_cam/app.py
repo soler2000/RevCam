@@ -9,7 +9,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
-from .camera import BaseCamera, create_camera
+from .camera import BaseCamera, CameraError, create_camera
 from .config import ConfigManager
 from .pipeline import FramePipeline
 from .webrtc import WebRTCManager
@@ -36,6 +36,10 @@ class OrientationPayload(BaseModel):
     rotation: int = 0
     flip_horizontal: bool = False
     flip_vertical: bool = False
+
+
+class CameraSelectionPayload(BaseModel):
+    backend: str
 
 
 def create_app(config_path: Path | str = Path("data/config.json")) -> FastAPI:
@@ -93,6 +97,56 @@ def create_app(config_path: Path | str = Path("data/config.json")) -> FastAPI:
             "flip_vertical": orientation.flip_vertical,
         }
 
+    @app.post("/api/camera")
+    async def update_camera(payload: CameraSelectionPayload) -> dict[str, str]:
+        nonlocal camera, webrtc_manager
+
+        requested = payload.backend.strip().lower()
+        if not requested:
+            raise HTTPException(status_code=400, detail="Camera backend cannot be empty")
+
+        old_camera = camera
+        try:
+            new_camera = create_camera(requested)
+        except CameraError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        async def _shutdown_existing_manager() -> None:
+            nonlocal webrtc_manager
+            if webrtc_manager is None:
+                return
+            try:
+                await webrtc_manager.shutdown()
+            except Exception:  # pragma: no cover - defensive logging
+                logger.exception("Failed to shutdown existing WebRTC connections")
+            try:
+                webrtc_manager = WebRTCManager(camera=new_camera, pipeline=pipeline)
+            except RuntimeError as exc:  # pragma: no cover - mirrors startup guard
+                logger.warning("WebRTC disabled after switching camera: %s", exc)
+                webrtc_manager = None
+
+        await _shutdown_existing_manager()
+
+        if webrtc_manager is None:
+            try:
+                webrtc_manager = WebRTCManager(camera=new_camera, pipeline=pipeline)
+            except RuntimeError as exc:  # pragma: no cover - mirrors startup guard
+                logger.warning("WebRTC disabled: %s", exc)
+                webrtc_manager = None
+
+        camera = new_camera
+
+        if old_camera is not None and old_camera is not new_camera:
+            try:
+                await old_camera.close()
+            except Exception:  # pragma: no cover - defensive logging
+                logger.exception("Failed to close previous camera")
+
+        return {
+            "backend": requested,
+            "camera": type(new_camera).__name__,
+        }
+
     @app.post("/api/offer")
     async def webrtc_offer(payload: OfferPayload) -> dict[str, str]:
         if webrtc_manager is None:
@@ -109,3 +163,4 @@ def create_app(config_path: Path | str = Path("data/config.json")) -> FastAPI:
 
 
 __all__ = ["create_app"]
+

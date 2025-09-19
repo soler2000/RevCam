@@ -107,19 +107,40 @@ class SyntheticCamera(BaseCamera):
         return frame.astype(np.uint8)
 
 
-def create_camera() -> BaseCamera:
-    """Create the camera specified by the environment."""
+def create_camera(choice: str | None = None) -> BaseCamera:
+    """Create a camera instance.
 
-    choice = os.getenv("REVCAM_CAMERA", "picamera").lower()
-    if choice == "synthetic":
+    When *choice* is provided it selects the requested backend explicitly.
+    Otherwise the value is taken from the ``REVCAM_CAMERA`` environment
+    variable, defaulting to ``"picamera"``. Unknown explicit choices raise a
+    :class:`CameraError` so callers can surface a helpful error message.
+    """
+
+    requested = os.getenv("REVCAM_CAMERA", "picamera") if choice is None else choice
+    backend = requested.lower()
+
+    if backend == "synthetic":
         return SyntheticCamera()
-    if choice == "opencv":
+    if backend == "opencv":
         return OpenCVCamera()
-    try:
-        return Picamera2Camera()
-    except CameraError:
-        # Fall back to synthetic frames when running on development machines.
-        return SyntheticCamera()
+    if backend == "picamera":
+        try:
+            return Picamera2Camera()
+        except CameraError:
+            # Fall back to synthetic frames when running on development machines
+            # or when the hardware is unavailable.
+            return SyntheticCamera()
+
+    if choice is None:
+        # Unknown environment configuration – behave like the legacy logic by
+        # attempting to initialise the Picamera and falling back to synthetic
+        # frames if that fails.
+        try:
+            return Picamera2Camera()
+        except CameraError:
+            return SyntheticCamera()
+
+    raise CameraError(f"Unknown camera backend: {requested}")
 
 
 __all__ = [
