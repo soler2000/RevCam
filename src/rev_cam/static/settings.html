@@ -120,7 +120,12 @@
           const activeLabel = cameraLabels.get(camera.active) || camera.active;
           status += ` (active: ${activeLabel})`;
         }
-        const errorMessages = describeCameraErrors(camera);
+        const errorMessages = describeCameraErrors(camera).filter((detail) => {
+          if (typeof status !== "string") {
+            return true;
+          }
+          return !status.toLowerCase().includes(detail.toLowerCase());
+        });
         if (errorMessages.length) {
           status += ` • ${errorMessages.join(" • ")}`;
         }

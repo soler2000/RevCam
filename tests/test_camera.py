@@ -122,6 +122,26 @@ def test_picamera_initialisation_error_includes_cause(monkeypatch: pytest.Monkey
     assert "inner detail" in str(excinfo.value)
 
 
+def test_picamera_busy_error_includes_hint(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Busy camera errors should include guidance for stopping other services."""
+
+    class BusyCamera:
+        def __init__(self) -> None:
+            raise RuntimeError("Camera __init__ sequence did not complete.") from RuntimeError(
+                "Failed to acquire camera: Device or resource busy"
+            )
+
+    module = types.SimpleNamespace(Picamera2=BusyCamera)
+    monkeypatch.setitem(sys.modules, "picamera2", module)
+
+    with pytest.raises(CameraError) as excinfo:
+        Picamera2Camera()
+
+    message = str(excinfo.value)
+    assert "Device or resource busy" in message
+    assert "stop conflicting services" in message
+
+
 def test_identify_camera_returns_source() -> None:
     camera = SyntheticCamera()
     assert identify_camera(camera) == "synthetic"

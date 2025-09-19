@@ -101,8 +101,16 @@ class Picamera2Camera(BaseCamera):
                     pass
             detail = _summarise_exception(exc)
             message = "Failed to initialise Picamera2 camera"
+            hints: list[str] = []
             if detail:
+                lower_detail = detail.lower()
+                if "device or resource busy" in lower_detail:
+                    hints.append(
+                        "Another process is using the camera. Close libcamera-* applications or stop conflicting services (e.g. `sudo systemctl stop libcamera-apps`)."
+                    )
                 message = f"{message}: {detail}"
+            if hints:
+                message = f"{message}. {' '.join(hints)}"
             raise CameraError(message) from exc
 
     async def get_frame(self) -> np.ndarray:  # pragma: no cover - hardware dependent
