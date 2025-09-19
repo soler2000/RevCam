@@ -140,18 +140,21 @@ class Picamera2Camera(BaseCamera):
             logger.exception("Failed to import Picamera2: %s", detail or exc)
             raise CameraError(message) from exc
 
+        _ensure_picamera_allocator(Picamera2)
+
         self._camera = None
+        camera_instance = None
         started = False
         try:
-            camera = Picamera2()
-            self._camera = camera
-            _ensure_picamera_allocator(camera)
-            config = camera.create_video_configuration(main={"format": "RGB888"})
-            camera.configure(config)
-            camera.start()
+            camera_instance = Picamera2()
+            self._camera = camera_instance
+            _ensure_picamera_allocator(camera_instance)
+            config = camera_instance.create_video_configuration(main={"format": "RGB888"})
+            camera_instance.configure(config)
+            camera_instance.start()
             started = True
         except Exception as exc:  # pragma: no cover - hardware dependent
-            camera = self._camera
+            camera = camera_instance or self._camera
             if camera is not None:
                 try:
                     _ensure_picamera_allocator(camera)
@@ -168,6 +171,11 @@ class Picamera2Camera(BaseCamera):
                     pass
                 try:
                     camera.close()
+                except Exception:
+                    pass
+            else:
+                try:
+                    _ensure_picamera_allocator(Picamera2)
                 except Exception:
                     pass
             detail = _summarise_exception(exc)

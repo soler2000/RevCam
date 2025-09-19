@@ -92,6 +92,26 @@ def test_picamera_failure_without_allocator_is_handled(monkeypatch: pytest.Monke
     assert cleanup.get("allocator_present") is True
 
 
+def test_picamera_allocator_class_injection(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Allocator shim should attach to the Picamera2 class when init fails early."""
+
+    class DummyCamera:
+        def __init__(self) -> None:
+            raise RuntimeError("initialisation failed")
+
+    module = types.SimpleNamespace(Picamera2=DummyCamera)
+    monkeypatch.setitem(sys.modules, "picamera2", module)
+
+    with pytest.raises(CameraError):
+        Picamera2Camera()
+
+    try:
+        assert hasattr(DummyCamera, "allocator")
+    finally:
+        if hasattr(DummyCamera, "allocator"):
+            delattr(DummyCamera, "allocator")
+
+
 def test_picamera_allocator_injection_handles_custom_setattr(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
