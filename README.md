@@ -45,6 +45,13 @@ building everything from PyPI. Follow these steps on the Pi:
    sudo apt install python3-picamera2 python3-prctl
    ```
 
+   Prefer a single command? Run the bundled helper, which also installs
+   build prerequisites for `aiortc` and other native wheels:
+
+   ```bash
+   ./scripts/install_prereqs.sh
+   ```
+
 2. Create a virtual environment that can see the system packages you just
    installed (this prevents `pip` from trying to rebuild Picamera2 and PiDNG):
 

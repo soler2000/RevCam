@@ -25,7 +25,8 @@ sudo apt install -y \
 ```
 These packages provide the official Picamera2 stack and the headers/libraries
 required to compile `aiortc`, `pylibsrtp`, and `av` when PiWheels does not offer
-compatible wheels.
+compatible wheels. The same set is available through `./scripts/install_prereqs.sh`
+if you prefer a reusable helper.
 
 2. Clone (or update) the RevCam repository
 -----------------------------------------
