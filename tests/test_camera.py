@@ -53,6 +53,45 @@ def test_picamera_initialisation_failure_is_wrapped(monkeypatch: pytest.MonkeyPa
     assert getattr(dummy, "stop_called") is False
 
 
+def test_picamera_failure_without_allocator_is_handled(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Missing allocator attributes should be patched before closing."""
+
+    cleanup: dict[str, object] = {}
+
+    class DummyCamera:
+        def __init__(self) -> None:
+            cleanup["instance"] = self
+            self.stop_called = False
+            self.close_called = False
+
+        def create_video_configuration(self, **_: object) -> object:
+            return object()
+
+        def configure(self, _: object) -> None:
+            return None
+
+        def start(self) -> None:
+            raise RuntimeError("startup failed")
+
+        def stop(self) -> None:
+            self.stop_called = True
+
+        def close(self) -> None:
+            cleanup["close_called"] = True
+            cleanup["allocator_present"] = hasattr(self, "allocator")
+
+    module = types.SimpleNamespace(Picamera2=DummyCamera)
+    monkeypatch.setitem(sys.modules, "picamera2", module)
+
+    with pytest.raises(CameraError):
+        Picamera2Camera()
+
+    dummy = cleanup["instance"]
+    assert getattr(dummy, "stop_called") is False
+    assert cleanup.get("close_called") is True
+    assert cleanup.get("allocator_present") is True
+
+
 def test_create_camera_falls_back_when_picamera_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     """create_camera should fall back to the synthetic camera when Picamera2 fails."""
 

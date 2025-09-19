@@ -62,6 +62,13 @@ def _summarise_exception(exc: BaseException) -> str:
     return " | ".join(details)
 
 
+class _NullAllocator:
+    """Fallback allocator used when Picamera2 initialisation fails early."""
+
+    def sync(self, *args: object, **kwargs: object) -> None:  # pragma: no cover - defensive shim
+        return None
+
+
 class Picamera2Camera(BaseCamera):
     """Camera implementation using the Picamera2 stack."""
 
@@ -96,6 +103,8 @@ class Picamera2Camera(BaseCamera):
                 except Exception:
                     pass
                 try:
+                    if not hasattr(camera, "allocator"):
+                        setattr(camera, "allocator", _NullAllocator())
                     camera.close()
                 except Exception:
                     pass

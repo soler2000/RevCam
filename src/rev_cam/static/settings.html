@@ -79,12 +79,21 @@
           return [];
         }
         const descriptions = [];
+        const seen = new Set();
         for (const [source, detail] of Object.entries(camera.errors)) {
           if (!detail) {
             continue;
           }
           const label = cameraLabels.get(source) || source;
-          descriptions.push(`${label}: ${detail}`);
+          const combined = `${label}: ${detail}`;
+          const dedupeKey = detail.trim().toLowerCase();
+          if (dedupeKey && seen.has(dedupeKey)) {
+            continue;
+          }
+          if (dedupeKey) {
+            seen.add(dedupeKey);
+          }
+          descriptions.push(combined);
         }
         return descriptions;
       }
@@ -120,11 +129,26 @@
           const activeLabel = cameraLabels.get(camera.active) || camera.active;
           status += ` (active: ${activeLabel})`;
         }
+        const statusLower = typeof status === "string" ? status.toLowerCase() : "";
         const errorMessages = describeCameraErrors(camera).filter((detail) => {
-          if (typeof status !== "string") {
+          if (!statusLower) {
             return true;
           }
-          return !status.toLowerCase().includes(detail.toLowerCase());
+          const detailLower = detail.toLowerCase();
+          if (statusLower.includes(detailLower)) {
+            return false;
+          }
+          const colonIndex = detail.indexOf(":");
+          if (colonIndex !== -1) {
+            const tail = detail
+              .slice(colonIndex + 1)
+              .trim()
+              .toLowerCase();
+            if (tail && statusLower.includes(tail)) {
+              return false;
+            }
+          }
+          return true;
         });
         if (errorMessages.length) {
           status += ` • ${errorMessages.join(" • ")}`;
