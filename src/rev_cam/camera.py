@@ -2,12 +2,15 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import time
 from abc import ABC, abstractmethod
 from typing import Iterable
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 # User visible identifiers for camera backends. The order controls how they are
 # presented in the settings UI.
@@ -85,19 +88,39 @@ def _ensure_picamera_allocator(camera: object) -> None:
     if allocator_ready():
         return
 
+    def set_instance_attr() -> None:
+        setattr(camera, "allocator", _NULL_ALLOCATOR)
+
+    def set_object_attr() -> None:
+        object.__setattr__(camera, "allocator", _NULL_ALLOCATOR)
+
+    def set_class_attr() -> None:
+        setattr(camera.__class__, "allocator", _NULL_ALLOCATOR)
+
     setters = (
-        lambda: setattr(camera, "allocator", _NULL_ALLOCATOR),
-        lambda: object.__setattr__(camera, "allocator", _NULL_ALLOCATOR),
-        lambda: setattr(camera.__class__, "allocator", _NULL_ALLOCATOR),
+        ("instance setattr", set_instance_attr),
+        ("object setattr", set_object_attr),
+        ("class setattr", set_class_attr),
     )
 
-    for setter in setters:
+    for description, setter in setters:
         try:
             setter()
-        except Exception:
+        except Exception:  # pragma: no cover - defensive logging only
+            logger.debug(
+                "Failed to install Picamera2 allocator via %s", description, exc_info=True
+            )
             continue
         if allocator_ready():
+            logger.debug(
+                "Installed Picamera2 allocator shim via %s on object %r",
+                description,
+                camera,
+            )
             return
+
+    if not allocator_ready():  # pragma: no cover - defensive logging only
+        logger.warning("Unable to install Picamera2 allocator shim on object %r", camera)
 
 
 class Picamera2Camera(BaseCamera):
@@ -114,6 +137,7 @@ class Picamera2Camera(BaseCamera):
             )
             if detail:
                 message = f"{message} ({detail})"
+            logger.exception("Failed to import Picamera2: %s", detail or exc)
             raise CameraError(message) from exc
 
         self._camera = None
@@ -121,6 +145,7 @@ class Picamera2Camera(BaseCamera):
         try:
             camera = Picamera2()
             self._camera = camera
+            _ensure_picamera_allocator(camera)
             config = camera.create_video_configuration(main={"format": "RGB888"})
             camera.configure(config)
             camera.start()
@@ -157,6 +182,11 @@ class Picamera2Camera(BaseCamera):
                 message = f"{message}: {detail}"
             if hints:
                 message = f"{message}. {' '.join(hints)}"
+            logger.exception(
+                "Picamera2 initialisation failed with detail '%s' and hints %s",
+                detail or exc,
+                hints or None,
+            )
             raise CameraError(message) from exc
 
     async def get_frame(self) -> np.ndarray:  # pragma: no cover - hardware dependent
@@ -237,7 +267,8 @@ def create_camera(choice: str | None = None) -> BaseCamera:
     if resolved_choice == "auto":
         try:
             return Picamera2Camera()
-        except CameraError:
+        except CameraError as exc:
+            logger.error("Picamera2 unavailable during auto selection: %s", exc)
             return SyntheticCamera()
     raise CameraError(f"Unknown camera choice: {choice}")
 
