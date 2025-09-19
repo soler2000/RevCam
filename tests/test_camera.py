@@ -7,6 +7,8 @@ import types
 
 import pytest
 
+import rev_cam.camera as camera_module
+
 from rev_cam.camera import (
     CameraError,
     Picamera2Camera,
@@ -309,6 +311,34 @@ def test_picamera_busy_error_includes_hint(monkeypatch: pytest.MonkeyPatch) -> N
     message = str(excinfo.value)
     assert "Device or resource busy" in message
     assert "stop conflicting services" in message
+
+
+def test_picamera_busy_error_includes_conflicting_process_details(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Busy camera errors should surface detected conflicting processes."""
+
+    class BusyCamera:
+        def __init__(self) -> None:
+            raise RuntimeError("Camera __init__ sequence did not complete.") from RuntimeError(
+                "Failed to acquire camera: Device or resource busy"
+            )
+
+    module = types.SimpleNamespace(Picamera2=BusyCamera)
+    monkeypatch.setitem(sys.modules, "picamera2", module)
+    monkeypatch.setattr(
+        camera_module,
+        "_detect_camera_conflicts",
+        lambda: [
+            "Processes currently using the camera: 123 (libcamera-hello --timeout). Stop these processes to free the device."
+        ],
+    )
+
+    with pytest.raises(CameraError) as excinfo:
+        Picamera2Camera()
+
+    message = str(excinfo.value)
+    assert "libcamera-hello" in message
 
 
 def test_identify_camera_returns_source() -> None:

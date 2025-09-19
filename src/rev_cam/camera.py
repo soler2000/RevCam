@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import subprocess
 import time
 from abc import ABC, abstractmethod
 from typing import Iterable
@@ -151,6 +152,85 @@ def _ensure_picamera_allocator(camera: object) -> None:
         logger.warning("Unable to install Picamera2 allocator shim on object %r", camera)
 
 
+def _is_service_active(name: str) -> bool | None:
+    """Return whether *name* is an active systemd service."""
+
+    try:
+        result = subprocess.run(
+            ["systemctl", "is-active", name],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError:  # pragma: no cover - system without systemd
+        logger.debug("systemctl not available when checking %s", name)
+        return None
+    except Exception:  # pragma: no cover - defensive logging only
+        logger.debug("Failed to query systemctl status for %s", name, exc_info=True)
+        return None
+
+    if result.returncode == 0:
+        return True
+
+    output = (result.stdout or result.stderr or "").strip().lower()
+    if result.returncode == 3 or output == "inactive":
+        return False
+
+    return None
+
+
+def _list_camera_processes() -> list[str]:
+    """Return a list of processes that look like they may own the camera."""
+
+    keywords = ("libcamera", "picamera", "rpicam", "v4l2", "mmal")
+    try:
+        result = subprocess.run(
+            ["ps", "-eo", "pid,cmd"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except Exception:  # pragma: no cover - defensive logging only
+        logger.debug("Failed to enumerate processes for camera diagnostics", exc_info=True)
+        return []
+
+    matches: list[str] = []
+    for line in result.stdout.splitlines()[1:]:
+        parts = line.strip().split(None, 1)
+        if len(parts) != 2:
+            continue
+        pid_text, command = parts
+        try:
+            pid = int(pid_text)
+        except ValueError:
+            continue
+        if pid == os.getpid():
+            continue
+        lower_command = command.lower()
+        if any(keyword in lower_command for keyword in keywords):
+            matches.append(f"{pid} ({command.strip()})")
+
+    return matches
+
+
+def _detect_camera_conflicts() -> list[str]:
+    """Return human-readable hints about known camera conflicts."""
+
+    hints: list[str] = []
+    service_active = _is_service_active("libcamera-apps")
+    if service_active:
+        hints.append(
+            "System service 'libcamera-apps' is running. Stop it with `sudo systemctl stop libcamera-apps` to free the camera."
+        )
+    processes = _list_camera_processes()
+    if processes:
+        formatted = ", ".join(processes)
+        hints.append(
+            f"Processes currently using the camera: {formatted}. Stop these processes to free the device."
+        )
+    return hints
+
+
 class Picamera2Camera(BaseCamera):
     """Camera implementation using the Picamera2 stack."""
 
@@ -215,6 +295,7 @@ class Picamera2Camera(BaseCamera):
                     hints.append(
                         "Another process is using the camera. Close libcamera-* applications or stop conflicting services (e.g. `sudo systemctl stop libcamera-apps`)."
                     )
+                    hints.extend(_detect_camera_conflicts())
                 message = f"{message}: {detail}"
             if hints:
                 message = f"{message}. {' '.join(hints)}"
