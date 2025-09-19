@@ -45,6 +45,9 @@
   <body>
     <a href="/">← Back to live view</a>
     <h1>Camera Settings</h1>
+    <p id="app-version" style="margin-top: -0.5rem; opacity: 0.75;">
+      Version <span id="version-value">Loading…</span>
+    </p>
     <form id="orientation-form">
       <label>
         Camera source
@@ -72,6 +75,7 @@
     <script>
       const form = document.getElementById("orientation-form");
       const statusLabel = document.getElementById("status");
+      const versionValue = document.getElementById("version-value");
       const cameraLabels = new Map();
 
       function describeCameraErrors(camera) {
@@ -98,10 +102,20 @@
         return descriptions;
       }
 
+      function updateVersion(camera) {
+        if (!versionValue) {
+          return;
+        }
+        const version = camera && camera.version ? String(camera.version).trim() : "";
+        versionValue.textContent = version || "Unknown";
+      }
+
       function applySettings(orientation, camera, message = "Settings loaded") {
         form.rotation.value = orientation.rotation;
         form.flip_horizontal.checked = orientation.flip_horizontal;
         form.flip_vertical.checked = orientation.flip_vertical;
+
+        updateVersion(camera);
 
         const cameraSelect = form.elements.namedItem("camera");
         if (!(cameraSelect instanceof HTMLSelectElement)) {

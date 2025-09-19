@@ -13,6 +13,7 @@ from .camera import CAMERA_SOURCES, BaseCamera, CameraError, create_camera, iden
 from .config import ConfigManager
 from .pipeline import FramePipeline
 from .webrtc import WebRTCManager
+from .version import APP_VERSION
 
 if TYPE_CHECKING:  # pragma: no cover - imported for type checking only
     from aiortc import RTCSessionDescription
@@ -43,7 +44,7 @@ class CameraPayload(BaseModel):
 
 
 def create_app(config_path: Path | str = Path("data/config.json")) -> FastAPI:
-    app = FastAPI(title="RevCam", version="0.1.0")
+    app = FastAPI(title="RevCam", version=APP_VERSION)
 
     config_manager = ConfigManager(Path(config_path))
     pipeline = FramePipeline(lambda: config_manager.get_orientation())
@@ -146,6 +147,7 @@ def create_app(config_path: Path | str = Path("data/config.json")) -> FastAPI:
             "active": active_camera_choice,
             "options": options,
             "errors": errors,
+            "version": APP_VERSION,
         }
 
     @app.post("/api/camera")
@@ -173,7 +175,7 @@ def create_app(config_path: Path | str = Path("data/config.json")) -> FastAPI:
             webrtc_manager.camera = camera
         if old_camera is not None:
             await old_camera.close()
-        return {"selected": selection, "active": active_camera_choice}
+        return {"selected": selection, "active": active_camera_choice, "version": APP_VERSION}
 
     @app.post("/api/offer")
     async def webrtc_offer(payload: OfferPayload) -> dict[str, str]:

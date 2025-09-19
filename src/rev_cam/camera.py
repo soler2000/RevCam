@@ -71,6 +71,19 @@ class _NullAllocator:
     def sync(self, *args: object, **kwargs: object) -> None:  # pragma: no cover - defensive shim
         return None
 
+    def acquire(self, *args: object, **kwargs: object) -> None:  # pragma: no cover - defensive shim
+        return None
+
+    def release(self, *args: object, **kwargs: object) -> None:  # pragma: no cover - defensive shim
+        return None
+
+    def __getattr__(self, name: str):  # pragma: no cover - defensive shim
+        def _noop(*args: object, **kwargs: object) -> None:
+            logger.debug("_NullAllocator ignoring %s call", name)
+            return None
+
+        return _noop
+
 
 _NULL_ALLOCATOR = _NullAllocator()
 

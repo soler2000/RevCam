@@ -13,6 +13,7 @@ from rev_cam.camera import (
     SyntheticCamera,
     create_camera,
     identify_camera,
+    _ensure_picamera_allocator,
 )
 
 
@@ -195,6 +196,23 @@ def test_picamera_allocator_injection_handles_slots(monkeypatch: pytest.MonkeyPa
 
     assert cleanup.get("close_called") is True
     assert cleanup.get("allocator_present") is True
+
+
+def test_null_allocator_provides_expected_methods() -> None:
+    class Dummy:
+        pass
+
+    camera = Dummy()
+    _ensure_picamera_allocator(camera)
+    allocator = getattr(camera, "allocator", None)
+    assert allocator is not None
+    assert hasattr(allocator, "sync")
+    assert hasattr(allocator, "acquire")
+    assert hasattr(allocator, "release")
+    assert allocator.acquire(object()) is None
+    assert allocator.release(object()) is None
+    # Unknown attributes should be safely ignored
+    assert allocator.some_new_method() is None
 
 
 def test_create_camera_falls_back_when_picamera_fails(monkeypatch: pytest.MonkeyPatch) -> None:

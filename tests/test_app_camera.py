@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 
 from rev_cam.app import create_app
 from rev_cam.camera import CameraError
+from rev_cam.version import APP_VERSION
 
 
 class _BrokenPicamera:
@@ -37,6 +38,7 @@ def test_camera_endpoint_reports_picamera_error(client: TestClient) -> None:
     assert payload["active"] == "synthetic"
     assert "picamera" in payload["errors"]
     assert "picamera backend unavailable" in payload["errors"]["picamera"]
+    assert payload["version"] == APP_VERSION
 
 
 def test_camera_update_surfaces_failure(client: TestClient) -> None:
@@ -47,3 +49,4 @@ def test_camera_update_surfaces_failure(client: TestClient) -> None:
 
     refreshed = client.get("/api/camera").json()
     assert "picamera backend unavailable" in refreshed["errors"]["picamera"]
+    assert refreshed["version"] == APP_VERSION
