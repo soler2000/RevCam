@@ -267,6 +267,13 @@ mentions kernel threads named `kworker/R-mmal-vchiq`, the legacy camera
 interface is enabled. Disable it via `sudo raspi-config` (Interface Options →
 Legacy Camera) or remove `start_x=1` from `/boot/config.txt`, then reboot.
 
+Need a quick status report? Run the diagnostics helper to print detected
+services and processes:
+
+```bash
+python -m rev_cam.diagnostics
+```
+
 #### Uvicorn reports "address already in use"
 
 Another RevCam instance is already bound to the requested port. Stop the

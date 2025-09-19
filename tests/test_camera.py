@@ -15,6 +15,7 @@ from rev_cam.camera import (
     SyntheticCamera,
     create_camera,
     identify_camera,
+    diagnose_camera_conflicts,
     _ensure_picamera_allocator,
 )
 
@@ -330,7 +331,7 @@ def test_picamera_busy_error_includes_conflicting_process_details(
     monkeypatch.setitem(sys.modules, "picamera2", module)
     monkeypatch.setattr(
         camera_module,
-        "_detect_camera_conflicts",
+        "_collect_camera_conflicts",
         lambda: [
             "Processes currently using the camera: 123 (libcamera-hello --timeout). Stop these processes to free the device."
         ],
@@ -355,7 +356,7 @@ def test_detect_camera_conflicts_reports_legacy_camera_hint(
         lambda: ["319 ([kworker/R-mmal-vchiq])"],
     )
 
-    hints = camera_module._detect_camera_conflicts()
+    hints = camera_module._collect_camera_conflicts()
 
     assert any("legacy camera interface" in hint for hint in hints)
 
@@ -378,7 +379,7 @@ def test_picamera_busy_error_includes_legacy_camera_hint(
     )
     monkeypatch.setattr(
         camera_module,
-        "_detect_camera_conflicts",
+        "_collect_camera_conflicts",
         lambda: [legacy_hint],
     )
 
@@ -391,4 +392,21 @@ def test_picamera_busy_error_includes_legacy_camera_hint(
 def test_identify_camera_returns_source() -> None:
     camera = SyntheticCamera()
     assert identify_camera(camera) == "synthetic"
+
+
+def test_diagnose_camera_conflicts_reports_processes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The diagnostics helper should report detected services and processes."""
+
+    monkeypatch.setattr(camera_module, "_is_service_active", lambda name: True)
+    monkeypatch.setattr(
+        camera_module,
+        "_list_camera_processes",
+        lambda: ["123 (libcamera-vid)", "456 (kworker/R-mmal-vchiq)"],
+    )
+
+    hints = diagnose_camera_conflicts()
+
+    assert any("libcamera-apps" in hint for hint in hints)
+    assert any("Processes currently" in hint for hint in hints)
+    assert any("legacy camera" in hint.lower() for hint in hints)
 

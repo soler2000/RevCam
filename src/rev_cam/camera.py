@@ -213,7 +213,7 @@ def _list_camera_processes() -> list[str]:
     return matches
 
 
-def _detect_camera_conflicts() -> list[str]:
+def _collect_camera_conflicts() -> list[str]:
     """Return human-readable hints about known camera conflicts."""
 
     hints: list[str] = []
@@ -234,6 +234,12 @@ def _detect_camera_conflicts() -> list[str]:
                 "Kernel threads named kworker/R-mmal-vchiq indicate the legacy camera interface is still enabled. Disable the legacy camera (e.g. via `sudo raspi-config` -> Interface Options -> Legacy Camera, or remove `start_x=1` from `/boot/config.txt`) and reboot to free the device."
             )
     return hints
+
+
+def diagnose_camera_conflicts() -> list[str]:
+    """Public helper used by diagnostics tooling to surface camera conflicts."""
+
+    return _collect_camera_conflicts()
 
 
 class Picamera2Camera(BaseCamera):
@@ -302,7 +308,7 @@ class Picamera2Camera(BaseCamera):
                     hints.append(
                         "Another process is using the camera. Close libcamera-* applications or stop conflicting services (e.g. `sudo systemctl stop libcamera-apps`)."
                     )
-                    hints.extend(_detect_camera_conflicts())
+                    hints.extend(_collect_camera_conflicts())
                 message = f"{message}: {detail}"
             if hints:
                 message = f"{message}. {' '.join(hints)}"
@@ -415,6 +421,7 @@ __all__ = [
     "BaseCamera",
     "CameraError",
     "identify_camera",
+    "diagnose_camera_conflicts",
     "Picamera2Camera",
     "OpenCVCamera",
     "SyntheticCamera",
