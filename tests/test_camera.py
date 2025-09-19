@@ -209,6 +209,13 @@ def test_null_allocator_provides_expected_methods() -> None:
     assert hasattr(allocator, "sync")
     assert hasattr(allocator, "acquire")
     assert hasattr(allocator, "release")
+    sync_context = allocator.sync(object(), object(), False)
+    assert hasattr(sync_context, "__enter__")
+    assert hasattr(sync_context, "__exit__")
+    assert sync_context.__enter__() is sync_context
+    assert sync_context.__exit__(None, None, None) is False
+    with allocator.sync(object(), object(), False):
+        pass
     assert allocator.acquire(object()) is None
     assert allocator.release(object()) is None
     # Unknown attributes should be safely ignored

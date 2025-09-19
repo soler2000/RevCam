@@ -65,11 +65,26 @@ def _summarise_exception(exc: BaseException) -> str:
     return " | ".join(details)
 
 
+class _NullSync:
+    """Context manager used by :class:`_NullAllocator`."""
+
+    def __enter__(self) -> "_NullSync":  # pragma: no cover - defensive shim
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: object | None,
+    ) -> bool:  # pragma: no cover - defensive shim
+        return False
+
+
 class _NullAllocator:
     """Fallback allocator used when Picamera2 initialisation fails early."""
 
-    def sync(self, *args: object, **kwargs: object) -> None:  # pragma: no cover - defensive shim
-        return None
+    def sync(self, *args: object, **kwargs: object) -> _NullSync:  # pragma: no cover - defensive shim
+        return _NullSync()
 
     def acquire(self, *args: object, **kwargs: object) -> None:  # pragma: no cover - defensive shim
         return None
