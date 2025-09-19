@@ -1,6 +1,7 @@
 """Video frame processing pipeline."""
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, List
 
@@ -25,6 +26,13 @@ class FramePipeline:
     def add_overlay(self, overlay: OverlayFn) -> None:
         self.overlays.append(overlay)
 
+    def _clone_frame(self, frame: FrameLike) -> FrameLike:
+        """Return a copy that overlays can safely mutate."""
+
+        if _np is not None and isinstance(frame, _np.ndarray):  # pragma: no cover - optional path
+            return frame.copy()
+        return deepcopy(frame)
+
     def _apply_orientation(self, frame: FrameLike, orientation: Orientation) -> FrameLike:
         output = frame
         k = (orientation.rotation // 90) % 4
@@ -45,6 +53,8 @@ class FramePipeline:
     def process(self, frame: FrameLike) -> FrameLike:
         orientation = self.orientation_provider().normalise()
         transformed = self._apply_orientation(frame, orientation)
+        if self.overlays:
+            transformed = self._clone_frame(transformed)
         return self._apply_overlays(transformed)
 
     def _rotate(self, frame: FrameLike, k: int) -> FrameLike:
