@@ -13,6 +13,22 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+NUMPY_ABI_HINT = (
+    "Detected a NumPy ABI mismatch. Reinstall the Raspberry Pi OS packages so "
+    "NumPy and Picamera2 share compatible binaries (for example `sudo apt install "
+    "--reinstall python3-numpy python3-picamera2 simplejpeg`). If NumPy was "
+    "upgraded inside a virtual environment, recreate it with `python3 -m venv "
+    "--system-site-packages .venv`."
+)
+
+_NUMPY_ABI_TOKENS = (
+    "abi",
+    "dtype size changed",
+    "pyarray",
+    "multiarray",
+    "umath",
+)
+
 # User visible identifiers for camera backends. The order controls how they are
 # presented in the settings UI.
 CAMERA_SOURCES: dict[str, str] = {
@@ -46,7 +62,7 @@ class BaseCamera(ABC):
         return None
 
 
-def _summarise_exception(exc: BaseException) -> str:
+def summarise_exception(exc: BaseException) -> str:
     """Collect the unique error messages from an exception chain."""
 
     details: list[str] = []
@@ -64,6 +80,21 @@ def _summarise_exception(exc: BaseException) -> str:
             details.append(text)
             seen.add(text)
     return " | ".join(details)
+
+
+def detect_numpy_abi_mismatch(detail: str | None) -> bool:
+    """Return ``True`` when *detail* looks like a NumPy ABI mismatch."""
+
+    if not detail:
+        return False
+
+    lower_detail = detail.lower()
+    if "numpy" not in lower_detail and not any(
+        token in lower_detail for token in ("pyarray", "multiarray", "umath")
+    ):
+        return False
+
+    return any(token in lower_detail for token in _NUMPY_ABI_TOKENS)
 
 
 class _NullSync:
@@ -249,7 +280,7 @@ class Picamera2Camera(BaseCamera):
         try:
             from picamera2 import Picamera2
         except Exception as exc:  # pragma: no cover - hardware dependent
-            detail = _summarise_exception(exc)
+            detail = summarise_exception(exc)
             message = (
                 "picamera2 is not available. Install the 'python3-picamera2' package "
                 "and ensure the application can access system packages (for example "
@@ -258,14 +289,8 @@ class Picamera2Camera(BaseCamera):
             )
             hints: list[str] = []
             if detail:
-                lower_detail = detail.lower()
-                if "numpy" in lower_detail and ("abi" in lower_detail or "dtype size changed" in lower_detail):
-                    hints.append(
-                        "Detected a NumPy ABI mismatch. Reinstall the Raspberry Pi OS packages so NumPy and Picamera2 "
-                        "share compatible binaries (for example `sudo apt install --reinstall python3-numpy python3-"
-                        "picamera2 simplejpeg`). If NumPy was upgraded inside a virtual environment, recreate it with "
-                        "`python3 -m venv --system-site-packages .venv`."
-                    )
+                if detect_numpy_abi_mismatch(detail) and NUMPY_ABI_HINT not in hints:
+                    hints.append(NUMPY_ABI_HINT)
                 message = f"{message} ({detail})"
             if hints:
                 message = f"{message} {' '.join(hints)}"
@@ -310,10 +335,12 @@ class Picamera2Camera(BaseCamera):
                     _ensure_picamera_allocator(Picamera2)
                 except Exception:
                     pass
-            detail = _summarise_exception(exc)
+            detail = summarise_exception(exc)
             message = "Failed to initialise Picamera2 camera"
             hints: list[str] = []
             if detail:
+                if detect_numpy_abi_mismatch(detail) and NUMPY_ABI_HINT not in hints:
+                    hints.append(NUMPY_ABI_HINT)
                 lower_detail = detail.lower()
                 if "device or resource busy" in lower_detail:
                     hints.append(
