@@ -69,6 +69,37 @@ class _NullAllocator:
         return None
 
 
+_NULL_ALLOCATOR = _NullAllocator()
+
+
+def _ensure_picamera_allocator(camera: object) -> None:
+    """Ensure *camera* exposes an allocator with a ``sync`` method."""
+
+    if camera is None:  # pragma: no cover - defensive guard
+        return
+
+    def allocator_ready() -> bool:
+        candidate = getattr(camera, "allocator", None)
+        return hasattr(candidate, "sync")
+
+    if allocator_ready():
+        return
+
+    setters = (
+        lambda: setattr(camera, "allocator", _NULL_ALLOCATOR),
+        lambda: object.__setattr__(camera, "allocator", _NULL_ALLOCATOR),
+        lambda: setattr(camera.__class__, "allocator", _NULL_ALLOCATOR),
+    )
+
+    for setter in setters:
+        try:
+            setter()
+        except Exception:
+            continue
+        if allocator_ready():
+            return
+
+
 class Picamera2Camera(BaseCamera):
     """Camera implementation using the Picamera2 stack."""
 
@@ -98,13 +129,19 @@ class Picamera2Camera(BaseCamera):
             camera = self._camera
             if camera is not None:
                 try:
+                    _ensure_picamera_allocator(camera)
+                except Exception:
+                    pass
+                try:
                     if started:
                         camera.stop()
                 except Exception:
                     pass
                 try:
-                    if not hasattr(camera, "allocator"):
-                        setattr(camera, "allocator", _NullAllocator())
+                    _ensure_picamera_allocator(camera)
+                except Exception:
+                    pass
+                try:
                     camera.close()
                 except Exception:
                     pass

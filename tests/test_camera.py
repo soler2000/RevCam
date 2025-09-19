@@ -92,6 +92,91 @@ def test_picamera_failure_without_allocator_is_handled(monkeypatch: pytest.Monke
     assert cleanup.get("allocator_present") is True
 
 
+def test_picamera_allocator_injection_handles_custom_setattr(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Allocator patching should bypass restrictive ``__setattr__`` logic."""
+
+    cleanup: dict[str, object] = {}
+
+    class DummyCamera:
+        def __init__(self) -> None:
+            cleanup["instance"] = self
+            object.__setattr__(self, "close_called", False)
+
+        def __setattr__(self, name: str, value: object) -> None:
+            if name == "allocator":
+                raise AttributeError("allocator attribute disabled")
+            object.__setattr__(self, name, value)
+
+        def create_video_configuration(self, **_: object) -> object:
+            return object()
+
+        def configure(self, _: object) -> None:
+            return None
+
+        def start(self) -> None:
+            raise RuntimeError("startup failed")
+
+        def stop(self) -> None:
+            return None
+
+        def close(self) -> None:
+            cleanup["close_called"] = True
+            cleanup["allocator_present"] = hasattr(self, "allocator")
+
+    module = types.SimpleNamespace(Picamera2=DummyCamera)
+    monkeypatch.setitem(sys.modules, "picamera2", module)
+
+    with pytest.raises(CameraError):
+        Picamera2Camera()
+
+    assert cleanup.get("close_called") is True
+    assert cleanup.get("allocator_present") is True
+
+
+def test_picamera_allocator_injection_handles_slots(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Allocator patching should fall back to class attributes when needed."""
+
+    cleanup: dict[str, object] = {}
+
+    class DummyCamera:
+        __slots__ = ("close_called",)
+
+        def __init__(self) -> None:
+            cleanup["instance"] = self
+            self.close_called = False
+
+        def create_video_configuration(self, **_: object) -> object:
+            return object()
+
+        def configure(self, _: object) -> None:
+            return None
+
+        def start(self) -> None:
+            raise RuntimeError("startup failed")
+
+        def stop(self) -> None:
+            return None
+
+        def close(self) -> None:
+            cleanup["close_called"] = True
+            cleanup["allocator_present"] = hasattr(self, "allocator")
+
+    module = types.SimpleNamespace(Picamera2=DummyCamera)
+    monkeypatch.setitem(sys.modules, "picamera2", module)
+
+    try:
+        with pytest.raises(CameraError):
+            Picamera2Camera()
+    finally:
+        if hasattr(DummyCamera, "allocator"):
+            delattr(DummyCamera, "allocator")
+
+    assert cleanup.get("close_called") is True
+    assert cleanup.get("allocator_present") is True
+
+
 def test_create_camera_falls_back_when_picamera_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     """create_camera should fall back to the synthetic camera when Picamera2 fails."""
 
