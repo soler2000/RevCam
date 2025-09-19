@@ -13,6 +13,8 @@ Options:
   --pi                    Optimise installation for Raspberry Pi OS. Creates the
                           virtual environment with --system-site-packages and
                           installs dependencies through PiWheels when possible.
+  --no-pi                 Disable Raspberry Pi auto-detection and keep the
+                          virtual environment isolated.
   --dev                   Install the development dependencies defined in
                           pyproject.toml.
   --recreate              Delete any existing virtual environment before
@@ -26,6 +28,8 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PYTHON="${PYTHON:-python3}"
 VENV_DIR="$PROJECT_ROOT/.venv"
 USE_PI=false
+FORCE_NO_PI=false
+AUTO_ENABLED_PI=false
 WITH_DEV=false
 RECREATE=false
 
@@ -49,6 +53,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --pi)
             USE_PI=true
+            shift
+            ;;
+        --no-pi)
+            FORCE_NO_PI=true
             shift
             ;;
         --dev)
@@ -81,6 +89,26 @@ if ! "$PYTHON" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)
     exit 1
 fi
 
+if [[ "$USE_PI" == false && "$FORCE_NO_PI" == false ]]; then
+    set +e
+    "$PYTHON" - <<'PY'
+import importlib.util
+import sys
+
+spec = importlib.util.find_spec("picamera2")
+sys.exit(99 if spec is not None else 0)
+PY
+    status=$?
+    set -e
+    if [[ $status -eq 99 ]]; then
+        echo "Detected system-wide Picamera2 installation; enabling Raspberry Pi integration (use --no-pi to disable)."
+        USE_PI=true
+        AUTO_ENABLED_PI=true
+    elif [[ $status -ne 0 ]]; then
+        echo "Warning: unable to determine Picamera2 availability (detector exit $status)" >&2
+    fi
+fi
+
 if [[ "$USE_PI" == true ]]; then
     VENV_FLAGS+=(--system-site-packages)
     PIP_FLAGS+=(--prefer-binary --extra-index-url "https://www.piwheels.org/simple")
@@ -102,7 +130,11 @@ fi
 source "$VENV_DIR/bin/activate"
 
 if [[ "$USE_PI" == true ]]; then
-    echo "Enabling Raspberry Pi friendly installation options"
+    if [[ "$AUTO_ENABLED_PI" == true && "$FORCE_NO_PI" == false ]]; then
+        echo "Using Raspberry Pi friendly installation options (auto-detected system Picamera2 packages)."
+    else
+        echo "Enabling Raspberry Pi friendly installation options"
+    fi
 fi
 
 "$VENV_DIR/bin/python" -m pip install --upgrade pip

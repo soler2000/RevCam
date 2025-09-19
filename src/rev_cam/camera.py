@@ -246,7 +246,9 @@ class Picamera2Camera(BaseCamera):
             detail = _summarise_exception(exc)
             message = (
                 "picamera2 is not available. Install the 'python3-picamera2' package "
-                "and ensure the application can access system packages"
+                "and ensure the application can access system packages (for example "
+                "recreate the virtual environment with `python3 -m venv --system-"
+                "site-packages .venv` or run `./scripts/install.sh --pi`)."
             )
             if detail:
                 message = f"{message} ({detail})"

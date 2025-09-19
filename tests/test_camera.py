@@ -274,6 +274,8 @@ def test_import_failure_surface_details(monkeypatch: pytest.MonkeyPatch) -> None
     message = str(excinfo.value)
     assert "numpy ABI mismatch" in message
     assert "python3-picamera2" in message
+    assert "--system-site-packages" in message
+    assert "scripts/install.sh --pi" in message
 
 
 def test_picamera_initialisation_error_includes_cause(monkeypatch: pytest.MonkeyPatch) -> None:

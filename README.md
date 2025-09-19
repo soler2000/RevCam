@@ -90,11 +90,13 @@ source .venv/bin/activate
 pip install -e .[dev]
 ```
 
-### Copy-paste bootstrap script
+### Copy-paste bootstrap script (development machines)
 
 Need a single snippet you can drop into a terminal? The commands below clone (or
 update) the repository and prepare a development virtual environment. Replace
-the `REVCAM_REPO` value if you use a different remote.
+the `REVCAM_REPO` value if you use a different remote. On Raspberry Pi hardware
+use the dedicated script in the next section so the virtual environment can see
+the system Picamera2 packages.
 
 ```bash
 REVCAM_REPO="https://github.com/soler2000/RevCam.git"
@@ -114,6 +116,41 @@ pip install --upgrade pip
 pip install -e .[dev]
 ```
 
+### Raspberry Pi copy-paste bootstrap script
+
+Need a single snippet tuned for Raspberry Pi OS? The commands below install the
+apt-packaged Picamera2 stack, clone (or update) the repository, create a virtual
+environment that can see the system packages, install RevCam using PiWheels, and
+launch the server on port 9000.
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+REVCAM_REPO="https://github.com/soler2000/RevCam.git"
+REVCAM_REF="main"  # replace with a branch or pull/<ID>/head for PR testing
+
+sudo apt update
+sudo apt install -y python3-picamera2 python3-prctl
+
+if [ ! -d RevCam ]; then
+  git clone "$REVCAM_REPO" RevCam
+fi
+
+cd RevCam
+git fetch "$REVCAM_REPO" "$REVCAM_REF"
+git checkout FETCH_HEAD
+
+# Install runtime deps; use --dev on non-Pi development machines
+./scripts/install.sh --pi
+
+uvicorn rev_cam.app:create_app --factory --host 0.0.0.0 --port 9000
+```
+
+The script automatically reuses the existing virtual environment on subsequent
+runs. Pass `--recreate` to `scripts/install.sh` if you want to start with a
+fresh environment.
+
 ### Copy-paste branch runner
 
 Need to try out a feature branch from GitHub? The snippet below checks out the
@@ -127,11 +164,6 @@ REVCAM_BRANCH="main"
 ```
 
 ```bash
-git pull REVCAM_REPO REVCAM_BRANCH
-uvicorn rev_cam.app:create_app --factory --host 0.0.0.0 --port 9000
-```
-
-```bash
 set -euo pipefail
 
 if [ ! -d RevCam ]; then
@@ -142,12 +174,7 @@ cd RevCam
 git fetch origin "$REVCAM_BRANCH"
 git checkout "$REVCAM_BRANCH"
 
-if [ ! -d .venv ]; then
-  python3 -m venv .venv
-fi
-source .venv/bin/activate
-pip install --upgrade pip
-pip install -e .[dev]
+./scripts/install.sh --pi
 
 uvicorn rev_cam.app:create_app --factory --host 0.0.0.0 --port 9000
 ```
@@ -212,6 +239,39 @@ pytest
 
 Unit tests cover the frame pipeline and configuration management so that critical
 behaviour remains reliable.
+
+### Troubleshooting
+
+#### Picamera2 module cannot be imported
+
+If you see `ModuleNotFoundError: picamera2`, the virtual environment cannot see
+the Raspberry Pi OS Picamera2 packages. Ensure the packages are installed
+(`sudo apt install python3-picamera2 python3-prctl`) and recreate the virtual
+environment with system packages enabled:
+
+```bash
+rm -rf .venv
+python3 -m venv --system-site-packages .venv
+source .venv/bin/activate
+./scripts/install.sh --pi
+```
+
+Alternatively rerun `./scripts/install.sh --pi --recreate` to automate the
+steps.
+
+#### Camera reports "Device or resource busy"
+
+Another process is still using the camera. Stop conflicting services such as
+`libcamera-apps` and close any applications accessing the device. If the error
+mentions kernel threads named `kworker/R-mmal-vchiq`, the legacy camera
+interface is enabled. Disable it via `sudo raspi-config` (Interface Options →
+Legacy Camera) or remove `start_x=1` from `/boot/config.txt`, then reboot.
+
+#### Uvicorn reports "address already in use"
+
+Another RevCam instance is already bound to the requested port. Stop the
+existing process (`Ctrl+C` in the other terminal or `pkill -f uvicorn`) or use a
+different port with `--port`.
 
 ## Future work
 
