@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass
 from fractions import Fraction
 from typing import TYPE_CHECKING, Set
@@ -34,6 +35,9 @@ else:  # pragma: no cover - executed when dependency is installed
     _AIORTC_IMPORT_ERROR = None
 
 
+logger = logging.getLogger(__name__)
+
+
 def _ensure_aiortc_available() -> None:
     """Raise a helpful error when the optional aiortc dependency is missing."""
 
@@ -52,16 +56,95 @@ class PipelineVideoTrack(_VideoStreamTrack):
         self._camera = camera
         self._pipeline = pipeline
         self._frame_time = Fraction(1, fps)
+        self._frame_queue: asyncio.Queue = asyncio.Queue(maxsize=1)
+        self._frame_task: asyncio.Task[None] | None = None
+        self._frame_error: BaseException | None = None
+        self._stopped = False
 
     async def recv(self) -> VideoFrame:
         _ensure_aiortc_available()
+        await self._ensure_producer()
         pts, time_base = await self.next_timestamp()
-        frame = await self._camera.get_frame()
+        producer = self._frame_task
+        if producer is None:
+            raise RuntimeError("Frame producer is not running")
+        if producer.done():
+            producer.result()
+        frame = await self._frame_queue.get()
+        while True:
+            try:
+                frame = self._frame_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
         processed = self._pipeline.process(frame)
         video_frame = VideoFrame.from_ndarray(processed, format="rgb24")
         video_frame.pts = pts
         video_frame.time_base = time_base
         return video_frame
+
+    async def _ensure_producer(self) -> None:
+        if self._stopped:
+            raise RuntimeError("PipelineVideoTrack has been stopped")
+        if self._frame_error is not None:
+            exc = self._frame_error
+            self._frame_error = None
+            raise exc
+        if self._frame_task is not None:
+            return
+        loop = asyncio.get_running_loop()
+        self._frame_task = loop.create_task(self._frame_producer())
+        self._frame_task.add_done_callback(self._on_producer_done)
+
+    async def _frame_producer(self) -> None:
+        try:
+            while not self._stopped:
+                frame = await self._camera.get_frame()
+                await self._push_latest_frame(frame)
+        except asyncio.CancelledError:
+            raise
+
+    async def _push_latest_frame(self, frame) -> None:
+        while True:
+            try:
+                self._frame_queue.put_nowait(frame)
+                return
+            except asyncio.QueueFull:
+                try:
+                    self._frame_queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    await asyncio.sleep(0)
+
+    def _on_producer_done(self, task: asyncio.Task[None]) -> None:
+        try:
+            task.result()
+        except asyncio.CancelledError:
+            pass
+        except Exception as exc:  # pragma: no cover - logging only
+            self._frame_error = exc
+            logger.exception("Frame producer terminated unexpectedly", exc_info=True)
+        finally:
+            self._frame_task = None
+
+    def stop(self) -> None:
+        if self._stopped:
+            return
+        self._stopped = True
+        task = self._frame_task
+        if task is not None:
+            def _silence(done_task: asyncio.Task[None]) -> None:
+                try:
+                    done_task.result()
+                except asyncio.CancelledError:
+                    pass
+                except Exception:  # pragma: no cover - logging only
+                    logger.exception(
+                        "Frame producer raised during shutdown", exc_info=True
+                    )
+
+            task.cancel()
+            task.add_done_callback(_silence)
+            self._frame_task = None
+        super().stop()
 
 
 @dataclass
