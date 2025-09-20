@@ -4,11 +4,17 @@ from unittest.mock import AsyncMock
 
 from aiortc import RTCPeerConnection, RTCSessionDescription
 import numpy as np
+import pytest
 
 from rev_cam.camera import BaseCamera
 from rev_cam.config import Orientation
 from rev_cam.pipeline import FramePipeline
-from rev_cam.webrtc import PipelineVideoTrack, WebRTCManager
+from rev_cam.webrtc import (
+    MediaMTXError,
+    PipelineVideoTrack,
+    WebRTCError,
+    WebRTCManager,
+)
 
 
 class CountingCamera(BaseCamera):
@@ -109,6 +115,42 @@ def test_webrtc_manager_reuses_publisher_for_multiple_offers():
         await manager.handle_offer(offer2)
         assert client.publish_calls == 1
         assert client.play_offers == ["offer-1", "offer-2"]
+        await manager.shutdown()
+
+    run_async(_test())
+
+
+class _FailingPublishClient(StubMediaMTXClient):
+    async def publish(self, offer: RTCSessionDescription) -> RTCSessionDescription:
+        raise MediaMTXError("publisher offline")
+
+
+class _FailingPlayClient(StubMediaMTXClient):
+    async def play(self, offer: RTCSessionDescription) -> RTCSessionDescription:
+        raise MediaMTXError("viewer endpoint offline")
+
+
+def test_webrtc_manager_wraps_mediamtx_failures() -> None:
+    async def _test() -> None:
+        camera = CountingCamera()
+        pipeline = FramePipeline(lambda: Orientation())
+        publish_client = _FailingPublishClient()
+        manager = WebRTCManager(camera=camera, pipeline=pipeline, client=publish_client)
+        with pytest.raises(WebRTCError) as excinfo:
+            await manager.handle_offer(RTCSessionDescription(sdp="offer", type="offer"))
+        assert "publisher offline" in str(excinfo.value)
+        await manager.shutdown()
+
+        working_client = StubMediaMTXClient()
+        manager = WebRTCManager(camera=camera, pipeline=pipeline, client=working_client)
+        await manager.handle_offer(RTCSessionDescription(sdp="offer", type="offer"))
+        await manager.shutdown()
+
+        play_client = _FailingPlayClient()
+        manager = WebRTCManager(camera=camera, pipeline=pipeline, client=play_client)
+        with pytest.raises(WebRTCError) as excinfo:
+            await manager.handle_offer(RTCSessionDescription(sdp="offer", type="offer"))
+        assert "viewer endpoint offline" in str(excinfo.value)
         await manager.shutdown()
 
     run_async(_test())

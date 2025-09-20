@@ -50,6 +50,18 @@ else:  # pragma: no cover - executed when dependency is installed
 logger = logging.getLogger(__name__)
 
 
+class MediaMTXError(RuntimeError):
+    """Base error raised for MediaMTX signalling failures."""
+
+
+class MediaMTXConnectionError(MediaMTXError):
+    """Raised when MediaMTX cannot be reached over the network."""
+
+
+class WebRTCError(RuntimeError):
+    """Raised when RevCam cannot complete a WebRTC exchange."""
+
+
 def _ensure_aiortc_available() -> None:
     """Raise a helpful error when the optional aiortc dependency is missing."""
 
@@ -198,6 +210,33 @@ class MediaMTXClient:
         self._config = config
         self._client: _HTTPXAsyncClient | None = None
 
+    async def _exchange(
+        self, url: str, offer: RTCSessionDescription
+    ) -> RTCSessionDescription:
+        _ensure_httpx_available()
+        client = await self._get_client()
+        try:
+            response = await client.post(
+                url,
+                content=offer.sdp,
+                headers={"Content-Type": "application/sdp"},
+            )
+            response.raise_for_status()
+        except getattr(_httpx, "ConnectError") as exc:  # type: ignore[arg-type]
+            raise MediaMTXConnectionError(
+                f"Unable to connect to MediaMTX at {url}: {exc}"
+            ) from exc
+        except getattr(_httpx, "HTTPStatusError") as exc:  # type: ignore[arg-type]
+            status = exc.response.status_code
+            raise MediaMTXError(
+                f"MediaMTX returned HTTP {status} for {url}: {exc.response.text.strip()}"
+            ) from exc
+        except getattr(_httpx, "HTTPError") as exc:  # type: ignore[arg-type]
+            raise MediaMTXError(
+                f"MediaMTX request to {url} failed: {exc}"
+            ) from exc
+        return _RTCSessionDescription(sdp=response.text, type="answer")
+
     async def _get_client(self) -> _HTTPXAsyncClient:
         _ensure_httpx_available()
         if self._client is None:
@@ -206,27 +245,11 @@ class MediaMTXClient:
 
     async def publish(self, offer: RTCSessionDescription) -> RTCSessionDescription:
         _ensure_aiortc_available()
-        _ensure_httpx_available()
-        client = await self._get_client()
-        response = await client.post(
-            self._config.publish_url(),
-            content=offer.sdp,
-            headers={"Content-Type": "application/sdp"},
-        )
-        response.raise_for_status()
-        return _RTCSessionDescription(sdp=response.text, type="answer")
+        return await self._exchange(self._config.publish_url(), offer)
 
     async def play(self, offer: RTCSessionDescription) -> RTCSessionDescription:
         _ensure_aiortc_available()
-        _ensure_httpx_available()
-        client = await self._get_client()
-        response = await client.post(
-            self._config.play_url(),
-            content=offer.sdp,
-            headers={"Content-Type": "application/sdp"},
-        )
-        response.raise_for_status()
-        return _RTCSessionDescription(sdp=response.text, type="answer")
+        return await self._exchange(self._config.play_url(), offer)
 
     async def close(self) -> None:
         if self._client is not None:
@@ -276,15 +299,21 @@ class MediaMTXPublisher:
         self._task: asyncio.Task[None] | None = None
         self._stop_event = asyncio.Event()
         self._ready_event = asyncio.Event()
+        self._start_error: BaseException | None = None
 
     async def start(self) -> None:
         if self._task is None:
             self._stop_event = asyncio.Event()
             self._ready_event = asyncio.Event()
+            self._start_error = None
             loop = asyncio.get_running_loop()
             self._task = loop.create_task(self._run())
         task = self._task
         await self._ready_event.wait()
+        error = self._start_error
+        if error is not None:
+            self._start_error = None
+            raise error
         if task is not None and task.done():
             task.result()
 
@@ -303,6 +332,7 @@ class MediaMTXPublisher:
             self._task = None
             self._stop_event = asyncio.Event()
             self._ready_event = asyncio.Event()
+            self._start_error = None
 
     async def _run(self) -> None:
         track = PipelineVideoTrack(self._camera, self._pipeline, fps=self._fps)
@@ -322,7 +352,8 @@ class MediaMTXPublisher:
         except asyncio.CancelledError:
             self._ready_event.set()
             raise
-        except Exception:
+        except Exception as exc:
+            self._start_error = exc
             self._ready_event.set()
             logger.exception("MediaMTX publisher failed", exc_info=True)
             raise
@@ -389,8 +420,14 @@ class WebRTCManager:
             self._publisher_started = False
 
     async def handle_offer(self, offer: RTCSessionDescription) -> RTCSessionDescription:
-        await self._ensure_publisher()
-        return await self._client.play(offer)
+        try:
+            await self._ensure_publisher()
+        except MediaMTXError as exc:
+            raise WebRTCError(f"Unable to start MediaMTX publisher: {exc}") from exc
+        try:
+            return await self._client.play(offer)
+        except MediaMTXError as exc:
+            raise WebRTCError(f"Unable to connect viewer via MediaMTX: {exc}") from exc
 
     async def shutdown(self) -> None:
         async with self._publisher_lock:

@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from .camera import CAMERA_SOURCES, BaseCamera, CameraError, create_camera, identify_camera
 from .config import ConfigManager
 from .pipeline import FramePipeline
-from .webrtc import WebRTCManager
+from .webrtc import WebRTCError, WebRTCManager
 from .version import APP_VERSION
 
 if TYPE_CHECKING:  # pragma: no cover - imported for type checking only
@@ -201,6 +201,7 @@ def create_app(config_path: Path | str = Path("data/config.json")) -> FastAPI:
 
     @app.post("/api/offer")
     async def webrtc_offer(payload: OfferPayload) -> dict[str, str]:
+        nonlocal webrtc_error
         if webrtc_manager is None:
             raise HTTPException(status_code=503, detail="WebRTC service unavailable")
         try:
@@ -208,8 +209,14 @@ def create_app(config_path: Path | str = Path("data/config.json")) -> FastAPI:
         except ImportError as exc:  # pragma: no cover - mirrors WebRTCManager guard
             raise HTTPException(status_code=503, detail="WebRTC support requires aiortc to be installed") from exc
         offer = RTCSessionDescription(sdp=payload.sdp, type=payload.type)
-        answer = await webrtc_manager.handle_offer(offer)
-        return {"sdp": answer.sdp, "type": answer.type}
+        try:
+            answer = await webrtc_manager.handle_offer(offer)
+        except WebRTCError as exc:
+            webrtc_error = str(exc)
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        else:
+            webrtc_error = None
+            return {"sdp": answer.sdp, "type": answer.type}
 
     return app
 
