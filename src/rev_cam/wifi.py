@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 import math
 import subprocess
 import time
 from typing import Iterable, Sequence
+
+from .mdns import MDNSAdvertiser
 
 
 class WiFiError(RuntimeError):
@@ -394,15 +397,37 @@ class WiFiManager:
         *,
         rollback_timeout: float = 30.0,
         poll_interval: float = 1.0,
+        hotspot_rollback_timeout: float | None = 120.0,
+        mdns_advertiser: MDNSAdvertiser | None = None,
     ) -> None:
         self._backend = backend or NMCLIBackend()
         self._rollback_timeout = rollback_timeout
         self._poll_interval = max(0.1, poll_interval)
         self._hotspot_profile: str | None = None
+        self._hotspot_rollback_timeout = (
+            self._rollback_timeout
+            if hotspot_rollback_timeout is None
+            else max(0.0, hotspot_rollback_timeout)
+        )
+        self._mdns = mdns_advertiser
+        if self._mdns is None:
+            try:
+                self._mdns = MDNSAdvertiser()
+            except Exception as exc:  # pragma: no cover - environment specific
+                logging.getLogger(__name__).warning(
+                    "mDNS advertising disabled: %s", exc
+                )
+                self._mdns = None
+        try:
+            initial_status = self._backend.get_status()
+        except WiFiError:
+            initial_status = None
+        if initial_status:
+            self._update_mdns(initial_status)
 
     # ------------------------------ operations -----------------------------
     def get_status(self) -> WiFiStatus:
-        return self._backend.get_status()
+        return self._fetch_status()
 
     def scan_networks(self) -> Sequence[WiFiNetwork]:
         return self._backend.scan()
@@ -418,9 +443,10 @@ class WiFiManager:
         if not isinstance(ssid, str) or not ssid.strip():
             raise WiFiError("SSID must be a non-empty string")
         cleaned_ssid = ssid.strip()
-        previous_status = self._backend.get_status()
+        previous_status = self._fetch_status()
         previous_profile = previous_status.profile if previous_status.connected else None
         status = self._backend.connect(cleaned_ssid, password)
+        self._update_mdns(status)
         if not development_mode:
             return status
         timeout = self._rollback_timeout if rollback_timeout is None else max(0.0, rollback_timeout)
@@ -440,8 +466,9 @@ class WiFiManager:
             if current.connected and (current.ssid == cleaned_ssid or current.profile == cleaned_ssid):
                 return current
             time.sleep(self._poll_interval)
-            current = self._backend.get_status()
+            current = self._fetch_status()
         restored = self._backend.activate_profile(previous_profile)
+        self._update_mdns(restored)
         restored.detail = (
             f"Connection to {cleaned_ssid} did not establish within {int(math.ceil(timeout))}s; "
             f"restored {previous_status.ssid or previous_profile}."
@@ -463,7 +490,7 @@ class WiFiManager:
             raise WiFiError("Hotspot password must be at least 8 characters")
         cleaned_password = password.strip() if isinstance(password, str) and password.strip() else None
         try:
-            previous_status = self._backend.get_status()
+            previous_status = self._fetch_status()
         except WiFiError:
             previous_status = None
             previous_profile = None
@@ -481,9 +508,11 @@ class WiFiManager:
                 ) from exc
             raise WiFiError(f"Unable to enable hotspot: {message}") from exc
         self._hotspot_profile = status.profile or self._hotspot_profile
+        self._update_mdns(status)
         if not development_mode:
             return status
-        timeout = self._rollback_timeout if rollback_timeout is None else max(0.0, rollback_timeout)
+        default_timeout = self._hotspot_rollback_timeout
+        timeout = default_timeout if rollback_timeout is None else max(0.0, rollback_timeout)
         if timeout <= 0:
             return status
         if status.hotspot_active:
@@ -493,9 +522,10 @@ class WiFiManager:
         while time.monotonic() < deadline:
             if current.hotspot_active:
                 self._hotspot_profile = current.profile or self._hotspot_profile
+                self._update_mdns(current)
                 return current
             time.sleep(self._poll_interval)
-            current = self._backend.get_status()
+            current = self._fetch_status()
         if previous_profile:
             restored = self._backend.activate_profile(previous_profile)
             previous_name = (
@@ -505,6 +535,7 @@ class WiFiManager:
                 f"Hotspot {cleaned_ssid} did not become active within {int(math.ceil(timeout))}s; "
                 f"restored {previous_name}."
             )
+            self._update_mdns(restored)
             if previous_status and previous_status.hotspot_active:
                 self._hotspot_profile = previous_profile
             elif not restored.hotspot_active:
@@ -514,13 +545,38 @@ class WiFiManager:
             f"Hotspot {cleaned_ssid} did not become active within {int(math.ceil(timeout))}s and "
             "no previous connection was available to restore."
         )
+        self._update_mdns(current)
         return current
 
     def disable_hotspot(self) -> WiFiStatus:
         status = self._backend.stop_hotspot(self._hotspot_profile)
+        self._update_mdns(status)
         if not status.hotspot_active:
             self._hotspot_profile = None
         return status
+
+    def close(self) -> None:
+        if self._mdns is not None:
+            try:
+                self._mdns.close()
+            except Exception:  # pragma: no cover - best effort cleanup
+                logging.getLogger(__name__).debug("Error shutting down mDNS advertiser", exc_info=True)
+            finally:
+                self._mdns = None
+
+    # ------------------------------ helpers -----------------------------
+    def _fetch_status(self) -> WiFiStatus:
+        status = self._backend.get_status()
+        self._update_mdns(status)
+        return status
+
+    def _update_mdns(self, status: WiFiStatus) -> None:
+        if self._mdns is None:
+            return
+        try:
+            self._mdns.advertise(status.ip_address)
+        except Exception:  # pragma: no cover - best effort logging
+            logging.getLogger(__name__).debug("mDNS advertise failed", exc_info=True)
 
 
 __all__ = [

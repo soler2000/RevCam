@@ -167,6 +167,8 @@ def create_app(
             await streamer.aclose()
         if camera:
             await camera.close()
+        if hasattr(wifi_manager, "close"):
+            await run_in_threadpool(wifi_manager.close)
 
     @app.get("/", response_class=HTMLResponse)
     async def index() -> str:

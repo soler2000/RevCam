@@ -16,6 +16,8 @@ that future driver-assistance overlays can be injected on the server without maj
 - REST API for orientation control and camera management.
 - Optional battery indicator when an INA219 sensor is connected, showing live
   percentage, voltage, and current draw in the viewer.
+- Built-in mDNS advertisement so `motion.local:9000` resolves on iOS clients
+  even when the RevCam hotspot is active.
 
 ## Project layout
 
@@ -164,6 +166,16 @@ EOF
 After reloading the service (or rebooting) `nmcli general permissions` should
 list `yes` for the `org.freedesktop.NetworkManager.*` capabilities and RevCam's
 hotspot toggle will succeed.
+
+### Hotspot hostname and development-mode rollback
+
+When the RevCam hotspot is enabled the server now advertises itself over mDNS
+as `motion.local`, so iOS devices can simply browse to
+[`http://motion.local:9000/`](http://motion.local:9000/) without looking up the
+hotspot's IP address. If development mode is enabled for the hotspot, RevCam
+waits up to 120 seconds for the access point to become fully active before
+rolling back to the previous Wi-Fi profile, giving clients more time to join the
+new network.
 
 ### Copy-paste bootstrap script (development machines)
 

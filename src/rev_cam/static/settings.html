@@ -335,6 +335,8 @@
       const wifiRollbackInput = wifiConnectForm
         ? wifiConnectForm.querySelector('input[name="rollback"]')
         : null;
+      const HOTSPOT_HOSTNAME = "motion.local";
+      const HOTSPOT_DEV_ROLLBACK_DEFAULT = 120;
 
       function describeCameraErrors(camera) {
         if (!camera || !camera.errors) {
@@ -378,6 +380,7 @@
           if (status.ip_address) {
             pieces.push(`IP ${status.ip_address}`);
           }
+          pieces.push(`Visit http://${HOTSPOT_HOSTNAME}:9000/`);
         } else if (status.connected) {
           const signalText = formatSignalValue(status.signal);
           pieces.push(`Connected to ${name}${signalText !== "—" ? ` (${signalText})` : ""}`);
@@ -519,7 +522,12 @@
           if (wifiHotspotStatus) {
             if (status.hotspot_active) {
               const hotspotName = status.ssid || status.profile || "Hotspot";
-              wifiHotspotStatus.textContent = `Hotspot active (${hotspotName})`;
+              const pieces = [`Hotspot active (${hotspotName})`];
+              if (status.ip_address) {
+                pieces.push(`IP ${status.ip_address}`);
+              }
+              pieces.push(`Visit http://${HOTSPOT_HOSTNAME}:9000/`);
+              wifiHotspotStatus.textContent = pieces.join(" • ");
             } else {
               wifiHotspotStatus.textContent = "Hotspot disabled.";
             }
@@ -633,19 +641,31 @@
             setWifiFeedback("Hotspot password must contain at least 8 characters.", true);
             return;
           }
+          const devModeEnabled = wifiDevToggle ? !!wifiDevToggle.checked : false;
           payload = {
             enabled: true,
             ssid: ssidValue || undefined,
-            development_mode: wifiDevToggle ? !!wifiDevToggle.checked : false,
+            development_mode: devModeEnabled,
           };
           if (passwordValue) {
             payload.password = passwordValue;
           }
-          if (wifiRollbackInput) {
-            const rollback = parseFloat(wifiRollbackInput.value);
-            if (!Number.isNaN(rollback) && rollback > 0) {
-              payload.rollback_seconds = rollback;
+          let rollbackSeconds = null;
+          let userProvidedRollback = NaN;
+          if (wifiRollbackInput && wifiRollbackInput.dataset.userEdited === "true") {
+            userProvidedRollback = parseFloat(wifiRollbackInput.value);
+          }
+          if (devModeEnabled) {
+            if (!Number.isNaN(userProvidedRollback) && userProvidedRollback > 0) {
+              rollbackSeconds = userProvidedRollback;
+            } else {
+              rollbackSeconds = HOTSPOT_DEV_ROLLBACK_DEFAULT;
             }
+          } else if (!Number.isNaN(userProvidedRollback) && userProvidedRollback > 0) {
+            rollbackSeconds = userProvidedRollback;
+          }
+          if (typeof rollbackSeconds === "number" && rollbackSeconds > 0) {
+            payload.rollback_seconds = rollbackSeconds;
           }
           setWifiFeedback("Enabling hotspot…");
         } else {
@@ -675,7 +695,7 @@
           const detailMessage = status.detail
             ? status.detail
             : enabled
-            ? "Hotspot enabled."
+            ? `Hotspot enabled. Connect via http://${HOTSPOT_HOSTNAME}:9000/.`
             : "Hotspot disabled.";
           setWifiFeedback(detailMessage);
           await refreshWifiStatus();
@@ -932,6 +952,12 @@
         wifiConnectForm.addEventListener("submit", (event) => {
           event.preventDefault();
           connectToWifi().catch((err) => console.error(err));
+        });
+      }
+
+      if (wifiRollbackInput) {
+        wifiRollbackInput.addEventListener("input", () => {
+          wifiRollbackInput.dataset.userEdited = "true";
         });
       }
 

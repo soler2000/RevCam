@@ -135,17 +135,45 @@ class FakeWiFiBackend:
         return self.status
 
 
+class FakeMDNSAdvertiser:
+    def __init__(self) -> None:
+        self.calls: list[str | None] = []
+        self.closed = False
+
+    def advertise(self, ip_address: str | None) -> None:
+        self.calls.append(ip_address)
+
+    def close(self) -> None:
+        self.closed = True
+
+
 @pytest.fixture
 def wifi_backend() -> FakeWiFiBackend:
     return FakeWiFiBackend()
 
 
 @pytest.fixture
-def client(tmp_path: Path, wifi_backend: FakeWiFiBackend) -> TestClient:
-    manager = WiFiManager(backend=wifi_backend, rollback_timeout=0.05, poll_interval=0.005)
+def mdns_advertiser() -> FakeMDNSAdvertiser:
+    return FakeMDNSAdvertiser()
+
+
+@pytest.fixture
+def client(
+    tmp_path: Path,
+    wifi_backend: FakeWiFiBackend,
+    mdns_advertiser: FakeMDNSAdvertiser,
+) -> TestClient:
+    manager = WiFiManager(
+        backend=wifi_backend,
+        rollback_timeout=0.05,
+        poll_interval=0.005,
+        hotspot_rollback_timeout=0.05,
+        mdns_advertiser=mdns_advertiser,
+    )
     app = create_app(tmp_path / "config.json", wifi_manager=manager)
     with TestClient(app) as test_client:
         test_client.backend = wifi_backend
+        test_client.mdns = mdns_advertiser
         yield test_client
 
 
@@ -187,10 +215,15 @@ def test_wifi_hotspot_toggle(client: TestClient) -> None:
     )
     assert enable.status_code == 200
     assert enable.json()["hotspot_active"] is True
+    advertiser = getattr(client, "mdns", None)
+    assert advertiser is not None
+    assert advertiser.calls
+    assert advertiser.calls[-1] == "192.168.4.1"
 
     disable = client.post("/api/wifi/hotspot", json={"enabled": False})
     assert disable.status_code == 200
     assert disable.json()["hotspot_active"] is False
+    assert advertiser.calls[-1] is None
 
 
 def test_wifi_hotspot_development_mode_rolls_back(client: TestClient) -> None:
@@ -203,7 +236,6 @@ def test_wifi_hotspot_development_mode_rolls_back(client: TestClient) -> None:
             "enabled": True,
             "ssid": "RevCam-AP",
             "development_mode": True,
-            "rollback_seconds": 0.05,
         },
     )
     assert response.status_code == 200
