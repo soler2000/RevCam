@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-import numpy as np
 import pytest
+
+pytest.importorskip("numpy")
+import numpy as np
 
 from rev_cam import streaming
 from rev_cam.camera import BaseCamera

@@ -17,6 +17,7 @@ except ImportError:  # pragma: no cover - fallback when optional dependencies mi
         "synthetic": "Synthetic test pattern",
     }
     DEFAULT_CAMERA_CHOICE = "auto"
+from .battery import BatteryLimits, DEFAULT_BATTERY_LIMITS
 from .distance import DEFAULT_DISTANCE_ZONES, DistanceZones
 
 
@@ -157,6 +158,32 @@ def _parse_distance_zones(value: Any, *, default: DistanceZones) -> DistanceZone
         raise ValueError("Distance zone values must be numeric") from exc
 
 
+def _parse_battery_limits(value: Any, *, default: BatteryLimits) -> BatteryLimits:
+    if value is None:
+        return default
+    if isinstance(value, BatteryLimits):
+        return BatteryLimits(value.warning_percent, value.shutdown_percent)
+    if isinstance(value, Mapping):
+        payload = value.get("limits") if "limits" in value else value
+        if not isinstance(payload, Mapping):
+            raise ValueError("Battery limits must provide 'warning' and 'shutdown' values")
+        warning = payload.get("warning_percent", payload.get("warning", default.warning_percent))
+        shutdown = payload.get(
+            "shutdown_percent", payload.get("shutdown", default.shutdown_percent)
+        )
+    elif isinstance(value, Sequence):
+        items = list(value)
+        if len(items) != 2:
+            raise ValueError("Battery limits sequence must contain two values")
+        warning, shutdown = items
+    else:
+        raise ValueError("Unsupported battery limits value")
+    try:
+        return BatteryLimits(float(warning), float(shutdown))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Battery limit values must be numeric") from exc
+
+
 class ConfigManager:
     """Stores configuration state on disk with thread-safety."""
 
@@ -169,18 +196,20 @@ class ConfigManager:
             self._camera,
             self._resolution,
             self._distance_zones,
+            self._battery_limits,
         ) = self._load()
 
     def _ensure_parent(self) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
 
-    def _load(self) -> tuple[Orientation, str, Resolution, DistanceZones]:
+    def _load(self) -> tuple[Orientation, str, Resolution, DistanceZones, BatteryLimits]:
         if not self._path.exists():
             return (
                 Orientation(),
                 DEFAULT_CAMERA_CHOICE,
                 DEFAULT_RESOLUTION,
                 DEFAULT_DISTANCE_ZONES,
+                DEFAULT_BATTERY_LIMITS,
             )
         try:
             payload = json.loads(self._path.read_text())
@@ -204,7 +233,12 @@ class ConfigManager:
             distance_payload = payload.get("distance")
             distance_zones = _parse_distance_zones(distance_payload, default=DEFAULT_DISTANCE_ZONES)
 
-            return orientation, camera, resolution, distance_zones
+            battery_payload = payload.get("battery")
+            battery_limits = _parse_battery_limits(
+                battery_payload, default=DEFAULT_BATTERY_LIMITS
+            )
+
+            return orientation, camera, resolution, distance_zones, battery_limits
         except (OSError, ValueError) as exc:
             raise RuntimeError(f"Failed to load configuration: {exc}") from exc
 
@@ -214,6 +248,7 @@ class ConfigManager:
             "camera": self._camera,
             "resolution": {"width": self._resolution.width, "height": self._resolution.height},
             "distance": {"zones": self._distance_zones.to_dict()},
+            "battery": {"limits": self._battery_limits.to_dict()},
         }
         self._path.write_text(json.dumps(payload, indent=2))
 
@@ -267,6 +302,17 @@ class ConfigManager:
             self._distance_zones = zones
             self._save()
         return zones
+
+    def get_battery_limits(self) -> BatteryLimits:
+        with self._lock:
+            return self._battery_limits
+
+    def set_battery_limits(self, data: Mapping[str, Any] | Sequence[object]) -> BatteryLimits:
+        limits = _parse_battery_limits(data, default=self._battery_limits)
+        with self._lock:
+            self._battery_limits = limits
+            self._save()
+        return limits
 
 
 __all__ = [

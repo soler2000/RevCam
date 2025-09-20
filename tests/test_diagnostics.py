@@ -6,6 +6,8 @@ import types
 
 import pytest
 
+pytest.importorskip("numpy")
+
 import rev_cam.diagnostics as diagnostics
 
 

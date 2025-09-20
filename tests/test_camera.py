@@ -6,8 +6,10 @@ import asyncio
 import sys
 import types
 
-import numpy as np
 import pytest
+
+pytest.importorskip("numpy")
+import numpy as np
 
 import rev_cam.camera as camera_module
 

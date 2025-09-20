@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import types
 from pathlib import Path
 
 import pytest
@@ -27,7 +28,21 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
                 error=None,
             )
 
+    class _StubBatteryMonitor:
+        def read(self):  # pragma: no cover - used indirectly
+            return types.SimpleNamespace(to_dict=lambda: {})
+
+    class _StubSupervisor:
+        def start(self) -> None:  # pragma: no cover - used indirectly
+            return None
+
+        async def aclose(self) -> None:  # pragma: no cover - used indirectly
+            return None
+
     monkeypatch.setattr(app_module, "DistanceMonitor", lambda *args, **kwargs: _StubMonitor())
+    monkeypatch.setattr(app_module, "BatteryMonitor", lambda *args, **kwargs: _StubBatteryMonitor())
+    monkeypatch.setattr(app_module, "BatterySupervisor", lambda *args, **kwargs: _StubSupervisor())
+    monkeypatch.setattr(app_module, "create_battery_overlay", lambda *args, **kwargs: (lambda frame: frame))
     app = app_module.create_app(tmp_path / "config.json")
     with TestClient(app) as test_client:
         yield test_client

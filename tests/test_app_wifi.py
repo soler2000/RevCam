@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -162,7 +163,19 @@ def client(
     tmp_path: Path,
     wifi_backend: FakeWiFiBackend,
     mdns_advertiser: FakeMDNSAdvertiser,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> TestClient:
+    class _StubBatteryMonitor:
+        def read(self):  # pragma: no cover - used indirectly
+            return SimpleNamespace(to_dict=lambda: {"available": False})
+
+    class _StubSupervisor:
+        def start(self) -> None:  # pragma: no cover - used indirectly
+            return None
+
+        async def aclose(self) -> None:  # pragma: no cover - used indirectly
+            return None
+
     manager = WiFiManager(
         backend=wifi_backend,
         rollback_timeout=0.05,
@@ -170,6 +183,9 @@ def client(
         hotspot_rollback_timeout=0.05,
         mdns_advertiser=mdns_advertiser,
     )
+    monkeypatch.setattr("rev_cam.app.BatteryMonitor", lambda *args, **kwargs: _StubBatteryMonitor())
+    monkeypatch.setattr("rev_cam.app.BatterySupervisor", lambda *args, **kwargs: _StubSupervisor())
+    monkeypatch.setattr("rev_cam.app.create_battery_overlay", lambda *args, **kwargs: (lambda frame: frame))
     app = create_app(tmp_path / "config.json", wifi_manager=manager)
     with TestClient(app) as test_client:
         test_client.backend = wifi_backend
