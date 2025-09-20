@@ -20,10 +20,12 @@ class _StubCamera(BaseCamera):
 
 class _StubSimplejpeg:
     def __init__(self) -> None:
-        self.calls: list[dict[str, object]] = []
+        self.images: list[object] = []
+        self.kwargs: list[dict[str, object]] = []
 
     def encode_jpeg(self, image, **kwargs):  # pragma: no cover - exercised in tests
-        self.calls.append(kwargs)
+        self.images.append(image)
+        self.kwargs.append(kwargs)
         return b"jpeg"
 
 
@@ -54,13 +56,31 @@ def test_encode_frame_respects_simplejpeg_capabilities(
     result = streamer._encode_frame(frame)
 
     assert result == b"jpeg"
-    assert len(stub.calls) == 1
-    kwargs = stub.calls[0]
+    assert len(stub.kwargs) == 1
+    kwargs = stub.kwargs[0]
 
     assert kwargs["quality"] == streamer.jpeg_quality
     assert kwargs["colorspace"] == "RGB"
     for name, expected in expected_flags.items():
         assert (name in kwargs) is expected
+
+
+def test_encode_frame_copies_non_contiguous_input(monkeypatch: pytest.MonkeyPatch) -> None:
+    stub = _StubSimplejpeg()
+    monkeypatch.setattr(streaming, "simplejpeg", stub, raising=False)
+    monkeypatch.setattr(streaming, "_SIMPLEJPEG_IMPORT_ERROR", None, raising=False)
+    monkeypatch.setattr(streaming, "_SIMPLEJPEG_ENCODE_KWARGS", set(), raising=False)
+
+    original = np.arange(2 * 3 * 3, dtype=np.uint8).reshape((2, 3, 3))
+    rotated = np.rot90(original, 2)
+    assert not rotated.flags["C_CONTIGUOUS"]
+
+    streaming.encode_frame_to_jpeg(rotated, quality=85)
+
+    assert len(stub.images) == 1
+    encoded = stub.images[0]
+    assert encoded.flags["C_CONTIGUOUS"]
+    assert np.array_equal(encoded, rotated)
 
 
 def test_streamer_apply_settings_updates_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
