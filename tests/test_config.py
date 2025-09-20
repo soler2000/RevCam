@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+from rev_cam.battery import BatteryLimits
 from rev_cam.config import (
     ConfigManager,
     DistanceZones,
@@ -66,3 +67,19 @@ def test_distance_zones_persistence(tmp_path: Path):
     assert isinstance(updated, DistanceZones)
     reloaded = ConfigManager(config_file)
     assert reloaded.get_distance_zones() == updated
+
+
+def test_default_battery_limits(tmp_path: Path):
+    manager = ConfigManager(tmp_path / "config.json")
+    limits = manager.get_battery_limits()
+    assert isinstance(limits, BatteryLimits)
+    assert limits.warning_percent >= limits.shutdown_percent
+
+
+def test_battery_limits_persistence(tmp_path: Path):
+    config_file = tmp_path / "config.json"
+    manager = ConfigManager(config_file)
+    updated = manager.set_battery_limits({"warning_percent": 32.0, "shutdown_percent": 9.0})
+    assert isinstance(updated, BatteryLimits)
+    reloaded = ConfigManager(config_file)
+    assert reloaded.get_battery_limits() == updated
