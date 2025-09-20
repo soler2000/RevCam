@@ -118,6 +118,7 @@ class DistanceMonitor:
         self._max_distance = max_distance_m
         self._min_interval = max(0.0, float(update_interval))
         self._ema: float | None = None
+        self._unit_scale: float | None = None
         self._spike_candidate: float | None = None
         self._spike_rejects: int = 0
         self._last_error: str | None = None
@@ -235,15 +236,31 @@ class DistanceMonitor:
             return None
         if not math.isfinite(raw):
             return None
+        return self._convert_raw_distance(raw)
 
-        # The Adafruit VL53L1X driver reports distances in centimetres.  Fall back
-        # to millimetres when extremely large values are observed to ensure
-        # compatibility with alternate drivers.
-        if raw > 1000:
-            distance_m = raw / 1000.0
-        else:
-            distance_m = raw / 100.0
-        return distance_m
+    def _convert_raw_distance(self, raw: float) -> float | None:
+        """Normalise a raw sensor measurement into metres.
+
+        Different VL53L1X drivers report readings in metres, centimetres,
+        or millimetres.  Try each representation and keep the first value
+        that falls inside the configured operating range.  Once a matching
+        scale is found reuse it for subsequent samples so that we stay
+        consistent while the sensor keeps reporting values in the same unit.
+        """
+        scale = self._unit_scale
+        if scale is not None:
+            distance_m = raw * scale
+            if self._min_distance <= distance_m <= self._max_distance:
+                return distance_m
+            self._unit_scale = None
+
+        conversions = (0.01, 0.001, 1.0)
+        for scale in conversions:
+            distance_m = raw * scale
+            if self._min_distance <= distance_m <= self._max_distance:
+                self._unit_scale = scale
+                return distance_m
+        return None
 
     def _reset_smoothing(self) -> None:
         self._history.clear()

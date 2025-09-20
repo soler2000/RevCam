@@ -55,6 +55,19 @@ def test_distance_monitor_filters_invalid_samples() -> None:
     assert third.error is None
 
 
+def test_distance_monitor_handles_measurements_in_metres() -> None:
+    sensor = _SequenceSensor([1.8, 1.75])
+    monitor = DistanceMonitor(sensor_factory=lambda: sensor, update_interval=0.0)
+
+    first = monitor.read()
+    second = monitor.read()
+
+    assert first.distance_m == pytest.approx(1.8, rel=1e-6)
+    assert first.raw_distance_m == pytest.approx(1.8, rel=1e-6)
+    assert second.raw_distance_m == pytest.approx(1.75, rel=1e-6)
+    assert second.distance_m == pytest.approx(1.785, abs=1e-6)
+
+
 def test_distance_monitor_recovers_from_legitimate_jump() -> None:
     sensor = _SequenceSensor([20.0, 500.0, 500.0])
     monitor = DistanceMonitor(sensor_factory=lambda: sensor, update_interval=0.0)
