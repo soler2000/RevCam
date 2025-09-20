@@ -189,6 +189,38 @@
         font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
         word-break: break-all;
       }
+      .stream-settings {
+        margin-top: 1.25rem;
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+      }
+      .stream-settings-grid {
+        display: grid;
+        gap: 1rem;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      }
+      .stream-settings label {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+        margin-bottom: 0;
+        font-size: 0.95rem;
+      }
+      .stream-settings input[type="range"] {
+        width: 100%;
+      }
+      .stream-quality-control {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+      }
+      .stream-quality-display {
+        min-width: 2.5rem;
+        text-align: right;
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+      }
       #orientation-form {
         display: flex;
         flex-direction: column;
@@ -555,6 +587,42 @@
               </button>
             </div>
             <code id="stream-url">—</code>
+            <form id="stream-settings-form" class="stream-settings">
+              <div class="stream-settings-grid">
+                <label>
+                  Frames per second
+                  <input
+                    type="number"
+                    name="fps"
+                    id="stream-fps"
+                    min="1"
+                    max="60"
+                    step="1"
+                    inputmode="numeric"
+                    value="20"
+                  />
+                </label>
+                <label>
+                  JPEG quality
+                  <div class="stream-quality-control">
+                    <input
+                      type="range"
+                      name="jpeg_quality"
+                      id="stream-quality"
+                      min="1"
+                      max="100"
+                      step="1"
+                      value="85"
+                    />
+                    <span class="stream-quality-display" id="stream-quality-display">85</span>
+                  </div>
+                </label>
+              </div>
+              <div class="form-actions">
+                <button type="submit">Save streaming settings</button>
+                <span id="stream-settings-status" class="muted"></span>
+              </div>
+            </form>
           </section>
 
           <form id="orientation-form" class="card">
@@ -913,6 +981,16 @@
       const copyStreamButton = document.getElementById("copy-stream-url");
       const copyButtonDefault = copyStreamButton ? copyStreamButton.textContent : "";
       let copyResetTimer = null;
+      const streamSettingsForm = document.getElementById("stream-settings-form");
+      const streamFpsInput = streamSettingsForm
+        ? streamSettingsForm.querySelector('input[name="fps"]')
+        : null;
+      const streamQualityInput = streamSettingsForm
+        ? streamSettingsForm.querySelector('input[name="jpeg_quality"]')
+        : null;
+      const streamQualityDisplay = document.getElementById("stream-quality-display");
+      const streamSettingsStatus = document.getElementById("stream-settings-status");
+      let streamSettingsStatusTimer = null;
       const wifiSummary = document.getElementById("wifi-summary");
       const wifiRefreshButton = document.getElementById("wifi-refresh");
       const wifiScanButton = document.getElementById("wifi-scan");
@@ -938,6 +1016,71 @@
         : null;
       const HOTSPOT_HOSTNAME = "motion.local";
       const HOTSPOT_DEV_ROLLBACK_DEFAULT = 120;
+
+      function clearStreamSettingsStatus() {
+        if (streamSettingsStatus) {
+          streamSettingsStatus.textContent = "";
+        }
+        if (streamSettingsStatusTimer) {
+          clearTimeout(streamSettingsStatusTimer);
+          streamSettingsStatusTimer = null;
+        }
+      }
+
+      function setStreamQualityDisplay(value) {
+        if (!streamQualityDisplay) {
+          return;
+        }
+        if (typeof value === "number" && Number.isFinite(value)) {
+          streamQualityDisplay.textContent = String(Math.round(value));
+        } else if (
+          streamQualityInput &&
+          typeof streamQualityInput.value === "string" &&
+          streamQualityInput.value
+        ) {
+          streamQualityDisplay.textContent = streamQualityInput.value;
+        } else {
+          streamQualityDisplay.textContent = "—";
+        }
+      }
+
+      function updateStreamInputs(settings, options = {}) {
+        if (!streamSettingsForm) {
+          return;
+        }
+        const forceUpdate = options.force === true;
+        const fpsValue = settings && typeof settings.fps === "number" ? settings.fps : null;
+        const qualityValue =
+          settings && typeof settings.jpeg_quality === "number"
+            ? settings.jpeg_quality
+            : null;
+        if (streamFpsInput) {
+          if (!forceUpdate && streamFpsInput.dataset.userEdited === "true") {
+            // Keep user-entered value.
+          } else if (fpsValue !== null && Number.isFinite(fpsValue)) {
+            streamFpsInput.value = String(Math.round(fpsValue));
+            delete streamFpsInput.dataset.userEdited;
+          } else {
+            streamFpsInput.value = "";
+            delete streamFpsInput.dataset.userEdited;
+          }
+        }
+        if (streamQualityInput) {
+          if (!forceUpdate && streamQualityInput.dataset.userEdited === "true") {
+            setStreamQualityDisplay(null);
+          } else if (qualityValue !== null && Number.isFinite(qualityValue)) {
+            const rounded = Math.min(100, Math.max(1, Math.round(qualityValue)));
+            streamQualityInput.value = String(rounded);
+            delete streamQualityInput.dataset.userEdited;
+            setStreamQualityDisplay(rounded);
+          } else {
+            delete streamQualityInput.dataset.userEdited;
+            setStreamQualityDisplay(null);
+          }
+        }
+      }
+
+      setStreamQualityDisplay(null);
 
       function formatDistance(value) {
         if (typeof value !== "number" || Number.isNaN(value)) {
@@ -2116,15 +2259,46 @@
           return;
         }
         const stream = camera && camera.stream ? camera.stream : null;
+        const configuredSettings =
+          stream && stream.settings && typeof stream.settings === "object"
+            ? stream.settings
+            : null;
+        const activeSettings =
+          stream && stream.active && typeof stream.active === "object"
+            ? stream.active
+            : null;
+        updateStreamInputs(configuredSettings, { force: true });
         if (copyStreamButton) {
           copyStreamButton.textContent = copyButtonDefault;
         }
         if (!stream || stream.enabled === false) {
           if (streamSummary) {
             const detail = stream && stream.error ? String(stream.error).trim() : "";
-            streamSummary.textContent = detail
+            const configuredParts = [];
+            const configuredFps =
+              configuredSettings && typeof configuredSettings.fps === "number"
+                ? Math.round(configuredSettings.fps)
+                : null;
+            const configuredQuality =
+              configuredSettings && typeof configuredSettings.jpeg_quality === "number"
+                ? Math.round(configuredSettings.jpeg_quality)
+                : null;
+            if (configuredFps !== null && Number.isFinite(configuredFps)) {
+              configuredParts.push(`${configuredFps} fps`);
+            }
+            if (configuredQuality !== null && Number.isFinite(configuredQuality)) {
+              configuredParts.push(`quality ${configuredQuality}`);
+            }
+            const configSummary =
+              configuredParts.length > 0
+                ? `Configured for ${configuredParts.join(" · ")}.`
+                : "";
+            const baseMessage = detail
               ? `Streaming disabled: ${detail}`
               : "Streaming disabled.";
+            streamSummary.textContent = configSummary
+              ? `${baseMessage} ${configSummary}`
+              : baseMessage;
           }
           if (openStreamLink) {
             openStreamLink.classList.add("disabled");
@@ -2145,11 +2319,47 @@
           : "/stream/mjpeg";
         const absoluteUrl = new URL(endpoint, window.location.origin).toString();
         const streamType = stream.content_type ? String(stream.content_type) : "MJPEG";
+        const activeFps =
+          activeSettings && typeof activeSettings.fps === "number"
+            ? activeSettings.fps
+            : null;
+        const activeQuality =
+          activeSettings && typeof activeSettings.jpeg_quality === "number"
+            ? activeSettings.jpeg_quality
+            : null;
+        const configuredFps =
+          configuredSettings && typeof configuredSettings.fps === "number"
+            ? configuredSettings.fps
+            : null;
+        const configuredQuality =
+          configuredSettings && typeof configuredSettings.jpeg_quality === "number"
+            ? configuredSettings.jpeg_quality
+            : null;
+        const fpsDisplay =
+          activeFps !== null && Number.isFinite(activeFps)
+            ? Math.round(activeFps)
+            : configuredFps !== null && Number.isFinite(configuredFps)
+            ? Math.round(configuredFps)
+            : null;
+        const qualityDisplay =
+          activeQuality !== null && Number.isFinite(activeQuality)
+            ? Math.round(activeQuality)
+            : configuredQuality !== null && Number.isFinite(configuredQuality)
+            ? Math.round(configuredQuality)
+            : null;
         if (streamSummary) {
           if (stream.error) {
             streamSummary.textContent = `Streaming issue: ${stream.error}`;
           } else {
-            streamSummary.textContent = `Live stream ready (${streamType})`;
+            const detailParts = [];
+            if (fpsDisplay !== null) {
+              detailParts.push(`${fpsDisplay} fps`);
+            }
+            if (qualityDisplay !== null) {
+              detailParts.push(`quality ${qualityDisplay}`);
+            }
+            const detailText = detailParts.length ? ` – ${detailParts.join(" · ")}` : "";
+            streamSummary.textContent = `Live stream ready (${streamType})${detailText}`;
           }
         }
         if (openStreamLink) {
@@ -2324,6 +2534,117 @@
                 resetCopyFeedback();
               }
             }, 2500);
+          }
+        });
+      }
+
+      if (streamFpsInput) {
+        streamFpsInput.addEventListener("input", () => {
+          streamFpsInput.dataset.userEdited = "true";
+          clearStreamSettingsStatus();
+        });
+      }
+
+      if (streamQualityInput) {
+        const handleQualityChange = () => {
+          streamQualityInput.dataset.userEdited = "true";
+          setStreamQualityDisplay(Number.parseInt(streamQualityInput.value, 10));
+          clearStreamSettingsStatus();
+        };
+        streamQualityInput.addEventListener("input", handleQualityChange);
+        streamQualityInput.addEventListener("change", handleQualityChange);
+      }
+
+      if (streamSettingsForm) {
+        streamSettingsForm.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          clearStreamSettingsStatus();
+          if (streamSettingsStatus) {
+            streamSettingsStatus.textContent = "Saving…";
+          }
+          const payload = {};
+          if (streamFpsInput) {
+            const parsedFps = Number.parseInt(streamFpsInput.value, 10);
+            if (!Number.isFinite(parsedFps) || parsedFps < 1 || parsedFps > 60) {
+              if (streamSettingsStatus) {
+                streamSettingsStatus.textContent = "Enter a valid FPS between 1 and 60.";
+              }
+              return;
+            }
+            payload.fps = parsedFps;
+          }
+          if (streamQualityInput) {
+            const parsedQuality = Number.parseInt(streamQualityInput.value, 10);
+            if (!Number.isFinite(parsedQuality) || parsedQuality < 1 || parsedQuality > 100) {
+              if (streamSettingsStatus) {
+                streamSettingsStatus.textContent = "Quality must be between 1 and 100.";
+              }
+              return;
+            }
+            payload.jpeg_quality = parsedQuality;
+          }
+
+          try {
+            const response = await fetch("/api/stream/settings", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload),
+            });
+            if (!response.ok) {
+              let errorDetail = "Unable to save streaming settings.";
+              try {
+                const error = await response.json();
+                if (error && typeof error.detail === "string" && error.detail.trim()) {
+                  errorDetail = error.detail.trim();
+                }
+              } catch (err) {
+                console.error(err);
+              }
+              if (streamSettingsStatus) {
+                streamSettingsStatus.textContent = `Error: ${errorDetail}`;
+              }
+              return;
+            }
+            const data = await response.json();
+            const updatedSettings = {
+              fps:
+                data && typeof data.fps === "number" && Number.isFinite(data.fps)
+                  ? data.fps
+                  : payload.fps,
+              jpeg_quality:
+                data &&
+                typeof data.jpeg_quality === "number" &&
+                Number.isFinite(data.jpeg_quality)
+                  ? data.jpeg_quality
+                  : payload.jpeg_quality,
+            };
+            updateStreamInputs(updatedSettings, { force: true });
+            if (streamSettingsStatus) {
+              streamSettingsStatus.textContent = "Streaming settings saved";
+            }
+            if (streamSettingsStatusTimer) {
+              clearTimeout(streamSettingsStatusTimer);
+            }
+            streamSettingsStatusTimer = window.setTimeout(() => {
+              if (streamSettingsStatus) {
+                streamSettingsStatus.textContent = "";
+              }
+              streamSettingsStatusTimer = null;
+            }, 3000);
+            try {
+              const cameraResponse = await fetch("/api/camera", { cache: "no-store" });
+              if (cameraResponse.ok) {
+                const cameraData = await cameraResponse.json();
+                updateStreamSection(cameraData);
+              }
+            } catch (err) {
+              console.error(err);
+            }
+          } catch (err) {
+            console.error(err);
+            if (streamSettingsStatus) {
+              streamSettingsStatus.textContent = "Error: Unable to save streaming settings.";
+            }
           }
         });
       }

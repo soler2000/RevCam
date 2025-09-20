@@ -56,6 +56,23 @@ class Resolution:
         return f"{self.width}x{self.height}"
 
 
+@dataclass(frozen=True, slots=True)
+class StreamSettings:
+    """Configuration values for the MJPEG stream."""
+
+    fps: int = 20
+    jpeg_quality: int = 85
+
+    def __post_init__(self) -> None:
+        if self.fps < 1 or self.fps > 60:
+            raise ValueError("Stream fps must be between 1 and 60")
+        if self.jpeg_quality < 1 or self.jpeg_quality > 100:
+            raise ValueError("Stream JPEG quality must be between 1 and 100")
+
+    def to_dict(self) -> Dict[str, int]:
+        return {"fps": int(self.fps), "jpeg_quality": int(self.jpeg_quality)}
+
+
 RESOLUTION_PRESETS: Mapping[str, Resolution] = {
     "640x480": Resolution(640, 480),
     "800x600": Resolution(800, 600),
@@ -66,6 +83,7 @@ RESOLUTION_PRESETS: Mapping[str, Resolution] = {
 
 DEFAULT_RESOLUTION_KEY = "1280x720"
 DEFAULT_RESOLUTION = RESOLUTION_PRESETS[DEFAULT_RESOLUTION_KEY]
+DEFAULT_STREAM_SETTINGS = StreamSettings()
 
 
 def _parse_orientation(data: Mapping[str, Any]) -> Orientation:
@@ -133,6 +151,35 @@ def _parse_resolution(value: Any, *, default: Resolution) -> Resolution:
             raise ValueError("Resolution width and height must be integers") from exc
         return Resolution(width, height)
     raise ValueError("Unsupported resolution value")
+
+
+def _parse_stream_settings(value: Any, *, default: StreamSettings) -> StreamSettings:
+    if value is None:
+        return default
+    if isinstance(value, StreamSettings):
+        fps_raw: Any = value.fps
+        quality_raw: Any = value.jpeg_quality
+    elif isinstance(value, Mapping):
+        fps_raw = value.get("fps", default.fps)
+        quality_raw = value.get("jpeg_quality", value.get("quality", default.jpeg_quality))
+    else:
+        raise ValueError("Stream settings must be provided as a mapping")
+
+    try:
+        fps = int(float(fps_raw))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Stream fps must be an integer") from exc
+    if fps < 1 or fps > 60:
+        raise ValueError("Stream fps must be between 1 and 60")
+
+    try:
+        quality = int(float(quality_raw))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Stream JPEG quality must be an integer") from exc
+    if quality < 1 or quality > 100:
+        raise ValueError("Stream JPEG quality must be between 1 and 100")
+
+    return StreamSettings(fps=fps, jpeg_quality=quality)
 
 
 def _parse_distance_zones(value: Any, *, default: DistanceZones) -> DistanceZones:
@@ -225,6 +272,7 @@ class ConfigManager:
             self._distance_zones,
             self._battery_limits,
             self._battery_capacity,
+            self._stream_settings,
         ) = self._load()
 
     def _ensure_parent(self) -> None:
@@ -232,7 +280,7 @@ class ConfigManager:
 
     def _load(
         self,
-    ) -> tuple[Orientation, str, Resolution, DistanceZones, BatteryLimits, int]:
+    ) -> tuple[Orientation, str, Resolution, DistanceZones, BatteryLimits, int, StreamSettings]:
         if not self._path.exists():
             return (
                 Orientation(),
@@ -241,6 +289,7 @@ class ConfigManager:
                 DEFAULT_DISTANCE_ZONES,
                 DEFAULT_BATTERY_LIMITS,
                 DEFAULT_BATTERY_CAPACITY_MAH,
+                DEFAULT_STREAM_SETTINGS,
             )
         try:
             payload = json.loads(self._path.read_text())
@@ -272,6 +321,11 @@ class ConfigManager:
                 battery_payload, default=DEFAULT_BATTERY_CAPACITY_MAH
             )
 
+            stream_payload = payload.get("stream")
+            stream_settings = _parse_stream_settings(
+                stream_payload, default=DEFAULT_STREAM_SETTINGS
+            )
+
             return (
                 orientation,
                 camera,
@@ -279,6 +333,7 @@ class ConfigManager:
                 distance_zones,
                 battery_limits,
                 battery_capacity,
+                stream_settings,
             )
         except (OSError, ValueError) as exc:
             raise RuntimeError(f"Failed to load configuration: {exc}") from exc
@@ -293,6 +348,7 @@ class ConfigManager:
                 "limits": self._battery_limits.to_dict(),
                 "capacity_mah": self._battery_capacity,
             },
+            "stream": self._stream_settings.to_dict(),
         }
         self._path.write_text(json.dumps(payload, indent=2))
 
@@ -369,11 +425,23 @@ class ConfigManager:
             self._save()
         return capacity
 
+    def get_stream_settings(self) -> StreamSettings:
+        with self._lock:
+            return self._stream_settings
+
+    def set_stream_settings(self, data: Mapping[str, Any] | StreamSettings) -> StreamSettings:
+        settings = _parse_stream_settings(data, default=self._stream_settings)
+        with self._lock:
+            self._stream_settings = settings
+            self._save()
+        return settings
+
 
 __all__ = [
     "ConfigManager",
     "Orientation",
     "Resolution",
+    "StreamSettings",
     "RESOLUTION_PRESETS",
     "DEFAULT_RESOLUTION",
     "DEFAULT_RESOLUTION_KEY",
