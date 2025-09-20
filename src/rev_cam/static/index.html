@@ -18,6 +18,11 @@
       footer {
         padding: 0.75rem 1rem;
         background: rgba(0, 0, 0, 0.6);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 0.75rem;
       }
       main {
         flex: 1 1 auto;
@@ -26,7 +31,7 @@
         justify-content: center;
         padding: 1rem;
       }
-      video {
+      img#stream {
         width: 100%;
         max-width: 1000px;
         background: #000;
@@ -39,6 +44,21 @@
         padding: 0.5rem 1rem;
         border-radius: 999px;
         font-size: 1rem;
+        cursor: pointer;
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      .control-group {
+        display: flex;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+      }
+      a.settings-link {
+        color: #0a84ff;
+        text-decoration: none;
+        font-weight: 600;
       }
       #status {
         font-size: 0.9rem;
@@ -52,60 +72,88 @@
       <div id="status">Initialising…</div>
     </header>
     <main>
-      <video id="video" autoplay playsinline muted></video>
+      <img id="stream" alt="Camera feed" />
     </main>
     <footer>
-      <button id="reconnect">Reconnect</button>
-      <a href="/settings" style="color: #0a84ff; margin-left: 1rem;">Settings</a>
+      <div class="control-group">
+        <button id="toggle-stream" type="button" aria-pressed="false">Pause stream</button>
+        <button id="reconnect" type="button">Reconnect</button>
+      </div>
+      <a class="settings-link" href="/settings">Settings</a>
     </footer>
     <script>
       const statusLabel = document.getElementById("status");
       const reconnectButton = document.getElementById("reconnect");
-      const video = document.getElementById("video");
-      let pc;
+      const streamElement = document.getElementById("stream");
+      const toggleButton = document.getElementById("toggle-stream");
+      let reconnectTimer = null;
+      let shouldStream = false;
 
-      async function startStream() {
-        statusLabel.textContent = "Connecting to camera…";
-        if (pc) {
-          pc.close();
+      function clearReconnectTimer() {
+        if (reconnectTimer) {
+          clearTimeout(reconnectTimer);
+          reconnectTimer = null;
         }
-        pc = new RTCPeerConnection();
-        pc.addTransceiver("video", { direction: "recvonly" });
-        pc.ontrack = (event) => {
-          if (event.streams && event.streams[0]) {
-            video.srcObject = event.streams[0];
-          }
-        };
-        pc.onconnectionstatechange = () => {
-          statusLabel.textContent = `Connection: ${pc.connectionState}`;
-        };
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-        const response = await fetch("/api/offer", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(pc.localDescription),
-        });
-        if (!response.ok) {
-          statusLabel.textContent = "Failed to negotiate WebRTC session";
-          return;
-        }
-        const answer = await response.json();
-        await pc.setRemoteDescription(answer);
-        statusLabel.textContent = "Streaming";
       }
 
-      reconnectButton.addEventListener("click", () => {
-        startStream().catch((err) => {
-          console.error(err);
-          statusLabel.textContent = "Error: " + err.message;
-        });
+      function scheduleReconnect(delay = 1000) {
+        if (!shouldStream) {
+          return;
+        }
+        clearReconnectTimer();
+        reconnectTimer = setTimeout(() => startStream("Reconnecting…"), delay);
+      }
+
+      function startStream(message = "Connecting to camera…") {
+        shouldStream = true;
+        clearReconnectTimer();
+        toggleButton.textContent = "Pause stream";
+        toggleButton.setAttribute("aria-pressed", "true");
+        statusLabel.textContent = message;
+        const cacheBuster = Date.now();
+        streamElement.src = `/stream/mjpeg?cb=${cacheBuster}`;
+      }
+
+      function stopStream(message = "Streaming paused") {
+        shouldStream = false;
+        clearReconnectTimer();
+        streamElement.src = "";
+        streamElement.removeAttribute("src");
+        statusLabel.textContent = message;
+        toggleButton.textContent = "Start stream";
+        toggleButton.setAttribute("aria-pressed", "false");
+      }
+
+      streamElement.addEventListener("load", () => {
+        if (!shouldStream) {
+          return;
+        }
+        statusLabel.textContent = "Streaming";
       });
 
-      startStream().catch((err) => {
-        console.error(err);
-        statusLabel.textContent = "Error: " + err.message;
+      streamElement.addEventListener("error", (event) => {
+        console.error("Stream error", event);
+        statusLabel.textContent = "Connection lost – retrying…";
+        scheduleReconnect();
       });
+
+      reconnectButton.addEventListener("click", () => {
+        if (!shouldStream) {
+          startStream();
+        } else {
+          startStream("Reconnecting…");
+        }
+      });
+
+      toggleButton.addEventListener("click", () => {
+        if (shouldStream) {
+          stopStream();
+        } else {
+          startStream();
+        }
+      });
+
+      startStream();
     </script>
   </body>
 </html>

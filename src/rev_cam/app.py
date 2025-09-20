@@ -3,20 +3,16 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
 from .camera import CAMERA_SOURCES, BaseCamera, CameraError, create_camera, identify_camera
-from .config import ConfigManager
+from .config import ConfigManager, Resolution, RESOLUTION_PRESETS
 from .pipeline import FramePipeline
-from .webrtc import WebRTCManager
+from .streaming import MJPEGStreamer
 from .version import APP_VERSION
-
-if TYPE_CHECKING:  # pragma: no cover - imported for type checking only
-    from aiortc import RTCSessionDescription
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -28,11 +24,6 @@ def _load_static(name: str) -> str:
     return path.read_text(encoding="utf-8")
 
 
-class OfferPayload(BaseModel):
-    sdp: str
-    type: Literal["offer"]
-
-
 class OrientationPayload(BaseModel):
     rotation: int = 0
     flip_horizontal: bool = False
@@ -41,6 +32,7 @@ class OrientationPayload(BaseModel):
 
 class CameraPayload(BaseModel):
     source: str
+    resolution: str | None = None
 
 
 def create_app(config_path: Path | str = Path("data/config.json")) -> FastAPI:
@@ -49,9 +41,10 @@ def create_app(config_path: Path | str = Path("data/config.json")) -> FastAPI:
     config_manager = ConfigManager(Path(config_path))
     pipeline = FramePipeline(lambda: config_manager.get_orientation())
     camera: BaseCamera | None = None
-    webrtc_manager: WebRTCManager | None = None
-    webrtc_error: str | None = None
+    streamer: MJPEGStreamer | None = None
+    stream_error: str | None = None
     active_camera_choice: str = "unknown"
+    active_resolution: Resolution = config_manager.get_resolution()
     camera_errors: dict[str, str] = {}
     logger = logging.getLogger(__name__)
 
@@ -61,23 +54,33 @@ def create_app(config_path: Path | str = Path("data/config.json")) -> FastAPI:
         else:
             camera_errors.pop(source, None)
 
-    def _build_camera(selection: str, *, fallback_to_synthetic: bool) -> tuple[BaseCamera, str]:
+    def _build_camera(
+        selection: str,
+        resolution: Resolution,
+        *,
+        fallback_to_synthetic: bool,
+    ) -> tuple[BaseCamera, str]:
         normalised = selection.strip().lower()
+        resolution_tuple = resolution.as_tuple()
         if normalised == "auto":
             try:
-                camera_instance = create_camera("picamera")
+                camera_instance = create_camera("picamera", resolution=resolution_tuple)
             except CameraError as exc:
                 reason = str(exc)
                 logger.warning("Picamera unavailable, using synthetic camera: %s", reason)
                 _record_camera_error("picamera", reason)
-                fallback_camera, fallback_active = _build_camera("synthetic", fallback_to_synthetic=False)
+                fallback_camera, fallback_active = _build_camera(
+                    "synthetic",
+                    resolution,
+                    fallback_to_synthetic=False,
+                )
                 return fallback_camera, fallback_active
             else:
                 _record_camera_error("picamera", None)
                 return camera_instance, identify_camera(camera_instance)
 
         try:
-            camera_instance = create_camera(normalised)
+            camera_instance = create_camera(normalised, resolution=resolution_tuple)
         except CameraError as exc:
             reason = str(exc)
             _record_camera_error(normalised, reason)
@@ -85,39 +88,42 @@ def create_app(config_path: Path | str = Path("data/config.json")) -> FastAPI:
                 logger.warning(
                     "Failed to initialise camera '%s': %s; falling back to synthetic", selection, reason
                 )
-                fallback_camera, fallback_active = _build_camera("synthetic", fallback_to_synthetic=False)
+                fallback_camera, fallback_active = _build_camera(
+                    "synthetic",
+                    resolution,
+                    fallback_to_synthetic=False,
+                )
                 return fallback_camera, fallback_active
             raise
         else:
             _record_camera_error(normalised, None)
             return camera_instance, identify_camera(camera_instance)
 
-    def _ensure_webrtc(current_camera: BaseCamera) -> None:
-        nonlocal webrtc_manager, webrtc_error
-        if webrtc_manager is None:
-            try:
-                webrtc_manager = WebRTCManager(camera=current_camera, pipeline=pipeline)
-            except RuntimeError as exc:
-                logger.warning("WebRTC disabled: %s", exc)
-                webrtc_manager = None
-                webrtc_error = str(exc)
-            else:
-                webrtc_error = None
-        else:
-            webrtc_manager.camera = current_camera
-            webrtc_error = None
-
     @app.on_event("startup")
     async def startup() -> None:  # pragma: no cover - framework hook
-        nonlocal camera, active_camera_choice
+        nonlocal camera, active_camera_choice, streamer, active_resolution, stream_error
         selection = config_manager.get_camera()
-        camera, active_camera_choice = _build_camera(selection, fallback_to_synthetic=True)
-        _ensure_webrtc(camera)
+        resolution = config_manager.get_resolution()
+        camera, active_camera_choice = _build_camera(
+            selection,
+            resolution,
+            fallback_to_synthetic=True,
+        )
+        active_resolution = resolution
+        try:
+            streamer = MJPEGStreamer(camera=camera, pipeline=pipeline)
+        except RuntimeError as exc:
+            logger.error("Failed to initialise MJPEG streamer: %s", exc)
+            stream_error = str(exc)
+            streamer = None
+        else:
+            stream_error = None
 
     @app.on_event("shutdown")
     async def shutdown() -> None:  # pragma: no cover - framework hook
-        if webrtc_manager:
-            await webrtc_manager.shutdown()
+        nonlocal streamer
+        if streamer is not None:
+            await streamer.aclose()
         if camera:
             await camera.close()
 
@@ -154,57 +160,158 @@ def create_app(config_path: Path | str = Path("data/config.json")) -> FastAPI:
     async def get_camera_config() -> dict[str, object]:
         options = [{"value": value, "label": label} for value, label in CAMERA_SOURCES.items()]
         errors = {source: message for source, message in camera_errors.items() if message}
-        webrtc_info = {"enabled": webrtc_manager is not None}
-        if webrtc_error:
-            webrtc_info["error"] = webrtc_error
+        current_resolution = config_manager.get_resolution()
+        resolution_options = [
+            {
+                "value": key,
+                "label": f"{preset.width}×{preset.height}",
+            }
+            for key, preset in RESOLUTION_PRESETS.items()
+        ]
+        stream_info = {
+            "enabled": streamer is not None,
+            "endpoint": "/stream/mjpeg" if streamer else None,
+            "content_type": streamer.media_type if streamer else None,
+            "error": stream_error,
+        }
         return {
             "selected": config_manager.get_camera(),
             "active": active_camera_choice,
             "options": options,
             "errors": errors,
             "version": APP_VERSION,
-            "webrtc": webrtc_info,
+            "stream": stream_info,
+            "resolution": {
+                "selected": current_resolution.key(),
+                "active": active_resolution.key(),
+                "options": resolution_options,
+            },
         }
 
     @app.post("/api/camera")
     async def update_camera(payload: CameraPayload) -> dict[str, object]:
-        nonlocal camera, active_camera_choice
+        nonlocal camera, active_camera_choice, streamer, active_resolution, stream_error
         selection = payload.source.strip().lower()
         if selection not in CAMERA_SOURCES:
             raise HTTPException(status_code=400, detail="Unknown camera source")
         try:
+            requested_resolution = config_manager.parse_resolution(payload.resolution)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        current_selection = config_manager.get_camera()
+        current_resolution = config_manager.get_resolution()
+        if (
+            camera is not None
+            and selection == current_selection
+            and requested_resolution == current_resolution
+        ):
+            stream_info = {
+                "enabled": streamer is not None,
+                "endpoint": "/stream/mjpeg" if streamer else None,
+                "content_type": streamer.media_type if streamer else None,
+                "error": stream_error,
+            }
+            return {
+                "selected": selection,
+                "active": active_camera_choice,
+                "version": APP_VERSION,
+                "stream": stream_info,
+                "resolution": {
+                    "selected": current_resolution.key(),
+                    "active": active_resolution.key(),
+                },
+            }
+
+        old_selection = current_selection
+        old_resolution = current_resolution
+        old_camera = camera
+        camera = None
+        if old_camera is not None:
+            try:
+                await old_camera.close()
+            except Exception:  # pragma: no cover - defensive logging only
+                logger.exception("Failed to close previous camera instance")
+
+        try:
             new_camera, active_camera_choice = _build_camera(
-                selection, fallback_to_synthetic=(selection == "auto")
+                selection,
+                requested_resolution,
+                fallback_to_synthetic=(selection == "auto"),
             )
         except CameraError as exc:
+            # Attempt to restore the previous camera configuration on failure.
+            try:
+                restored_camera, restored_active = _build_camera(
+                    old_selection,
+                    old_resolution,
+                    fallback_to_synthetic=True,
+                )
+            except Exception:  # pragma: no cover - best-effort recovery
+                camera = None
+                active_camera_choice = "unknown"
+            else:
+                camera = restored_camera
+                active_camera_choice = restored_active
+                active_resolution = old_resolution
+                if streamer is None and camera is not None:
+                    try:
+                        streamer = MJPEGStreamer(camera=camera, pipeline=pipeline)
+                    except RuntimeError as streamer_exc:
+                        logger.error("Failed to initialise MJPEG streamer: %s", streamer_exc)
+                        stream_error = str(streamer_exc)
+                        streamer = None
+                    else:
+                        stream_error = None
+                elif streamer is not None and camera is not None:
+                    streamer.camera = camera
+                    stream_error = None
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        old_camera = camera
+
         camera = new_camera
+        active_resolution = requested_resolution
         config_manager.set_camera(selection)
-        _ensure_webrtc(camera)
-        if old_camera is not None:
-            await old_camera.close()
-        webrtc_info = {"enabled": webrtc_manager is not None}
-        if webrtc_error:
-            webrtc_info["error"] = webrtc_error
+        config_manager.set_resolution(requested_resolution)
+        if streamer is None:
+            try:
+                streamer = MJPEGStreamer(camera=camera, pipeline=pipeline)
+            except RuntimeError as exc:
+                logger.error("Failed to initialise MJPEG streamer: %s", exc)
+                stream_error = str(exc)
+                streamer = None
+            else:
+                stream_error = None
+        else:
+            streamer.camera = camera
+            stream_error = None
+        stream_info = {
+            "enabled": streamer is not None,
+            "endpoint": "/stream/mjpeg" if streamer else None,
+            "content_type": streamer.media_type if streamer else None,
+            "error": stream_error,
+        }
         return {
             "selected": selection,
             "active": active_camera_choice,
             "version": APP_VERSION,
-            "webrtc": webrtc_info,
+            "stream": stream_info,
+            "resolution": {
+                "selected": requested_resolution.key(),
+                "active": active_resolution.key(),
+            },
         }
 
-    @app.post("/api/offer")
-    async def webrtc_offer(payload: OfferPayload) -> dict[str, str]:
-        if webrtc_manager is None:
-            raise HTTPException(status_code=503, detail="WebRTC service unavailable")
-        try:
-            from aiortc import RTCSessionDescription
-        except ImportError as exc:  # pragma: no cover - mirrors WebRTCManager guard
-            raise HTTPException(status_code=503, detail="WebRTC support requires aiortc to be installed") from exc
-        offer = RTCSessionDescription(sdp=payload.sdp, type=payload.type)
-        answer = await webrtc_manager.handle_offer(offer)
-        return {"sdp": answer.sdp, "type": answer.type}
+    @app.get("/stream/mjpeg")
+    async def stream_mjpeg():
+        if streamer is None:
+            raise HTTPException(
+                status_code=503,
+                detail=stream_error or "Streaming service unavailable",
+            )
+        response = StreamingResponse(streamer.stream(), media_type=streamer.media_type)
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        return response
 
     return app
 

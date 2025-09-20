@@ -171,6 +171,24 @@ then
     set +x
 fi
 
+if ! "$VENV_DIR/bin/python" - <<'PY'
+import importlib
+import sys
+
+try:
+    importlib.import_module("simplejpeg")
+except ModuleNotFoundError:
+    sys.exit(1)
+else:
+    sys.exit(0)
+PY
+then
+    echo "Installing missing runtime dependency: simplejpeg"
+    set -x
+    "$VENV_DIR/bin/python" -m pip install "${PIP_FLAGS[@]}" "simplejpeg>=2.1"
+    set +x
+fi
+
 trap - EXIT
 popd >/dev/null
 

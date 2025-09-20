@@ -31,6 +31,36 @@
         padding: 0.6rem 1.2rem;
         border-radius: 999px;
         font-size: 1rem;
+        cursor: pointer;
+      }
+      .button-link,
+      button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.35rem;
+        text-decoration: none;
+      }
+      .button-link {
+        background: #0a84ff;
+        color: #fff;
+        border-radius: 999px;
+        padding: 0.6rem 1.2rem;
+        font-size: 1rem;
+        font-weight: 600;
+      }
+      .button-link.disabled {
+        opacity: 0.5;
+        pointer-events: none;
+      }
+      button.secondary-button {
+        background: transparent;
+        border: 1px solid #0a84ff;
+        color: #0a84ff;
+      }
+      button.secondary-button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
       }
       #status {
         margin-top: 1rem;
@@ -40,6 +70,35 @@
       a {
         color: #0a84ff;
       }
+      #stream-section {
+        margin: 2rem 0 1.5rem;
+        padding: 1rem;
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.04);
+      }
+      #stream-section h2 {
+        margin-top: 0;
+        margin-bottom: 0.5rem;
+      }
+      #stream-summary {
+        margin: 0;
+        opacity: 0.85;
+      }
+      #stream-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        margin-top: 0.75rem;
+      }
+      #stream-url {
+        display: block;
+        margin-top: 0.75rem;
+        padding: 0.6rem 0.75rem;
+        border-radius: 8px;
+        background: rgba(0, 0, 0, 0.35);
+        font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+        word-break: break-all;
+      }
     </style>
   </head>
   <body>
@@ -48,10 +107,33 @@
     <p id="app-version" style="margin-top: -0.5rem; opacity: 0.75;">
       Version <span id="version-value">Loading…</span>
     </p>
+    <section id="stream-section">
+      <h2>Streaming</h2>
+      <p id="stream-summary">Loading…</p>
+      <div id="stream-actions">
+        <a
+          id="open-stream"
+          class="button-link disabled"
+          href="/stream/mjpeg"
+          target="_blank"
+          rel="noopener"
+          aria-disabled="true"
+          >Open MJPEG stream</a
+        >
+        <button type="button" id="copy-stream-url" class="secondary-button" disabled>
+          Copy stream URL
+        </button>
+      </div>
+      <code id="stream-url">—</code>
+    </section>
     <form id="orientation-form">
       <label>
         Camera source
         <select name="camera"></select>
+      </label>
+      <label>
+        Resolution
+        <select name="resolution"></select>
       </label>
       <h2 style="margin-bottom: 0.5rem; margin-top: 1.5rem;">Orientation</h2>
       <label>
@@ -77,6 +159,14 @@
       const statusLabel = document.getElementById("status");
       const versionValue = document.getElementById("version-value");
       const cameraLabels = new Map();
+      const resolutionLabels = new Map();
+      const streamSection = document.getElementById("stream-section");
+      const streamSummary = document.getElementById("stream-summary");
+      const streamUrlElement = document.getElementById("stream-url");
+      const openStreamLink = document.getElementById("open-stream");
+      const copyStreamButton = document.getElementById("copy-stream-url");
+      const copyButtonDefault = copyStreamButton ? copyStreamButton.textContent : "";
+      let copyResetTimer = null;
 
       function describeCameraErrors(camera) {
         if (!camera || !camera.errors) {
@@ -110,12 +200,74 @@
         versionValue.textContent = version || "Unknown";
       }
 
+      function updateStreamSection(camera) {
+        if (!streamSection) {
+          return;
+        }
+        const stream = camera && camera.stream ? camera.stream : null;
+        if (copyStreamButton) {
+          copyStreamButton.textContent = copyButtonDefault;
+        }
+        if (!stream || stream.enabled === false) {
+          if (streamSummary) {
+            const detail = stream && stream.error ? String(stream.error).trim() : "";
+            streamSummary.textContent = detail
+              ? `Streaming disabled: ${detail}`
+              : "Streaming disabled.";
+          }
+          if (openStreamLink) {
+            openStreamLink.classList.add("disabled");
+            openStreamLink.setAttribute("aria-disabled", "true");
+            openStreamLink.href = "/stream/mjpeg";
+          }
+          if (copyStreamButton) {
+            copyStreamButton.disabled = true;
+          }
+          if (streamUrlElement) {
+            streamUrlElement.textContent = "—";
+          }
+          return;
+        }
+
+        const endpoint = typeof stream.endpoint === "string" && stream.endpoint
+          ? stream.endpoint
+          : "/stream/mjpeg";
+        const absoluteUrl = new URL(endpoint, window.location.origin).toString();
+        const streamType = stream.content_type ? String(stream.content_type) : "MJPEG";
+        if (streamSummary) {
+          if (stream.error) {
+            streamSummary.textContent = `Streaming issue: ${stream.error}`;
+          } else {
+            streamSummary.textContent = `Live stream ready (${streamType})`;
+          }
+        }
+        if (openStreamLink) {
+          openStreamLink.classList.remove("disabled");
+          openStreamLink.removeAttribute("aria-disabled");
+          openStreamLink.href = absoluteUrl;
+        }
+        if (copyStreamButton) {
+          copyStreamButton.disabled = false;
+        }
+        if (streamUrlElement) {
+          streamUrlElement.textContent = absoluteUrl;
+        }
+      }
+
+      function resetCopyFeedback() {
+        if (copyStreamButton) {
+          copyStreamButton.textContent = copyButtonDefault;
+        }
+        copyResetTimer = null;
+      }
+
       function applySettings(orientation, camera, message = "Settings loaded") {
         form.rotation.value = orientation.rotation;
         form.flip_horizontal.checked = orientation.flip_horizontal;
         form.flip_vertical.checked = orientation.flip_vertical;
 
         updateVersion(camera);
+        updateStreamSection(camera);
 
         const cameraSelect = form.elements.namedItem("camera");
         if (!(cameraSelect instanceof HTMLSelectElement)) {
@@ -134,14 +286,57 @@
           cameraSelect.value = camera.selected;
         }
 
-        let status = message;
+        const resolutionSelect = form.elements.namedItem("resolution");
+        if (!(resolutionSelect instanceof HTMLSelectElement)) {
+          throw new Error("Resolution select element missing");
+        }
+        resolutionSelect.innerHTML = "";
+        resolutionLabels.clear();
+        const resolutionInfo = camera && camera.resolution ? camera.resolution : null;
+        const resolutionOptions =
+          resolutionInfo && Array.isArray(resolutionInfo.options) ? resolutionInfo.options : [];
+        for (const option of resolutionOptions) {
+          const opt = document.createElement("option");
+          opt.value = option.value;
+          opt.textContent = option.label;
+          resolutionSelect.appendChild(opt);
+          resolutionLabels.set(option.value, option.label);
+        }
         if (
-          !status.toLowerCase().startsWith("error") &&
-          camera.active &&
-          camera.active !== camera.selected
+          resolutionInfo &&
+          typeof resolutionInfo.selected === "string" &&
+          resolutionLabels.has(resolutionInfo.selected)
         ) {
-          const activeLabel = cameraLabels.get(camera.active) || camera.active;
+          resolutionSelect.value = resolutionInfo.selected;
+        } else if (resolutionSelect.options.length > 0) {
+          resolutionSelect.selectedIndex = 0;
+        }
+
+        let status = message;
+        const initialStatusLower = typeof status === "string" ? status.toLowerCase() : "";
+        const selectedCamera = typeof camera.selected === "string" ? camera.selected : "";
+        const activeCamera = typeof camera.active === "string" ? camera.active : "";
+        if (
+          !initialStatusLower.startsWith("error") &&
+          activeCamera &&
+          selectedCamera &&
+          activeCamera !== selectedCamera
+        ) {
+          const activeLabel = cameraLabels.get(activeCamera) || activeCamera;
           status += ` (active: ${activeLabel})`;
+        }
+        if (
+          resolutionInfo &&
+          typeof resolutionInfo.active === "string" &&
+          typeof resolutionInfo.selected === "string" &&
+          resolutionInfo.active &&
+          resolutionInfo.selected &&
+          resolutionInfo.active !== resolutionInfo.selected
+        ) {
+          const activeLabel =
+            resolutionLabels.get(resolutionInfo.active) ||
+            resolutionInfo.active.replace(/x/gi, "×");
+          status += ` (active resolution: ${activeLabel})`;
         }
         const statusLower = typeof status === "string" ? status.toLowerCase() : "";
         const errorMessages = describeCameraErrors(camera).filter((detail) => {
@@ -164,16 +359,25 @@
           }
           return true;
         });
-        if (camera.webrtc && camera.webrtc.error) {
-          const webrtcDetail = String(camera.webrtc.error).trim();
-          if (webrtcDetail) {
-            const webrtcMessage = `WebRTC disabled: ${webrtcDetail}`;
-            const webrtcLower = webrtcMessage.toLowerCase();
+        if (camera.stream) {
+          const streamDetail = camera.stream.error ? String(camera.stream.error).trim() : "";
+          if (streamDetail) {
+            const streamMessage = `Streaming disabled: ${streamDetail}`;
+            const streamLower = streamMessage.toLowerCase();
             const alreadyIncluded =
-              statusLower.includes(webrtcLower) ||
-              errorMessages.some((detail) => detail.toLowerCase() === webrtcLower);
+              statusLower.includes(streamLower) ||
+              errorMessages.some((detail) => detail.toLowerCase() === streamLower);
             if (!alreadyIncluded) {
-              errorMessages.push(webrtcMessage);
+              errorMessages.push(streamMessage);
+            }
+          } else if (camera.stream.enabled === false) {
+            const disabledMessage = "Streaming disabled";
+            const disabledLower = disabledMessage.toLowerCase();
+            const alreadyIncluded =
+              statusLower.includes(disabledLower) ||
+              errorMessages.some((detail) => detail.toLowerCase() === disabledLower);
+            if (!alreadyIncluded) {
+              errorMessages.push(disabledMessage);
             }
           }
         }
@@ -181,6 +385,36 @@
           status += ` • ${errorMessages.join(" • ")}`;
         }
         statusLabel.textContent = status;
+      }
+
+      if (copyStreamButton && streamUrlElement) {
+        copyStreamButton.addEventListener("click", async () => {
+          const url = streamUrlElement.textContent ? streamUrlElement.textContent.trim() : "";
+          if (!url) {
+            return;
+          }
+          try {
+            await navigator.clipboard.writeText(url);
+            copyStreamButton.textContent = "Copied!";
+            if (copyResetTimer) {
+              clearTimeout(copyResetTimer);
+            }
+            copyResetTimer = setTimeout(resetCopyFeedback, 2000);
+          } catch (err) {
+            console.error(err);
+            copyStreamButton.textContent = "Copy failed";
+            copyStreamButton.disabled = true;
+            if (copyResetTimer) {
+              clearTimeout(copyResetTimer);
+            }
+            copyResetTimer = setTimeout(() => {
+              if (copyStreamButton) {
+                copyStreamButton.disabled = false;
+                resetCopyFeedback();
+              }
+            }, 2500);
+          }
+        });
       }
 
       async function fetchSettings() {
@@ -235,10 +469,18 @@
           statusLabel.textContent = "Error: camera selector missing";
           return;
         }
+        const resolutionSelect = form.elements.namedItem("resolution");
+        if (!(resolutionSelect instanceof HTMLSelectElement)) {
+          statusLabel.textContent = "Error: resolution selector missing";
+          return;
+        }
         const cameraResponse = await fetch("/api/camera", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ source: cameraSelect.value }),
+          body: JSON.stringify({
+            source: cameraSelect.value,
+            resolution: resolutionSelect.value,
+          }),
         });
         if (!cameraResponse.ok) {
           let errorDetail = "Unable to update camera";

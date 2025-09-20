@@ -3,8 +3,8 @@ PR Installation Guide
 
 This document provides a copy-paste friendly checklist for installing and running
 this pull request build of RevCam on a Raspberry Pi running Raspberry Pi OS
-(Bookworm). Follow the steps in order to ensure Picamera2, aiortc, and other
-native dependencies are available to the application.
+(Bookworm). Follow the steps in order to ensure Picamera2 and other native
+dependencies are available to the application.
 
 Prerequisites
 -------------
@@ -18,15 +18,13 @@ Prerequisites
 sudo apt update
 sudo apt install -y \
   git python3 python3-venv python3-pip \
-  python3-picamera2 python3-prctl \
-  libatlas-base-dev libavformat-dev libavcodec-dev libavdevice-dev \
-  libavutil-dev libswscale-dev libswresample-dev libopus-dev libvpx-dev \
-  libsrtp2-dev pkg-config
+  python3-picamera2 python3-prctl python3-simplejpeg \
+  libatlas-base-dev \
+  libjpeg-dev zlib1g-dev pkg-config
 ```
-These packages provide the official Picamera2 stack and the headers/libraries
-required to compile `aiortc`, `pylibsrtp`, and `av` when PiWheels does not offer
-compatible wheels. The same set is available through `./scripts/install_prereqs.sh`
-if you prefer a reusable helper.
+These packages provide the official Picamera2 stack alongside the JPEG encoder
+used by the streaming pipeline. The same set is available through
+`./scripts/install_prereqs.sh` if you prefer a reusable helper.
 
 2. Clone (or update) the RevCam repository
 -----------------------------------------
@@ -56,14 +54,14 @@ python -m pip install --upgrade pip
 The `--system-site-packages` flag exposes the APT-installed Picamera2 modules to
 the virtual environment so RevCam can import them without rebuilding.
 
-4. Install RevCam and Python dependencies (including aiortc)
------------------------------------------------------------
+4. Install RevCam and Python dependencies
+----------------------------------------
 ```bash
 pip install --prefer-binary --extra-index-url https://www.piwheels.org/simple -e .
 ```
-The PiWheels index provides pre-built ARM wheels for heavy packages such as
-`aiortc`. When a wheel is not available, the system libraries installed in step
-1 allow `pip` to build the modules locally.
+The PiWheels index provides pre-built ARM wheels for heavy packages. When a
+wheel is not available, the system libraries installed in step 1 allow `pip` to
+build the modules locally.
 
 5. Verify camera availability before launching
 ----------------------------------------------
@@ -83,9 +81,10 @@ and reboot. Stop any conflicting services (for example, `libcamera-vid` or
 ```bash
 uvicorn rev_cam.app:create_app --factory --host 0.0.0.0 --port 9000
 ```
-Open `http://<pi-ip>:9000` in your browser. The settings page exposes a camera
-source dropdown—select *PiCamera2* to use the hardware camera once diagnostics
-report it as available.
+Open `http://<pi-ip>:9000` in your browser. The settings page exposes camera
+source and resolution dropdowns—select *PiCamera2* to use the hardware camera
+and choose a resolution that fits your bandwidth and display needs once
+diagnostics report the device as available.
 
 7. Optional: enable the service on boot
 --------------------------------------
@@ -100,5 +99,5 @@ Troubleshooting
 * **Busy camera errors** – re-run `python -m rev_cam.diagnostics` to identify
   lingering processes. Disable the legacy camera interface and reboot if
   `kworker/R-mmal-vchiq` threads are reported.
-* **`aiortc` missing** – re-run step 4. If compilation fails, verify the APT
-  packages listed in step 1 are installed.
+* **`simplejpeg` missing** – re-run step 4. If installation fails, verify the
+  APT packages listed in step 1 are installed.
