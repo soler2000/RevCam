@@ -131,6 +131,40 @@ source .venv/bin/activate
 pip install -e .[dev]
 ```
 
+### NetworkManager permissions for Wi-Fi control
+
+RevCam drives Wi-Fi and hotspot features through NetworkManager's `nmcli`
+command-line tool. The user account running RevCam therefore needs permission to
+modify Wi-Fi connections and toggle hotspots. When running inside a service
+account (for example under systemd) NetworkManager often denies these actions
+with errors such as:
+
+```
+Error: Failed to setup a Wi-Fi hotspot: Not authorized to control networking.
+```
+
+To grant the necessary access either run RevCam as a user that already has
+network privileges (e.g. the default `pi` account on Raspberry Pi OS) or add a
+Polkit rule allowing your service account to control NetworkManager. A minimal
+rule that authorises members of the `revcam` group looks like this:
+
+```bash
+sudo groupadd -f revcam
+sudo usermod -aG revcam <your-service-user>
+sudo tee /etc/polkit-1/rules.d/10-revcam-nm.rules >/dev/null <<'EOF'
+polkit.addRule(function(action, subject) {
+  if (action.id.indexOf('org.freedesktop.NetworkManager.') === 0 &&
+      subject.isInGroup('revcam')) {
+    return polkit.Result.YES;
+  }
+});
+EOF
+```
+
+After reloading the service (or rebooting) `nmcli general permissions` should
+list `yes` for the `org.freedesktop.NetworkManager.*` capabilities and RevCam's
+hotspot toggle will succeed.
+
 ### Copy-paste bootstrap script (development machines)
 
 Need a single snippet you can drop into a terminal? The commands below clone (or

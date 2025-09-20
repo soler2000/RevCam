@@ -175,8 +175,33 @@ class NMCLIBackend(WiFiBackend):
                 profiles.add(name)
         return profiles
 
+    @staticmethod
+    def _unescape_nmcli_field(value: str) -> str:
+        """Best effort unescaping for nmcli's colon-delimited output."""
+
+        if "\\" not in value:
+            return value
+        # nmcli escapes literal backslashes and colons. It does not use more
+        # elaborate sequences, so a simple two-step replacement is sufficient.
+        return value.replace("\\\\", "\\").replace("\\:", ":")
+
     def _scan_output(self, *, rescan: bool = False) -> Iterable[WiFiNetwork]:
         interface = self._get_interface()
+        if rescan:
+            try:
+                self._run(["nmcli", "device", "wifi", "rescan", "ifname", interface])
+            except WiFiError as exc:
+                message = str(exc).strip()
+                lowered = message.lower()
+                if "not authorized" in lowered or "not authorised" in lowered:
+                    raise WiFiError(
+                        "Unable to rescan Wi-Fi networks: not authorized to control networking. "
+                        "Ensure RevCam has permission to manage NetworkManager."
+                    ) from exc
+                # Some drivers refuse to rescan while already scanning or
+                # operating as an access point. In those cases we continue with
+                # the cached list to at least surface previously discovered
+                # networks.
         args = [
             "nmcli",
             "-t",
@@ -199,6 +224,7 @@ class NMCLIBackend(WiFiBackend):
             while len(parts) < 5:
                 parts.append("")
             in_use, ssid_raw, signal_raw, security_raw, freq_raw = parts[:5]
+            ssid_raw = self._unescape_nmcli_field(ssid_raw)
             ssid = ssid_raw.strip()
             hidden = not bool(ssid)
             if hidden:
