@@ -7,7 +7,8 @@ driver-assistance overlays can be injected on the server without major changes.
 
 ## Features
 
-- Fast MJPEG video delivery optimised for mobile Safari (iPhone/iPad).
+- Fast MJPEG video delivery optimised for mobile Safari (iPhone/iPad) with a
+  pause/resume web player control and automatic reconnect behaviour.
 - Camera orientation controls (rotation and horizontal/vertical flips).
 - Modular frame processing pipeline ready for future overlays (e.g. guidelines).
 - REST API for orientation control and camera management.
