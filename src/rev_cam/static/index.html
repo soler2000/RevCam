@@ -154,6 +154,7 @@
       <div class="control-group">
         <button id="toggle-stream" type="button" aria-pressed="false">Pause stream</button>
         <button id="reconnect" type="button">Reconnect</button>
+        <button id="save-snapshot" type="button">Save snapshot</button>
       </div>
       <a class="settings-link" href="/settings">Settings</a>
     </footer>
@@ -162,6 +163,7 @@
       const reconnectButton = document.getElementById("reconnect");
       const streamElement = document.getElementById("stream");
       const toggleButton = document.getElementById("toggle-stream");
+      const snapshotButton = document.getElementById("save-snapshot");
       const batteryIndicator = document.getElementById("battery-indicator");
       const batteryIcon = document.getElementById("battery-icon");
       const batteryLevel = document.getElementById("battery-level");
@@ -301,6 +303,58 @@
         toggleButton.setAttribute("aria-pressed", "false");
       }
 
+      async function saveSnapshot() {
+        if (!snapshotButton) {
+          return;
+        }
+        const previousStatus = statusLabel ? statusLabel.textContent : "";
+        const originalLabel = snapshotButton.textContent;
+        snapshotButton.disabled = true;
+        snapshotButton.textContent = "Saving…";
+        if (statusLabel) {
+          statusLabel.textContent = "Capturing snapshot…";
+        }
+
+        try {
+          const response = await fetch("/api/camera/snapshot", { cache: "no-store" });
+          if (!response.ok) {
+            throw new Error(`Snapshot request failed with ${response.status}`);
+          }
+          const blob = await response.blob();
+          const url = URL.createObjectURL(blob);
+          const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+          const anchor = document.createElement("a");
+          anchor.href = url;
+          anchor.download = `revcam-${timestamp}.jpg`;
+          anchor.style.display = "none";
+          document.body.appendChild(anchor);
+          anchor.click();
+          document.body.removeChild(anchor);
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+          if (statusLabel) {
+            statusLabel.textContent = "Snapshot saved";
+            setTimeout(() => {
+              if (statusLabel.textContent === "Snapshot saved") {
+                statusLabel.textContent = previousStatus || (shouldStream ? "Streaming" : "Streaming paused");
+              }
+            }, 2000);
+          }
+        } catch (error) {
+          console.error("Snapshot error", error);
+          if (statusLabel) {
+            statusLabel.textContent = "Snapshot failed";
+            setTimeout(() => {
+              if (statusLabel.textContent === "Snapshot failed") {
+                statusLabel.textContent = previousStatus || (shouldStream ? "Streaming" : "Streaming paused");
+              }
+            }, 2500);
+          }
+        } finally {
+          snapshotButton.disabled = false;
+          snapshotButton.textContent = originalLabel;
+        }
+      }
+
       streamElement.addEventListener("load", () => {
         if (!shouldStream) {
           return;
@@ -329,6 +383,12 @@
           startStream();
         }
       });
+
+      if (snapshotButton) {
+        snapshotButton.addEventListener("click", () => {
+          saveSnapshot().catch((error) => console.error("Snapshot handler error", error));
+        });
+      }
 
       window.addEventListener("beforeunload", () => {
         clearReconnectTimer();

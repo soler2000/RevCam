@@ -13,20 +13,12 @@ pytest.importorskip("httpx")
 from fastapi.testclient import TestClient
 
 from rev_cam.app import create_app
-from rev_cam.camera import CameraError
+from rev_cam.camera import BaseCamera, CameraError
 from rev_cam.config import DEFAULT_RESOLUTION_KEY
 from rev_cam.version import APP_VERSION
 
 
-class _BrokenPicamera:
-    """Stub Picamera implementation that always fails."""
-
-    def __init__(self) -> None:
-        raise CameraError("picamera backend unavailable")
-
-
-@pytest.fixture
-def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
+def _apply_common_stubs(monkeypatch: pytest.MonkeyPatch) -> None:
     class _StubBatteryMonitor:
         def read(self):  # pragma: no cover - used indirectly
             return SimpleNamespace(to_dict=lambda: {"available": False})
@@ -38,10 +30,34 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
         async def aclose(self) -> None:  # pragma: no cover - used indirectly
             return None
 
-    monkeypatch.setattr("rev_cam.camera.Picamera2Camera", _BrokenPicamera)
-    monkeypatch.setattr("rev_cam.app.BatteryMonitor", lambda *args, **kwargs: _StubBatteryMonitor())
-    monkeypatch.setattr("rev_cam.app.BatterySupervisor", lambda *args, **kwargs: _StubSupervisor())
-    monkeypatch.setattr("rev_cam.app.create_battery_overlay", lambda *args, **kwargs: (lambda frame: frame))
+    monkeypatch.setattr(
+        "rev_cam.camera.Picamera2Camera",
+        _BrokenPicamera,
+    )
+    monkeypatch.setattr(
+        "rev_cam.app.BatteryMonitor",
+        lambda *args, **kwargs: _StubBatteryMonitor(),
+    )
+    monkeypatch.setattr(
+        "rev_cam.app.BatterySupervisor",
+        lambda *args, **kwargs: _StubSupervisor(),
+    )
+    monkeypatch.setattr(
+        "rev_cam.app.create_battery_overlay",
+        lambda *args, **kwargs: (lambda frame: frame),
+    )
+
+
+class _BrokenPicamera:
+    """Stub Picamera implementation that always fails."""
+
+    def __init__(self) -> None:
+        raise CameraError("picamera backend unavailable")
+
+
+@pytest.fixture
+def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    _apply_common_stubs(monkeypatch)
     config_path = tmp_path / "config.json"
     app = create_app(config_path)
     with TestClient(app) as test_client:
@@ -110,6 +126,43 @@ def test_mjpeg_stream_endpoint(client: TestClient) -> None:
         first_chunk = next(iterator)
         assert b"--frame" in first_chunk
 
+
+def test_snapshot_endpoint_returns_jpeg(client: TestClient) -> None:
+    response = client.get("/api/camera/snapshot")
+    assert response.status_code == 200
+    content_type = response.headers.get("content-type", "")
+    assert content_type.startswith("image/jpeg")
+    assert response.content
+
+
+def test_snapshot_endpoint_handles_camera_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _FailingCamera(BaseCamera):
+        async def get_frame(self):  # pragma: no cover - exercised in test
+            raise CameraError("capture failed")
+
+        async def close(self) -> None:  # pragma: no cover - exercised indirectly
+            return None
+
+    def _create_camera_override(choice: str, *args, **kwargs):
+        if choice == "picamera":
+            raise CameraError("picamera backend unavailable")
+        if choice == "synthetic":
+            return _FailingCamera()
+        raise AssertionError(f"Unexpected camera choice {choice}")
+
+    _apply_common_stubs(monkeypatch)
+    monkeypatch.setattr("rev_cam.app.create_camera", _create_camera_override)
+
+    config_path = tmp_path / "config.json"
+    app = create_app(config_path)
+    with TestClient(app) as test_client:
+        response = test_client.get("/api/camera/snapshot")
+        assert response.status_code == 503
+        payload = response.json()
+        assert payload["detail"] == "capture failed"
 
 def test_stream_error_surfaces_when_streamer_unavailable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

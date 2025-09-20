@@ -5,7 +5,7 @@ import logging
 import os
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
@@ -15,7 +15,7 @@ from .camera import CAMERA_SOURCES, BaseCamera, CameraError, create_camera, iden
 from .config import ConfigManager, Resolution, RESOLUTION_PRESETS
 from .distance import DistanceMonitor, create_distance_overlay
 from .pipeline import FramePipeline
-from .streaming import MJPEGStreamer
+from .streaming import MJPEGStreamer, encode_frame_to_jpeg
 from .version import APP_VERSION
 from .wifi import WiFiError, WiFiManager
 
@@ -120,6 +120,45 @@ def create_app(
             camera_errors[source] = message
         else:
             camera_errors.pop(source, None)
+
+    async def _capture_snapshot_bytes() -> bytes:
+        if camera is None:
+            raise HTTPException(status_code=503, detail="Camera unavailable")
+
+        try:
+            frame = await camera.get_frame()
+        except CameraError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.exception("Unexpected snapshot camera failure")
+            raise HTTPException(status_code=500, detail="Failed to capture snapshot") from exc
+
+        try:
+            processed = await run_in_threadpool(pipeline.process, frame)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.exception("Snapshot pipeline processing failed")
+            raise HTTPException(status_code=500, detail="Failed to process snapshot") from exc
+
+        quality = streamer.jpeg_quality if streamer is not None else 85
+
+        try:
+            jpeg_bytes = await run_in_threadpool(
+                encode_frame_to_jpeg,
+                processed,
+                quality=quality,
+            )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.exception("Snapshot encoding failed")
+            raise HTTPException(status_code=500, detail="Failed to encode snapshot") from exc
+
+        return jpeg_bytes
+
+    async def _snapshot_response() -> Response:
+        payload = await _capture_snapshot_bytes()
+        response = Response(content=payload, media_type="image/jpeg")
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        return response
 
     def _build_camera(
         selection: str,
@@ -465,6 +504,14 @@ def create_app(
                 "active": active_resolution.key(),
             },
         }
+
+    @app.get("/api/camera/snapshot")
+    async def get_camera_snapshot() -> Response:
+        return await _snapshot_response()
+
+    @app.get("/snapshot.jpg")
+    async def legacy_snapshot() -> Response:
+        return await _snapshot_response()
 
     @app.get("/stream/mjpeg")
     async def stream_mjpeg():
