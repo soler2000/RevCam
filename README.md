@@ -175,7 +175,11 @@ as `motion.local`, so iOS devices can simply browse to
 hotspot's IP address. If development mode is enabled for the hotspot, RevCam
 waits up to 120 seconds for the access point to become fully active before
 rolling back to the previous Wi-Fi profile, giving clients more time to join the
-new network.
+new network. The announcer prefers the pure-Python `zeroconf` package (installed
+automatically when you run `pip install -e .`), but also falls back to Avahi's
+`avahi-publish` CLI. If you upgraded an existing environment, make sure
+`zeroconf` is installed or add `avahi-utils` via `sudo apt install avahi-utils`
+so `motion.local` resolves while the hotspot is active.
 
 ### Copy-paste bootstrap script (development machines)
 
