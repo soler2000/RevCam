@@ -396,6 +396,62 @@
         opacity: 0.75;
         margin-top: 0.75rem;
       }
+      .distance-readout {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 0.75rem;
+        margin: 0.5rem 0 0;
+      }
+      .distance-value {
+        font-size: 2.4rem;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+      }
+      .distance-zone {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 999px;
+        padding: 0.25rem 0.85rem;
+        font-size: 0.75rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      .zone-badge.clear {
+        color: #30d158;
+        background: rgba(48, 209, 88, 0.18);
+      }
+      .zone-badge.caution {
+        color: #ffd60a;
+        background: rgba(255, 214, 10, 0.18);
+      }
+      .zone-badge.warning {
+        color: #ff9f0a;
+        background: rgba(255, 159, 10, 0.18);
+      }
+      .zone-badge.danger {
+        color: #ff453a;
+        background: rgba(255, 69, 58, 0.2);
+      }
+      .zone-badge.unavailable {
+        color: rgba(245, 245, 245, 0.7);
+        background: rgba(245, 245, 245, 0.12);
+      }
+      .distance-actions {
+        margin-top: 1rem;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+      }
+      .distance-error {
+        margin: 0.75rem 0 0;
+        min-height: 1rem;
+      }
+      #distance-zones-status {
+        font-size: 0.9rem;
+      }
       @media (max-width: 640px) {
         body {
           padding: 1.5rem 1rem 2.5rem;
@@ -432,6 +488,18 @@
             tabindex="0"
           >
             Camera
+          </button>
+          <button
+            type="button"
+            class="tab-button"
+            role="tab"
+            id="tab-distance"
+            aria-controls="panel-distance"
+            aria-selected="false"
+            data-tab="distance"
+            tabindex="-1"
+          >
+            Distance
           </button>
           <button
             type="button"
@@ -515,6 +583,74 @@
             <div class="form-actions">
               <button type="submit">Save settings</button>
               <div id="status">Loading…</div>
+            </div>
+          </form>
+        </section>
+
+        <section
+          id="panel-distance"
+          class="tab-panel"
+          role="tabpanel"
+          aria-labelledby="tab-distance"
+          data-tab="distance"
+          hidden
+        >
+          <section class="card">
+            <h2>Distance sensor</h2>
+            <p id="distance-summary" class="muted">Distance readings are unavailable.</p>
+            <div class="distance-readout" id="distance-readout">
+              <span class="distance-value" id="distance-value">—</span>
+              <span class="distance-zone zone-badge unavailable" id="distance-zone">N/A</span>
+            </div>
+            <p id="distance-error" class="distance-error muted"></p>
+            <div class="distance-actions">
+              <button type="button" id="distance-refresh" class="secondary-button">
+                Refresh reading
+              </button>
+            </div>
+          </section>
+
+          <form id="distance-zones-form" class="card">
+            <h2>Warning zones</h2>
+            <p class="muted">
+              Set the thresholds for each warning zone. Distances are measured in metres.
+            </p>
+            <label>
+              Caution threshold (m)
+              <input
+                type="number"
+                name="caution"
+                min="0.1"
+                max="10"
+                step="0.1"
+                inputmode="decimal"
+              />
+            </label>
+            <label>
+              Warning threshold (m)
+              <input
+                type="number"
+                name="warning"
+                min="0.1"
+                max="10"
+                step="0.1"
+                inputmode="decimal"
+              />
+            </label>
+            <label>
+              Danger threshold (m)
+              <input
+                type="number"
+                name="danger"
+                min="0.1"
+                max="10"
+                step="0.1"
+                inputmode="decimal"
+              />
+            </label>
+            <div class="form-actions">
+              <button type="submit">Save warning zones</button>
+              <span id="distance-zones-status" class="muted"></span>
             </div>
           </form>
         </section>
@@ -639,6 +775,40 @@
       const availableTabs = tabButtons
         .map((button) => button.dataset.tab)
         .filter((value) => typeof value === "string" && value.length > 0);
+      const DISTANCE_ZONE_LABELS = {
+        danger: "Danger",
+        warning: "Warning",
+        caution: "Caution",
+        clear: "Clear",
+        unavailable: "Unavailable",
+      };
+      const distanceSummary = document.getElementById("distance-summary");
+      const distanceValue = document.getElementById("distance-value");
+      const distanceZone = document.getElementById("distance-zone");
+      const distanceError = document.getElementById("distance-error");
+      const distanceRefreshButton = document.getElementById("distance-refresh");
+      const distanceZonesForm = document.getElementById("distance-zones-form");
+      const distanceZonesStatus = document.getElementById("distance-zones-status");
+      const distanceInputs = distanceZonesForm
+        ? {
+            caution: distanceZonesForm.querySelector('input[name="caution"]'),
+            warning: distanceZonesForm.querySelector('input[name="warning"]'),
+            danger: distanceZonesForm.querySelector('input[name="danger"]'),
+          }
+        : null;
+      let distanceLoading = false;
+      if (distanceInputs) {
+        for (const input of Object.values(distanceInputs)) {
+          if (input instanceof HTMLInputElement) {
+            input.addEventListener("input", () => {
+              input.dataset.userEdited = "true";
+              if (distanceZonesStatus) {
+                distanceZonesStatus.textContent = "";
+              }
+            });
+          }
+        }
+      }
       const batterySummary = document.getElementById("battery-summary");
       const batteryRefreshButton = document.getElementById("battery-refresh");
       const batteryIndicator = document.getElementById("battery-indicator");
@@ -688,6 +858,128 @@
         : null;
       const HOTSPOT_HOSTNAME = "motion.local";
       const HOTSPOT_DEV_ROLLBACK_DEFAULT = 120;
+
+      function formatDistance(value) {
+        if (typeof value !== "number" || Number.isNaN(value)) {
+          return "—";
+        }
+        return `${Math.max(0, value).toFixed(1)} m`;
+      }
+
+      function updateDistanceBadge(zoneName) {
+        if (!distanceZone) {
+          return;
+        }
+        const valid = new Set(["danger", "warning", "caution", "clear"]);
+        const zoneKey =
+          typeof zoneName === "string" && valid.has(zoneName.toLowerCase())
+            ? zoneName.toLowerCase()
+            : "unavailable";
+        distanceZone.className = `distance-zone zone-badge ${zoneKey}`;
+        const label = DISTANCE_ZONE_LABELS[zoneKey] || DISTANCE_ZONE_LABELS.unavailable;
+        distanceZone.textContent = label.toUpperCase();
+      }
+
+      function updateDistanceInputs(zones, forceUpdate = false) {
+        if (!zones || !distanceInputs) {
+          return;
+        }
+        const keys = ["caution", "warning", "danger"];
+        for (const key of keys) {
+          const input = distanceInputs[key];
+          if (!(input instanceof HTMLInputElement)) {
+            continue;
+          }
+          if (!forceUpdate && input.dataset.userEdited === "true") {
+            continue;
+          }
+          const value = zones[key];
+          if (typeof value === "number" && Number.isFinite(value)) {
+            input.value = value.toFixed(1);
+          } else {
+            input.value = "";
+          }
+          delete input.dataset.userEdited;
+        }
+      }
+
+      function updateDistanceSummary(data) {
+        if (!distanceSummary) {
+          return;
+        }
+        if (
+          !data ||
+          data.available !== true ||
+          typeof data.distance_m !== "number" ||
+          Number.isNaN(data.distance_m)
+        ) {
+          const fallback =
+            data && typeof data.error === "string" && data.error.trim()
+              ? data.error.trim()
+              : "Distance sensor unavailable.";
+          distanceSummary.textContent = fallback;
+          return;
+        }
+        const zoneKey =
+          typeof data.zone === "string" ? data.zone.toLowerCase() : "clear";
+        const label = DISTANCE_ZONE_LABELS[zoneKey] || DISTANCE_ZONE_LABELS.clear;
+        distanceSummary.textContent = `${formatDistance(data.distance_m)} • ${label}`;
+      }
+
+      function applyDistanceData(data, options = {}) {
+        if (distanceValue) {
+          if (
+            data &&
+            data.available === true &&
+            typeof data.distance_m === "number" &&
+            Number.isFinite(data.distance_m)
+          ) {
+            distanceValue.textContent = formatDistance(data.distance_m);
+          } else {
+            distanceValue.textContent = "—";
+          }
+        }
+        const zoneKey = data && typeof data.zone === "string" ? data.zone.toLowerCase() : null;
+        updateDistanceBadge(zoneKey);
+        updateDistanceSummary(data);
+        if (distanceError) {
+          const message = data && typeof data.error === "string" ? data.error.trim() : "";
+          distanceError.textContent = message;
+          distanceError.classList.toggle("muted", !message);
+        }
+        if (data && data.zones) {
+          updateDistanceInputs(data.zones, options.updateInputs === true);
+        }
+      }
+
+      async function refreshDistanceReading(showLoading = false) {
+        if (distanceLoading) {
+          return;
+        }
+        distanceLoading = true;
+        if (showLoading && distanceSummary) {
+          distanceSummary.textContent = "Refreshing distance…";
+        }
+        if (distanceRefreshButton) {
+          distanceRefreshButton.disabled = true;
+        }
+        try {
+          const response = await fetch("/api/distance", { cache: "no-store" });
+          if (!response.ok) {
+            throw new Error(`Distance request failed with status ${response.status}`);
+          }
+          const payload = await response.json();
+          applyDistanceData(payload);
+        } catch (error) {
+          console.error("Distance status error", error);
+          applyDistanceData({ available: false, error: "Unable to load distance reading." });
+        } finally {
+          distanceLoading = false;
+          if (distanceRefreshButton) {
+            distanceRefreshButton.disabled = false;
+          }
+        }
+      }
 
       function getTabFromHash(hash) {
         if (typeof hash !== "string" || !hash) {
@@ -962,6 +1254,88 @@
           }
         });
       });
+
+      if (distanceRefreshButton) {
+        distanceRefreshButton.addEventListener("click", () => {
+          refreshDistanceReading(true).catch((err) => console.error(err));
+        });
+      }
+
+      if (distanceZonesForm) {
+        distanceZonesForm.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          if (!distanceInputs) {
+            return;
+          }
+          if (distanceZonesStatus) {
+            distanceZonesStatus.textContent = "Saving…";
+          }
+          const cautionInput = distanceInputs.caution;
+          const warningInput = distanceInputs.warning;
+          const dangerInput = distanceInputs.danger;
+          const caution =
+            cautionInput instanceof HTMLInputElement ? Number.parseFloat(cautionInput.value) : Number.NaN;
+          const warning =
+            warningInput instanceof HTMLInputElement ? Number.parseFloat(warningInput.value) : Number.NaN;
+          const danger =
+            dangerInput instanceof HTMLInputElement ? Number.parseFloat(dangerInput.value) : Number.NaN;
+          if (!Number.isFinite(caution) || !Number.isFinite(warning) || !Number.isFinite(danger)) {
+            if (distanceZonesStatus) {
+              distanceZonesStatus.textContent = "Enter numeric thresholds for all zones.";
+            }
+            return;
+          }
+          if (caution <= 0 || warning <= 0 || danger <= 0) {
+            if (distanceZonesStatus) {
+              distanceZonesStatus.textContent = "Thresholds must be positive values.";
+            }
+            return;
+          }
+          if (!(caution >= warning && warning >= danger)) {
+            if (distanceZonesStatus) {
+              distanceZonesStatus.textContent = "Ensure caution ≥ warning ≥ danger.";
+            }
+            return;
+          }
+          try {
+            const response = await fetch("/api/distance/zones", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ caution, warning, danger }),
+            });
+            if (!response.ok) {
+              let errorDetail = "Unable to save warning zones.";
+              try {
+                const payload = await response.json();
+                if (payload && typeof payload.detail === "string") {
+                  errorDetail = payload.detail;
+                }
+              } catch (err) {
+                console.error(err);
+              }
+              if (distanceZonesStatus) {
+                distanceZonesStatus.textContent = errorDetail;
+              }
+              return;
+            }
+            const payload = await response.json();
+            applyDistanceData(payload, { updateInputs: true });
+            if (distanceZonesStatus) {
+              distanceZonesStatus.textContent = "Warning zones saved";
+              setTimeout(() => {
+                if (distanceZonesStatus && distanceZonesStatus.textContent === "Warning zones saved") {
+                  distanceZonesStatus.textContent = "";
+                }
+              }, 3000);
+            }
+          } catch (err) {
+            console.error("Distance zone update error", err);
+            if (distanceZonesStatus) {
+              distanceZonesStatus.textContent = "Unable to save warning zones.";
+            }
+          }
+        });
+      }
 
       if (batteryRefreshButton) {
         batteryRefreshButton.addEventListener("click", () => {
@@ -1617,9 +1991,10 @@
       }
 
       async function fetchSettings() {
-        const [orientationResponse, cameraResponse] = await Promise.all([
+        const [orientationResponse, cameraResponse, distanceResponse] = await Promise.all([
           fetch("/api/orientation"),
           fetch("/api/camera"),
+          fetch("/api/distance"),
         ]);
         if (!orientationResponse.ok) {
           throw new Error("Unable to fetch current orientation");
@@ -1627,16 +2002,21 @@
         if (!cameraResponse.ok) {
           throw new Error("Unable to fetch camera configuration");
         }
-        const [orientationData, cameraData] = await Promise.all([
+        if (!distanceResponse.ok) {
+          throw new Error("Unable to fetch distance configuration");
+        }
+        const [orientationData, cameraData, distanceData] = await Promise.all([
           orientationResponse.json(),
           cameraResponse.json(),
+          distanceResponse.json(),
         ]);
-        return { orientation: orientationData, camera: cameraData };
+        return { orientation: orientationData, camera: cameraData, distance: distanceData };
       }
 
       async function loadSettings() {
         const data = await fetchSettings();
         applySettings(data.orientation, data.camera);
+        applyDistanceData(data.distance, { updateInputs: true });
       }
 
       form.addEventListener("submit", async (event) => {
@@ -1693,6 +2073,7 @@
           try {
             const data = await fetchSettings();
             applySettings(data.orientation, data.camera, statusLabel.textContent);
+            applyDistanceData(data.distance, { updateInputs: true });
           } catch (err) {
             console.error(err);
           }
@@ -1701,6 +2082,7 @@
         try {
           const data = await fetchSettings();
           applySettings(data.orientation, data.camera, "Settings saved");
+          applyDistanceData(data.distance, { updateInputs: true });
         } catch (err) {
           console.error(err);
           statusLabel.textContent = "Settings saved";

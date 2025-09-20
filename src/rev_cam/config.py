@@ -7,7 +7,17 @@ from pathlib import Path
 from threading import Lock
 from typing import Any, Dict, Iterable, Mapping, Sequence
 
-from .camera import CAMERA_SOURCES, DEFAULT_CAMERA_CHOICE
+try:
+    from .camera import CAMERA_SOURCES, DEFAULT_CAMERA_CHOICE
+except ImportError:  # pragma: no cover - fallback when optional dependencies missing
+    CAMERA_SOURCES = {
+        "auto": "Automatic (PiCamera2 with synthetic fallback)",
+        "picamera": "PiCamera2",
+        "opencv": "OpenCV (USB webcam)",
+        "synthetic": "Synthetic test pattern",
+    }
+    DEFAULT_CAMERA_CHOICE = "auto"
+from .distance import DEFAULT_DISTANCE_ZONES, DistanceZones
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,6 +132,31 @@ def _parse_resolution(value: Any, *, default: Resolution) -> Resolution:
     raise ValueError("Unsupported resolution value")
 
 
+def _parse_distance_zones(value: Any, *, default: DistanceZones) -> DistanceZones:
+    if value is None:
+        return default
+    if isinstance(value, DistanceZones):
+        return DistanceZones(value.caution, value.warning, value.danger)
+    if isinstance(value, Mapping):
+        payload = value.get("zones") if "zones" in value else value
+        if not isinstance(payload, Mapping):
+            raise ValueError("Distance zones must provide 'caution', 'warning' and 'danger'")
+        caution = payload.get("caution", default.caution)
+        warning = payload.get("warning", default.warning)
+        danger = payload.get("danger", default.danger)
+    elif isinstance(value, Sequence):
+        items = list(value)
+        if len(items) != 3:
+            raise ValueError("Distance zones sequence must contain three values")
+        caution, warning, danger = items
+    else:
+        raise ValueError("Unsupported distance zone value")
+    try:
+        return DistanceZones(float(caution), float(warning), float(danger))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Distance zone values must be numeric") from exc
+
+
 class ConfigManager:
     """Stores configuration state on disk with thread-safety."""
 
@@ -129,14 +164,24 @@ class ConfigManager:
         self._path = config_path
         self._lock = Lock()
         self._ensure_parent()
-        self._orientation, self._camera, self._resolution = self._load()
+        (
+            self._orientation,
+            self._camera,
+            self._resolution,
+            self._distance_zones,
+        ) = self._load()
 
     def _ensure_parent(self) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
 
-    def _load(self) -> tuple[Orientation, str, Resolution]:
+    def _load(self) -> tuple[Orientation, str, Resolution, DistanceZones]:
         if not self._path.exists():
-            return Orientation(), DEFAULT_CAMERA_CHOICE, DEFAULT_RESOLUTION
+            return (
+                Orientation(),
+                DEFAULT_CAMERA_CHOICE,
+                DEFAULT_RESOLUTION,
+                DEFAULT_DISTANCE_ZONES,
+            )
         try:
             payload = json.loads(self._path.read_text())
             if not isinstance(payload, dict):
@@ -155,7 +200,11 @@ class ConfigManager:
                 camera = DEFAULT_CAMERA_CHOICE
             resolution_payload = payload.get("resolution")
             resolution = _parse_resolution(resolution_payload, default=DEFAULT_RESOLUTION)
-            return orientation, camera, resolution
+
+            distance_payload = payload.get("distance")
+            distance_zones = _parse_distance_zones(distance_payload, default=DEFAULT_DISTANCE_ZONES)
+
+            return orientation, camera, resolution, distance_zones
         except (OSError, ValueError) as exc:
             raise RuntimeError(f"Failed to load configuration: {exc}") from exc
 
@@ -164,6 +213,7 @@ class ConfigManager:
             "orientation": asdict(self._orientation),
             "camera": self._camera,
             "resolution": {"width": self._resolution.width, "height": self._resolution.height},
+            "distance": {"zones": self._distance_zones.to_dict()},
         }
         self._path.write_text(json.dumps(payload, indent=2))
 
@@ -206,6 +256,17 @@ class ConfigManager:
             self._resolution = resolution
             self._save()
         return resolution
+
+    def get_distance_zones(self) -> DistanceZones:
+        with self._lock:
+            return self._distance_zones
+
+    def set_distance_zones(self, data: Mapping[str, Any] | Sequence[object]) -> DistanceZones:
+        zones = _parse_distance_zones(data, default=self._distance_zones)
+        with self._lock:
+            self._distance_zones = zones
+            self._save()
+        return zones
 
 
 __all__ = [
