@@ -355,13 +355,75 @@ class MediaMTXPublisher:
         except Exception as exc:
             self._start_error = exc
             self._ready_event.set()
-            logger.exception("MediaMTX publisher failed", exc_info=True)
+            if isinstance(exc, MediaMTXConnectionError):
+                logger.warning("MediaMTX publisher failed: %s", exc)
+            else:  # pragma: no cover - rare failure path
+                logger.exception("MediaMTX publisher failed", exc_info=True)
             raise
         finally:
             track.stop()
             with contextlib.suppress(Exception):
                 await pc.close()
             self._task = None
+
+
+class _DirectWebRTCBackend:
+    """Serve WebRTC offers directly from RevCam without MediaMTX."""
+
+    def __init__(
+        self,
+        camera: BaseCamera,
+        pipeline: FramePipeline,
+        *,
+        fps: int,
+    ) -> None:
+        _ensure_aiortc_available()
+        self._camera = camera
+        self._pipeline = pipeline
+        self._fps = fps
+        self._connections: set[RTCPeerConnection] = set()
+        self._tracks: dict[RTCPeerConnection, PipelineVideoTrack] = {}
+        self._lock = asyncio.Lock()
+
+    async def set_camera(self, camera: BaseCamera) -> None:
+        self._camera = camera
+
+    async def handle_offer(self, offer: RTCSessionDescription) -> RTCSessionDescription:
+        pc = _RTCPeerConnection()
+        track = PipelineVideoTrack(self._camera, self._pipeline, fps=self._fps)
+        pc.addTrack(track)
+
+        @pc.on("connectionstatechange")
+        async def _on_state_change() -> None:  # pragma: no cover - network timing dependent
+            if pc.connectionState in {"failed", "closed"}:
+                await self._close_connection(pc)
+
+        await pc.setRemoteDescription(offer)
+        answer = await pc.createAnswer()
+        await pc.setLocalDescription(answer)
+        async with self._lock:
+            self._connections.add(pc)
+            self._tracks[pc] = track
+        return pc.localDescription
+
+    async def _close_connection(self, pc: RTCPeerConnection) -> None:
+        track: PipelineVideoTrack | None = None
+        should_close = False
+        async with self._lock:
+            track = self._tracks.pop(pc, None)
+            if pc in self._connections:
+                self._connections.remove(pc)
+                should_close = True
+        if track is not None:
+            track.stop()
+        if should_close:
+            with contextlib.suppress(Exception):
+                await pc.close()
+
+    async def shutdown(self) -> None:
+        async with self._lock:
+            connections = list(self._connections)
+        await asyncio.gather(*(self._close_connection(pc) for pc in connections), return_exceptions=True)
 
 
 class WebRTCManager:
@@ -381,59 +443,124 @@ class WebRTCManager:
         self.camera = camera
         self.pipeline = pipeline
         self._config = MediaMTXConfig(base_url=mediamtx_url, stream_name=stream_name)
-        if client is None:
-            _ensure_httpx_available()
-            self._client = MediaMTXClient(self._config)
-        else:
-            self._client = client
         self._fps = fps
-        self._publisher = MediaMTXPublisher(
-            camera,
-            pipeline,
-            self._client,
-            config=self._config,
-            fps=fps,
-        )
+        self._direct = _DirectWebRTCBackend(camera, pipeline, fps=fps)
         self._publisher_lock = asyncio.Lock()
         self._publisher_started = False
+        self._client: MediaMTXClient | None
+        self._publisher: MediaMTXPublisher | None
+        if client is not None:
+            self._client = client
+            self._publisher = MediaMTXPublisher(
+                camera,
+                pipeline,
+                self._client,
+                config=self._config,
+                fps=fps,
+            )
+            self._mediamtx_enabled = True
+        elif _HTTPX_IMPORT_ERROR is None:
+            self._client = MediaMTXClient(self._config)
+            self._publisher = MediaMTXPublisher(
+                camera,
+                pipeline,
+                self._client,
+                config=self._config,
+                fps=fps,
+            )
+            self._mediamtx_enabled = True
+        else:
+            logger.info(
+                "MediaMTX integration disabled: httpx is not available (%s)",
+                _HTTPX_IMPORT_ERROR,
+            )
+            self._client = None
+            self._publisher = None
+            self._mediamtx_enabled = False
 
     async def _ensure_publisher(self) -> None:
+        publisher = self._publisher
+        if publisher is None:
+            raise MediaMTXError("MediaMTX publisher unavailable")
         async with self._publisher_lock:
             if self._publisher_started:
                 return
-            await self._publisher.start()
+            await publisher.start()
             self._publisher_started = True
+
+    async def _disable_mediamtx(self, reason: str) -> None:
+        if not self._mediamtx_enabled:
+            return
+        logger.warning("Disabling MediaMTX streaming: %s", reason)
+        self._mediamtx_enabled = False
+        publisher: MediaMTXPublisher | None
+        async with self._publisher_lock:
+            publisher = self._publisher
+            self._publisher = None
+            self._publisher_started = False
+        if publisher is not None:
+            with contextlib.suppress(Exception):
+                await publisher.stop()
+        client = self._client
+        self._client = None
+        if client is not None:
+            with contextlib.suppress(Exception):
+                await client.close()
 
     async def set_camera(self, camera: BaseCamera) -> None:
         if camera is self.camera:
             return
         async with self._publisher_lock:
-            await self._publisher.stop()
+            if self._publisher is not None:
+                await self._publisher.stop()
             self.camera = camera
-            self._publisher = MediaMTXPublisher(
-                camera,
-                self.pipeline,
-                self._client,
-                config=self._config,
-                fps=self._fps,
-            )
-            self._publisher_started = False
+            await self._direct.set_camera(camera)
+            if self._client is not None:
+                self._publisher = MediaMTXPublisher(
+                    camera,
+                    self.pipeline,
+                    self._client,
+                    config=self._config,
+                    fps=self._fps,
+                )
+                self._publisher_started = False
+            else:
+                self._publisher = None
+                self._publisher_started = False
 
     async def handle_offer(self, offer: RTCSessionDescription) -> RTCSessionDescription:
+        mediamtx_error: MediaMTXError | None = None
+        if self._mediamtx_enabled and self._client is not None and self._publisher is not None:
+            try:
+                await self._ensure_publisher()
+                return await self._client.play(offer)
+            except MediaMTXError as exc:
+                mediamtx_error = exc
+                await self._disable_mediamtx(str(exc))
         try:
-            await self._ensure_publisher()
-        except MediaMTXError as exc:
-            raise WebRTCError(f"Unable to start MediaMTX publisher: {exc}") from exc
-        try:
-            return await self._client.play(offer)
-        except MediaMTXError as exc:
-            raise WebRTCError(f"Unable to connect viewer via MediaMTX: {exc}") from exc
+            return await self._direct.handle_offer(offer)
+        except Exception as exc:
+            if mediamtx_error is not None:
+                raise WebRTCError(
+                    "MediaMTX unavailable and direct WebRTC setup failed"
+                ) from exc
+            raise WebRTCError("Unable to establish WebRTC connection") from exc
 
     async def shutdown(self) -> None:
+        await self._direct.shutdown()
+        publisher: MediaMTXPublisher | None
         async with self._publisher_lock:
-            await self._publisher.stop()
+            publisher = self._publisher
+            self._publisher = None
             self._publisher_started = False
-        await self._client.close()
+        if publisher is not None:
+            with contextlib.suppress(Exception):
+                await publisher.stop()
+        client = self._client
+        self._client = None
+        if client is not None:
+            with contextlib.suppress(Exception):
+                await client.close()
 
 
 __all__ = ["MediaMTXConfig", "PipelineVideoTrack", "WebRTCManager"]
