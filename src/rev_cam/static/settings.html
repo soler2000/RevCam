@@ -772,11 +772,22 @@
             </p>
           </section>
           <form id="battery-limits-form" class="card">
-            <h2>Battery limits</h2>
+            <h2>Battery settings</h2>
             <p class="muted">
-              Set the warning and shutdown thresholds used for on-screen alerts and automatic
-              shutdown.
+              Configure the warning and shutdown thresholds used for on-screen alerts and automatic
+              shutdown, and the capacity of the connected battery pack.
             </p>
+            <label>
+              Battery capacity (mAh)
+              <input
+                type="number"
+                name="capacity_mah"
+                min="50"
+                max="200000"
+                step="50"
+                inputmode="numeric"
+              />
+            </label>
             <label>
               Warning threshold (%)
               <input
@@ -800,7 +811,7 @@
               />
             </label>
             <div class="form-actions">
-              <button type="submit">Save battery limits</button>
+              <button type="submit">Save battery settings</button>
               <span id="battery-limits-status" class="muted"></span>
             </div>
           </form>
@@ -862,6 +873,7 @@
       const batteryLimitsStatus = document.getElementById("battery-limits-status");
       const batteryLimitsInputs = batteryLimitsForm
         ? {
+            capacity: batteryLimitsForm.querySelector('input[name="capacity_mah"]'),
             warning: batteryLimitsForm.querySelector('input[name="warning_percent"]'),
             shutdown: batteryLimitsForm.querySelector('input[name="shutdown_percent"]'),
           }
@@ -1193,6 +1205,13 @@
         } else if (data.charging === true) {
           pieces.push("Charging");
         }
+        if (
+          typeof data.capacity_mah === "number" &&
+          Number.isFinite(data.capacity_mah) &&
+          data.capacity_mah > 0
+        ) {
+          pieces.push(`${Math.round(data.capacity_mah)} mAh pack`);
+        }
         batterySummary.textContent = pieces.join(" • ");
       }
 
@@ -1240,6 +1259,7 @@
         }
         const { force = false, clearUserEdited = false } = options;
         const entries = [
+          ["capacity_mah", batteryLimitsInputs.capacity],
           ["warning_percent", batteryLimitsInputs.warning],
           ["shutdown_percent", batteryLimitsInputs.shutdown],
         ];
@@ -1261,9 +1281,17 @@
             }
           }
           if (typeof rawValue === "number" && Number.isFinite(rawValue)) {
-            input.value = rawValue.toString();
+            const displayValue =
+              property === "capacity_mah" ? Math.round(rawValue) : rawValue;
+            input.value = displayValue.toString();
+            if (property === "capacity_mah" && batteryCapacity) {
+              batteryCapacity.textContent = `${Math.round(displayValue)} mAh`;
+            }
           } else {
             input.value = "";
+            if (property === "capacity_mah" && batteryCapacity) {
+              batteryCapacity.textContent = "—";
+            }
           }
           if (clearUserEdited) {
             delete input.dataset.userEdited;
@@ -1287,7 +1315,7 @@
           batteryLimitsStatusTimer = null;
         }
         if (batteryLimitsStatus && showLoading) {
-          batteryLimitsStatus.textContent = "Loading battery limits…";
+          batteryLimitsStatus.textContent = "Loading battery settings…";
         }
         if (batteryLimitsSubmit) {
           batteryLimitsSubmit.disabled = true;
@@ -1295,7 +1323,7 @@
         try {
           const response = await fetch("/api/battery/limits", { cache: "no-store" });
           if (!response.ok) {
-            throw new Error(`Battery limits request failed with status ${response.status}`);
+            throw new Error(`Battery settings request failed with status ${response.status}`);
           }
           const payload = await response.json();
           updateBatteryLimitsInputs(payload, { force: true, clearUserEdited: true });
@@ -1307,7 +1335,7 @@
           console.error("Battery limits load error", error);
           batteryLimitsLoaded = false;
           if (batteryLimitsStatus) {
-            batteryLimitsStatus.textContent = "Unable to load battery limits.";
+            batteryLimitsStatus.textContent = "Unable to load battery settings.";
           }
         } finally {
           batteryLimitsLoading = false;
@@ -1502,8 +1530,13 @@
           if (!batteryLimitsInputs) {
             return;
           }
+          const capacityInput = batteryLimitsInputs.capacity;
           const warningInput = batteryLimitsInputs.warning;
           const shutdownInput = batteryLimitsInputs.shutdown;
+          const capacityValue =
+            capacityInput instanceof HTMLInputElement
+              ? Number.parseFloat(capacityInput.value)
+              : Number.NaN;
           const warningValue =
             warningInput instanceof HTMLInputElement
               ? Number.parseFloat(warningInput.value)
@@ -1512,9 +1545,26 @@
             shutdownInput instanceof HTMLInputElement
               ? Number.parseFloat(shutdownInput.value)
               : Number.NaN;
-          if (!Number.isFinite(warningValue) || !Number.isFinite(shutdownValue)) {
+          if (
+            !Number.isFinite(capacityValue) ||
+            !Number.isFinite(warningValue) ||
+            !Number.isFinite(shutdownValue)
+          ) {
             if (batteryLimitsStatus) {
-              batteryLimitsStatus.textContent = "Enter numeric thresholds for both values.";
+              batteryLimitsStatus.textContent = "Enter numeric values for all battery settings.";
+            }
+            return;
+          }
+          const roundedCapacity = Math.round(capacityValue);
+          if (roundedCapacity <= 0) {
+            if (batteryLimitsStatus) {
+              batteryLimitsStatus.textContent = "Capacity must be a positive number.";
+            }
+            return;
+          }
+          if (roundedCapacity < 50 || roundedCapacity > 200000) {
+            if (batteryLimitsStatus) {
+              batteryLimitsStatus.textContent = "Capacity must be between 50 and 200000 mAh.";
             }
             return;
           }
@@ -1541,7 +1591,8 @@
             batteryLimitsSubmit.disabled = true;
           }
           try {
-            const response = await fetch("/api/battery/limits", {
+            let payload = null;
+            const limitsResponse = await fetch("/api/battery/limits", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
@@ -1549,12 +1600,12 @@
                 shutdown_percent: shutdownValue,
               }),
             });
-            if (!response.ok) {
-              let errorDetail = "Unable to save battery limits.";
+            if (!limitsResponse.ok) {
+              let errorDetail = "Unable to save battery settings.";
               try {
-                const payload = await response.json();
-                if (payload && typeof payload.detail === "string") {
-                  errorDetail = payload.detail;
+                const problem = await limitsResponse.json();
+                if (problem && typeof problem.detail === "string") {
+                  errorDetail = problem.detail;
                 }
               } catch (err) {
                 console.error(err);
@@ -1564,25 +1615,49 @@
               }
               return;
             }
-            const payload = await response.json();
+            payload = await limitsResponse.json();
+            const capacityResponse = await fetch("/api/battery/capacity", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                capacity_mah: roundedCapacity,
+              }),
+            });
+            if (!capacityResponse.ok) {
+              let errorDetail = "Unable to save battery settings.";
+              try {
+                const problem = await capacityResponse.json();
+                if (problem && typeof problem.detail === "string") {
+                  errorDetail = problem.detail;
+                }
+              } catch (err) {
+                console.error(err);
+              }
+              if (batteryLimitsStatus) {
+                batteryLimitsStatus.textContent = errorDetail;
+              }
+              return;
+            }
+            payload = await capacityResponse.json();
             updateBatteryLimitsInputs(payload, { force: true, clearUserEdited: true });
             batteryLimitsLoaded = true;
             if (batteryLimitsStatus) {
-              batteryLimitsStatus.textContent = "Battery limits saved";
+              batteryLimitsStatus.textContent = "Battery settings saved";
               batteryLimitsStatusTimer = window.setTimeout(() => {
                 if (
                   batteryLimitsStatus &&
-                  batteryLimitsStatus.textContent === "Battery limits saved"
+                  batteryLimitsStatus.textContent === "Battery settings saved"
                 ) {
                   batteryLimitsStatus.textContent = "";
                 }
                 batteryLimitsStatusTimer = null;
               }, 3000);
             }
+            refreshBatteryStatus().catch((err) => console.error(err));
           } catch (err) {
-            console.error("Battery limits update error", err);
+            console.error("Battery settings update error", err);
             if (batteryLimitsStatus) {
-              batteryLimitsStatus.textContent = "Unable to save battery limits.";
+              batteryLimitsStatus.textContent = "Unable to save battery settings.";
             }
           } finally {
             if (batteryLimitsSubmit) {

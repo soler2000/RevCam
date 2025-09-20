@@ -66,6 +66,10 @@ class BatteryLimitsPayload(BaseModel):
     shutdown_percent: float
 
 
+class BatteryCapacityPayload(BaseModel):
+    capacity_mah: int
+
+
 def create_app(
     config_path: Path | str = Path("data/config.json"),
     *,
@@ -88,7 +92,10 @@ def create_app(
     else:
         i2c_bus_override = None
 
-    battery_monitor = BatteryMonitor(capacity_mah=1000, i2c_bus=i2c_bus_override)
+    battery_monitor = BatteryMonitor(
+        capacity_mah=config_manager.get_battery_capacity(),
+        i2c_bus=i2c_bus_override,
+    )
     battery_supervisor = BatterySupervisor(
         battery_monitor,
         config_manager.get_battery_limits,
@@ -303,18 +310,33 @@ def create_app(
         reading = battery_monitor.read()
         return reading.to_dict()
 
-    @app.get("/api/battery/limits")
-    async def get_battery_limits() -> dict[str, float]:
+    def _battery_settings_payload() -> dict[str, float | int]:
         limits = config_manager.get_battery_limits()
-        return limits.to_dict()
+        capacity = config_manager.get_battery_capacity()
+        payload: dict[str, float | int] = limits.to_dict()
+        payload["capacity_mah"] = capacity
+        return payload
+
+    @app.get("/api/battery/limits")
+    async def get_battery_limits() -> dict[str, float | int]:
+        return _battery_settings_payload()
 
     @app.post("/api/battery/limits")
-    async def update_battery_limits(payload: BatteryLimitsPayload) -> dict[str, float]:
+    async def update_battery_limits(payload: BatteryLimitsPayload) -> dict[str, float | int]:
         try:
-            limits = config_manager.set_battery_limits(payload.model_dump())
+            config_manager.set_battery_limits(payload.model_dump())
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return limits.to_dict()
+        return _battery_settings_payload()
+
+    @app.post("/api/battery/capacity")
+    async def update_battery_capacity(payload: BatteryCapacityPayload) -> dict[str, float | int]:
+        try:
+            capacity = config_manager.set_battery_capacity(payload.capacity_mah)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        battery_monitor.capacity_mah = capacity
+        return _battery_settings_payload()
 
     @app.get("/api/distance")
     async def get_distance_status() -> dict[str, object | None]:
