@@ -101,19 +101,25 @@ def diagnose_picamera_stack() -> dict[str, object]:
     return payload
 
 
+def collect_diagnostics() -> dict[str, object]:
+    """Collect diagnostics payload used by both the CLI and API."""
+
+    hints = diagnose_camera_conflicts()
+    picamera_stack = diagnose_picamera_stack()
+    return {
+        "version": APP_VERSION,
+        "camera_conflicts": hints,
+        "picamera": picamera_stack,
+    }
+
+
 def run(argv: Sequence[str] | None = None) -> int:
     """Execute the diagnostics CLI with *argv* arguments."""
 
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    hints = diagnose_camera_conflicts()
-    picamera_stack = diagnose_picamera_stack()
-    payload = {
-        "version": APP_VERSION,
-        "camera_conflicts": hints,
-        "picamera": picamera_stack,
-    }
+    payload = collect_diagnostics()
 
     if args.json:
         json.dump(payload, sys.stdout)
@@ -154,7 +160,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     return run(argv)
 
 
-__all__ = ["build_parser", "diagnose_picamera_stack", "run", "main"]
+__all__ = [
+    "build_parser",
+    "diagnose_picamera_stack",
+    "collect_diagnostics",
+    "run",
+    "main",
+]
 
 
 if __name__ == "__main__":  # pragma: no cover - module behaviour
