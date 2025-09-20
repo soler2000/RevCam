@@ -10,19 +10,47 @@
         font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         background-color: #111;
         color: #f5f5f5;
-        padding: 1.5rem;
+        padding: 2rem 1.5rem 3rem;
       }
       h1 {
-        margin-top: 0;
+        margin: 0;
+        font-size: 2rem;
+      }
+      h2 {
+        margin: 0 0 0.75rem;
+        font-size: 1.35rem;
+      }
+      h3 {
+        margin: 1rem 0 0.5rem;
+        font-size: 1.1rem;
+      }
+      p {
+        margin: 0 0 1rem;
+      }
+      a {
+        color: #0a84ff;
       }
       label {
         display: block;
         margin-bottom: 1rem;
       }
       select,
-      input[type="checkbox"] {
+      input[type="text"],
+      input[type="password"],
+      input[type="number"] {
         margin-top: 0.5rem;
         font-size: 1rem;
+        padding: 0.55rem 0.65rem;
+        border-radius: 8px;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        background: rgba(0, 0, 0, 0.35);
+        color: inherit;
+        width: 100%;
+        box-sizing: border-box;
+      }
+      input[type="checkbox"] {
+        margin-top: 0.5rem;
+        transform: scale(1.2);
       }
       button {
         background: #0a84ff;
@@ -32,6 +60,7 @@
         border-radius: 999px;
         font-size: 1rem;
         cursor: pointer;
+        font-weight: 600;
       }
       .button-link,
       button {
@@ -62,23 +91,84 @@
         opacity: 0.5;
         cursor: not-allowed;
       }
-      #status {
-        margin-top: 1rem;
+      button:disabled {
+        cursor: not-allowed;
+      }
+      .muted {
+        opacity: 0.75;
+      }
+      .page-content {
+        max-width: 960px;
+        margin: 0 auto;
+        display: flex;
+        flex-direction: column;
+        gap: 1.5rem;
+      }
+      .page-header {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+      }
+      .back-link {
+        width: fit-content;
+        font-weight: 600;
+        text-decoration: none;
+      }
+      .back-link:hover,
+      .back-link:focus-visible {
+        text-decoration: underline;
+      }
+      .tab-container {
+        display: flex;
+        flex-direction: column;
+        gap: 1.25rem;
+      }
+      .tab-list {
+        display: inline-flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        padding: 0.35rem;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.06);
+      }
+      .tab-button {
+        border: none;
+        background: transparent;
+        color: rgba(245, 245, 245, 0.7);
+        border-radius: 999px;
+        padding: 0.45rem 1rem;
         font-size: 0.95rem;
-        opacity: 0.85;
+        font-weight: 600;
+        transition: background 0.2s ease, color 0.2s ease;
       }
-      a {
-        color: #0a84ff;
+      .tab-button[aria-selected="true"] {
+        background: #0a84ff;
+        color: #fff;
+        box-shadow: 0 0 0 1px rgba(10, 132, 255, 0.3);
       }
-      #stream-section {
-        margin: 2rem 0 1.5rem;
-        padding: 1rem;
-        border-radius: 12px;
+      .tab-button:hover,
+      .tab-button:focus-visible {
+        color: #fff;
+      }
+      .tab-button:focus-visible {
+        outline: 2px solid rgba(255, 255, 255, 0.7);
+        outline-offset: 2px;
+      }
+      .tab-panel {
+        display: none;
+        flex-direction: column;
+        gap: 1.5rem;
+      }
+      .tab-panel:not([hidden]) {
+        display: flex;
+      }
+      .card {
+        padding: 1.5rem;
+        border-radius: 16px;
         background: rgba(255, 255, 255, 0.04);
       }
       #stream-section h2 {
         margin-top: 0;
-        margin-bottom: 0.5rem;
       }
       #stream-summary {
         margin: 0;
@@ -99,11 +189,24 @@
         font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
         word-break: break-all;
       }
-      #wifi-section {
-        margin: 2rem 0 1.5rem;
-        padding: 1rem;
-        border-radius: 12px;
-        background: rgba(255, 255, 255, 0.04);
+      #orientation-form {
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+      }
+      #orientation-form h2,
+      #orientation-form h3 {
+        margin-top: 0;
+      }
+      #orientation-form .form-actions {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+      }
+      #status {
+        font-size: 0.95rem;
+        opacity: 0.85;
       }
       #wifi-section h2,
       #wifi-section h3 {
@@ -190,116 +293,364 @@
         flex-wrap: wrap;
         gap: 0.5rem;
       }
+      .battery-card {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 1.5rem;
+      }
+      #battery-indicator {
+        display: inline-flex;
+        align-items: center;
+        gap: 1rem;
+        padding: 0.5rem 0.75rem;
+        border-radius: 12px;
+        background: rgba(0, 0, 0, 0.35);
+        min-width: 200px;
+      }
+      .battery-icon {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        justify-content: flex-start;
+        width: 52px;
+        height: 24px;
+        padding: 2px;
+        border-radius: 6px;
+        border: 2px solid currentColor;
+        color: #0a84ff;
+      }
+      .battery-icon::after {
+        content: "";
+        position: absolute;
+        right: -6px;
+        top: 50%;
+        transform: translateY(-50%);
+        width: 4px;
+        height: 12px;
+        border-radius: 4px;
+        background: currentColor;
+      }
+      .battery-level {
+        display: block;
+        height: 100%;
+        border-radius: 4px;
+        background: currentColor;
+        width: 0%;
+        transition: width 0.3s ease;
+      }
+      .battery-icon.low {
+        color: #ff9f0a;
+      }
+      .battery-icon.charging {
+        color: #30d158;
+      }
+      .battery-icon.unavailable {
+        color: rgba(245, 245, 245, 0.4);
+      }
+      #battery-status {
+        display: flex;
+        flex-direction: column;
+        gap: 0.2rem;
+      }
+      #battery-text {
+        font-size: 1.2rem;
+        font-weight: 600;
+      }
+      #battery-details {
+        font-size: 0.95rem;
+        opacity: 0.8;
+      }
+      .battery-metrics {
+        display: grid;
+        gap: 1rem;
+        flex: 1 1 260px;
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      }
+      .battery-metrics div {
+        background: rgba(255, 255, 255, 0.03);
+        padding: 0.75rem;
+        border-radius: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 0.35rem;
+      }
+      .battery-metrics dt {
+        font-size: 0.85rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        opacity: 0.7;
+      }
+      .battery-metrics dd {
+        margin: 0;
+        font-size: 1rem;
+        font-weight: 600;
+      }
+      .battery-actions {
+        display: flex;
+        gap: 0.5rem;
+        margin-top: 1.25rem;
+      }
+      .battery-note {
+        font-size: 0.9rem;
+        opacity: 0.75;
+        margin-top: 0.75rem;
+      }
+      @media (max-width: 640px) {
+        body {
+          padding: 1.5rem 1rem 2.5rem;
+        }
+        .card {
+          padding: 1.25rem;
+        }
+        #battery-indicator {
+          width: 100%;
+        }
+      }
     </style>
   </head>
   <body>
-    <a href="/">← Back to live view</a>
-    <h1>Camera Settings</h1>
-    <p id="app-version" style="margin-top: -0.5rem; opacity: 0.75;">
-      Version <span id="version-value">Loading…</span>
-    </p>
-    <section id="stream-section">
-      <h2>Streaming</h2>
-      <p id="stream-summary">Loading…</p>
-      <div id="stream-actions">
-        <a
-          id="open-stream"
-          class="button-link disabled"
-          href="/stream/mjpeg"
-          target="_blank"
-          rel="noopener"
-          aria-disabled="true"
-          >Open MJPEG stream</a
-        >
-        <button type="button" id="copy-stream-url" class="secondary-button" disabled>
-          Copy stream URL
-        </button>
-      </div>
-      <code id="stream-url">—</code>
-    </section>
-    <section id="wifi-section">
-      <h2>Wi-Fi</h2>
-      <p id="wifi-summary">Loading…</p>
-      <div id="wifi-controls">
-        <button type="button" id="wifi-refresh" class="secondary-button">Refresh status</button>
-        <button type="button" id="wifi-scan">Scan networks</button>
-        <label>
-          <input type="checkbox" id="wifi-dev-mode" /> Development mode (auto-rollback)
-        </label>
-      </div>
-      <div id="wifi-feedback" role="status" aria-live="polite"></div>
-      <ul id="wifi-network-list"></ul>
-      <form id="wifi-connect-form" hidden>
-        <h3 style="margin: 0;">Connect to network</h3>
-        <p id="wifi-connect-selected" style="margin: 0; opacity: 0.85;"></p>
-        <input type="hidden" name="ssid" />
-        <label>
-          Password
-          <input type="password" name="password" autocomplete="current-password" />
-        </label>
-        <label>
-          Rollback timeout (seconds)
-          <input type="number" name="rollback" min="5" max="180" step="5" value="30" />
-        </label>
-        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-          <button type="submit">Connect</button>
-          <button type="button" id="wifi-cancel-connect" class="secondary-button">Cancel</button>
-        </div>
-      </form>
-      <section id="wifi-hotspot-section">
-        <h3>Hotspot</h3>
-        <p style="margin: 0 0 0.5rem; opacity: 0.75;">
-          Development mode auto-rollback applies when enabling the hotspot.
+    <div class="page-content">
+      <header class="page-header">
+        <a class="back-link" href="/">← Back to live view</a>
+        <h1>Settings</h1>
+        <p id="app-version" class="muted">
+          Version <span id="version-value">Loading…</span>
         </p>
-        <p id="wifi-hotspot-status" style="margin: 0; opacity: 0.85;">Hotspot disabled.</p>
-        <label>
-          Hotspot name
-          <input type="text" id="wifi-hotspot-ssid" placeholder="RevCam Hotspot" autocomplete="ssid" />
-        </label>
-        <label>
-          Hotspot password
-          <input
-            type="password"
-            id="wifi-hotspot-password"
-            placeholder="Optional (min 8 characters)"
-            autocomplete="new-password"
-          />
-        </label>
-        <div class="button-group">
-          <button type="button" id="wifi-enable-hotspot">Enable hotspot</button>
-          <button type="button" id="wifi-disable-hotspot" class="secondary-button">Disable hotspot</button>
+      </header>
+
+      <div class="tab-container">
+        <div class="tab-list" role="tablist" aria-label="Settings sections">
+          <button
+            type="button"
+            class="tab-button"
+            role="tab"
+            id="tab-camera"
+            aria-controls="panel-camera"
+            aria-selected="true"
+            data-tab="camera"
+            tabindex="0"
+          >
+            Camera
+          </button>
+          <button
+            type="button"
+            class="tab-button"
+            role="tab"
+            id="tab-network"
+            aria-controls="panel-network"
+            aria-selected="false"
+            data-tab="network"
+            tabindex="-1"
+          >
+            Network
+          </button>
+          <button
+            type="button"
+            class="tab-button"
+            role="tab"
+            id="tab-battery"
+            aria-controls="panel-battery"
+            aria-selected="false"
+            data-tab="battery"
+            tabindex="-1"
+          >
+            Battery
+          </button>
         </div>
-      </section>
-    </section>
-    <form id="orientation-form">
-      <label>
-        Camera source
-        <select name="camera"></select>
-      </label>
-      <label>
-        Resolution
-        <select name="resolution"></select>
-      </label>
-      <h2 style="margin-bottom: 0.5rem; margin-top: 1.5rem;">Orientation</h2>
-      <label>
-        Rotation
-        <select name="rotation">
-          <option value="0">0°</option>
-          <option value="90">90°</option>
-          <option value="180">180°</option>
-          <option value="270">270°</option>
-        </select>
-      </label>
-      <label>
-        <input type="checkbox" name="flip_horizontal" /> Flip horizontally
-      </label>
-      <label>
-        <input type="checkbox" name="flip_vertical" /> Flip vertically
-      </label>
-      <button type="submit">Save</button>
-      <div id="status">Loading…</div>
-    </form>
+
+        <section
+          id="panel-camera"
+          class="tab-panel"
+          role="tabpanel"
+          aria-labelledby="tab-camera"
+          data-tab="camera"
+        >
+          <section id="stream-section" class="card">
+            <h2>Streaming</h2>
+            <p id="stream-summary">Loading…</p>
+            <div id="stream-actions">
+              <a
+                id="open-stream"
+                class="button-link disabled"
+                href="/stream/mjpeg"
+                target="_blank"
+                rel="noopener"
+                aria-disabled="true"
+                >Open MJPEG stream</a
+              >
+              <button type="button" id="copy-stream-url" class="secondary-button" disabled>
+                Copy stream URL
+              </button>
+            </div>
+            <code id="stream-url">—</code>
+          </section>
+
+          <form id="orientation-form" class="card">
+            <h2>Camera configuration</h2>
+            <label>
+              Camera source
+              <select name="camera"></select>
+            </label>
+            <label>
+              Resolution
+              <select name="resolution"></select>
+            </label>
+            <h3>Orientation</h3>
+            <label>
+              Rotation
+              <select name="rotation">
+                <option value="0">0°</option>
+                <option value="90">90°</option>
+                <option value="180">180°</option>
+                <option value="270">270°</option>
+              </select>
+            </label>
+            <label>
+              <input type="checkbox" name="flip_horizontal" /> Flip horizontally
+            </label>
+            <label>
+              <input type="checkbox" name="flip_vertical" /> Flip vertically
+            </label>
+            <div class="form-actions">
+              <button type="submit">Save settings</button>
+              <div id="status">Loading…</div>
+            </div>
+          </form>
+        </section>
+
+        <section
+          id="panel-network"
+          class="tab-panel"
+          role="tabpanel"
+          aria-labelledby="tab-network"
+          data-tab="network"
+          hidden
+        >
+          <section id="wifi-section" class="card">
+            <h2>Wi-Fi</h2>
+            <p id="wifi-summary">Loading…</p>
+            <div id="wifi-controls">
+              <button type="button" id="wifi-refresh" class="secondary-button">Refresh status</button>
+              <button type="button" id="wifi-scan">Scan networks</button>
+              <label>
+                <input type="checkbox" id="wifi-dev-mode" /> Development mode (auto-rollback)
+              </label>
+            </div>
+            <div id="wifi-feedback" role="status" aria-live="polite"></div>
+            <ul id="wifi-network-list"></ul>
+            <form id="wifi-connect-form" hidden>
+              <h3 style="margin: 0;">Connect to network</h3>
+              <p id="wifi-connect-selected" style="margin: 0; opacity: 0.85;"></p>
+              <input type="hidden" name="ssid" />
+              <label>
+                Password
+                <input type="password" name="password" autocomplete="current-password" />
+              </label>
+              <label>
+                Rollback timeout (seconds)
+                <input type="number" name="rollback" min="5" max="180" step="5" value="30" />
+              </label>
+              <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                <button type="submit">Connect</button>
+                <button type="button" id="wifi-cancel-connect" class="secondary-button">Cancel</button>
+              </div>
+            </form>
+            <section id="wifi-hotspot-section">
+              <h3>Hotspot</h3>
+              <p class="muted" style="margin: 0 0 0.5rem;">
+                Development mode auto-rollback applies when enabling the hotspot.
+              </p>
+              <p id="wifi-hotspot-status" style="margin: 0; opacity: 0.85;">Hotspot disabled.</p>
+              <label>
+                Hotspot name
+                <input type="text" id="wifi-hotspot-ssid" placeholder="RevCam Hotspot" autocomplete="ssid" />
+              </label>
+              <label>
+                Hotspot password
+                <input
+                  type="password"
+                  id="wifi-hotspot-password"
+                  placeholder="Optional (min 8 characters)"
+                  autocomplete="new-password"
+                />
+              </label>
+              <div class="button-group">
+                <button type="button" id="wifi-enable-hotspot">Enable hotspot</button>
+                <button type="button" id="wifi-disable-hotspot" class="secondary-button">Disable hotspot</button>
+              </div>
+            </section>
+          </section>
+        </section>
+
+        <section
+          id="panel-battery"
+          class="tab-panel"
+          role="tabpanel"
+          aria-labelledby="tab-battery"
+          data-tab="battery"
+          hidden
+        >
+          <section class="card">
+            <h2>Battery status</h2>
+            <p id="battery-summary" class="muted">Battery readings are unavailable until refreshed.</p>
+            <div class="battery-card">
+              <div id="battery-indicator" aria-live="polite" aria-label="Battery unavailable">
+                <span class="battery-icon unavailable" id="battery-icon" aria-hidden="true">
+                  <span class="battery-level" id="battery-level"></span>
+                </span>
+                <div id="battery-status">
+                  <span id="battery-text">—%</span>
+                  <span id="battery-details">Battery unavailable</span>
+                </div>
+              </div>
+              <dl class="battery-metrics">
+                <div>
+                  <dt>Status</dt>
+                  <dd id="battery-state">Unavailable</dd>
+                </div>
+                <div>
+                  <dt>Voltage</dt>
+                  <dd id="battery-voltage">—</dd>
+                </div>
+                <div>
+                  <dt>Current</dt>
+                  <dd id="battery-current">—</dd>
+                </div>
+                <div>
+                  <dt>Capacity</dt>
+                  <dd id="battery-capacity">—</dd>
+                </div>
+              </dl>
+            </div>
+            <div class="battery-actions">
+              <button type="button" id="battery-refresh" class="secondary-button">Refresh battery status</button>
+            </div>
+            <p class="battery-note">
+              Battery data is shown when an INA219 sensor is connected.
+            </p>
+          </section>
+        </section>
+      </div>
+    </div>
     <script>
+      const tabButtons = Array.from(document.querySelectorAll('.tab-button[role="tab"]'));
+      const tabPanels = Array.from(document.querySelectorAll('.tab-panel[role="tabpanel"]'));
+      const availableTabs = tabButtons
+        .map((button) => button.dataset.tab)
+        .filter((value) => typeof value === "string" && value.length > 0);
+      const batterySummary = document.getElementById("battery-summary");
+      const batteryRefreshButton = document.getElementById("battery-refresh");
+      const batteryIndicator = document.getElementById("battery-indicator");
+      const batteryIcon = document.getElementById("battery-icon");
+      const batteryLevel = document.getElementById("battery-level");
+      const batteryText = document.getElementById("battery-text");
+      const batteryDetails = document.getElementById("battery-details");
+      const batteryState = document.getElementById("battery-state");
+      const batteryVoltage = document.getElementById("battery-voltage");
+      const batteryCurrent = document.getElementById("battery-current");
+      const batteryCapacity = document.getElementById("battery-capacity");
+      let batteryLoading = false;
       const form = document.getElementById("orientation-form");
       const statusLabel = document.getElementById("status");
       const versionValue = document.getElementById("version-value");
@@ -337,6 +688,298 @@
         : null;
       const HOTSPOT_HOSTNAME = "motion.local";
       const HOTSPOT_DEV_ROLLBACK_DEFAULT = 120;
+
+      function getTabFromHash(hash) {
+        if (typeof hash !== "string" || !hash) {
+          return null;
+        }
+        const value = hash.replace(/^#/, "").trim();
+        if (!value) {
+          return null;
+        }
+        return availableTabs.includes(value) ? value : null;
+      }
+
+      function updateBatteryIndicator(data) {
+        if (!batteryIcon || !batteryLevel || !batteryText || !batteryDetails) {
+          return;
+        }
+        batteryIcon.classList.remove("low", "charging", "unavailable");
+        if (
+          !data ||
+          data.available !== true ||
+          typeof data.percentage !== "number" ||
+          Number.isNaN(data.percentage)
+        ) {
+          batteryIcon.classList.add("unavailable");
+          batteryLevel.style.width = "0%";
+          batteryText.textContent = "—";
+          const fallback =
+            data && typeof data.error === "string" && data.error.trim()
+              ? data.error.trim()
+              : "Battery unavailable";
+          batteryDetails.textContent = fallback;
+          if (batteryIndicator) {
+            batteryIndicator.setAttribute("aria-label", fallback);
+          }
+          return;
+        }
+        const percentage = Math.max(0, Math.min(100, Number(data.percentage)));
+        const rounded = Math.round(percentage);
+        batteryLevel.style.width = `${percentage}%`;
+        batteryText.textContent = `${rounded}%`;
+        if (data.charging === true) {
+          batteryIcon.classList.add("charging");
+        } else if (percentage <= 20) {
+          batteryIcon.classList.add("low");
+        }
+        const detailParts = [];
+        if (typeof data.voltage === "number" && Number.isFinite(data.voltage)) {
+          detailParts.push(`${data.voltage.toFixed(2)} V`);
+        }
+        if (typeof data.current_ma === "number" && Number.isFinite(data.current_ma)) {
+          const magnitude = Math.abs(data.current_ma);
+          const decimals = magnitude >= 100 ? 0 : magnitude >= 10 ? 1 : 2;
+          const formatted = magnitude.toFixed(decimals);
+          const suffix = data.charging === true ? "charging" : "draw";
+          detailParts.push(`${formatted} mA ${suffix}`);
+        } else if (data.charging === true) {
+          detailParts.push("Charging");
+        }
+        const detailText = detailParts.join(" · ") || "Battery OK";
+        batteryDetails.textContent = detailText;
+        if (batteryIndicator) {
+          batteryIndicator.setAttribute(
+            "aria-label",
+            `Battery ${rounded}%, ${detailParts.join(", ") || "status"}`,
+          );
+        }
+      }
+
+      function updateBatteryMetrics(data) {
+        if (batteryState) {
+          if (!data || data.available !== true) {
+            const fallback =
+              data && typeof data.error === "string" && data.error.trim()
+                ? data.error.trim()
+                : "Unavailable";
+            batteryState.textContent = fallback;
+          } else if (data.charging === true) {
+            batteryState.textContent = "Charging";
+          } else if (data.charging === false) {
+            batteryState.textContent = "On battery power";
+          } else {
+            batteryState.textContent = "Status unknown";
+          }
+        }
+        if (batteryVoltage) {
+          if (data && typeof data.voltage === "number" && Number.isFinite(data.voltage)) {
+            batteryVoltage.textContent = `${data.voltage.toFixed(2)} V`;
+          } else {
+            batteryVoltage.textContent = "—";
+          }
+        }
+        if (batteryCurrent) {
+          if (data && typeof data.current_ma === "number" && Number.isFinite(data.current_ma)) {
+            const magnitude = Math.abs(data.current_ma);
+            const decimals = magnitude >= 100 ? 0 : magnitude >= 10 ? 1 : 2;
+            const formatted = magnitude.toFixed(decimals);
+            const suffix = data && data.charging === true ? "charging" : "draw";
+            batteryCurrent.textContent = `${formatted} mA ${suffix}`;
+          } else if (data && data.charging === true) {
+            batteryCurrent.textContent = "Charging";
+          } else {
+            batteryCurrent.textContent = "—";
+          }
+        }
+        if (batteryCapacity) {
+          if (data && typeof data.capacity_mah === "number" && Number.isFinite(data.capacity_mah)) {
+            batteryCapacity.textContent = `${Math.round(data.capacity_mah)} mAh`;
+          } else {
+            batteryCapacity.textContent = "—";
+          }
+        }
+      }
+
+      function updateBatterySummary(data) {
+        if (!batterySummary) {
+          return;
+        }
+        if (
+          !data ||
+          data.available !== true ||
+          typeof data.percentage !== "number" ||
+          Number.isNaN(data.percentage)
+        ) {
+          const fallback =
+            data && typeof data.error === "string" && data.error.trim()
+              ? data.error.trim()
+              : "Battery sensor unavailable.";
+          batterySummary.textContent = fallback;
+          return;
+        }
+        const percentage = Math.max(0, Math.min(100, Number(data.percentage)));
+        const rounded = Math.round(percentage);
+        const pieces = [`${rounded}% charged`];
+        if (typeof data.voltage === "number" && Number.isFinite(data.voltage)) {
+          pieces.push(`${data.voltage.toFixed(2)} V`);
+        }
+        if (typeof data.current_ma === "number" && Number.isFinite(data.current_ma)) {
+          const magnitude = Math.abs(data.current_ma);
+          const decimals = magnitude >= 100 ? 0 : magnitude >= 10 ? 1 : 2;
+          const formatted = magnitude.toFixed(decimals);
+          const suffix = data.charging === true ? "charging" : "draw";
+          pieces.push(`${formatted} mA ${suffix}`);
+        } else if (data.charging === true) {
+          pieces.push("Charging");
+        }
+        batterySummary.textContent = pieces.join(" • ");
+      }
+
+      function applyBatteryReading(data) {
+        updateBatteryIndicator(data);
+        updateBatteryMetrics(data);
+        updateBatterySummary(data);
+      }
+
+      async function refreshBatteryStatus(showLoading = false) {
+        if (!batteryIndicator) {
+          return;
+        }
+        if (batteryLoading) {
+          return;
+        }
+        batteryLoading = true;
+        if (showLoading && batterySummary) {
+          batterySummary.textContent = "Refreshing battery status…";
+        }
+        if (batteryRefreshButton) {
+          batteryRefreshButton.disabled = true;
+        }
+        try {
+          const response = await fetch("/api/battery", { cache: "no-store" });
+          if (!response.ok) {
+            throw new Error(`Battery request failed with status ${response.status}`);
+          }
+          const payload = await response.json();
+          applyBatteryReading(payload);
+        } catch (error) {
+          console.error("Battery status error", error);
+          applyBatteryReading({ available: false, error: "Unable to load battery status." });
+        } finally {
+          batteryLoading = false;
+          if (batteryRefreshButton) {
+            batteryRefreshButton.disabled = false;
+          }
+        }
+      }
+
+      function setActiveTab(tabName, { updateHash = true } = {}) {
+        if (!availableTabs.length) {
+          return;
+        }
+        const desired =
+          typeof tabName === "string" && availableTabs.includes(tabName)
+            ? tabName
+            : availableTabs[0];
+        for (const button of tabButtons) {
+          const isActive = button.dataset.tab === desired;
+          button.setAttribute("aria-selected", isActive ? "true" : "false");
+          button.tabIndex = isActive ? 0 : -1;
+        }
+        for (const panel of tabPanels) {
+          if (panel.dataset.tab === desired) {
+            panel.removeAttribute("hidden");
+          } else {
+            panel.setAttribute("hidden", "");
+          }
+        }
+        if (updateHash) {
+          const desiredHash = `#${desired}`;
+          try {
+            if (window.location.hash !== desiredHash) {
+              if (typeof window.history?.replaceState === "function") {
+                window.history.replaceState(null, "", desiredHash);
+              } else {
+                window.location.hash = desiredHash;
+              }
+            }
+          } catch (err) {
+            console.error(err);
+          }
+        }
+        if (desired === "battery") {
+          refreshBatteryStatus().catch((err) => console.error(err));
+        }
+      }
+
+      function focusTabByIndex(index) {
+        if (!tabButtons.length) {
+          return;
+        }
+        const total = tabButtons.length;
+        const normalized = ((index % total) + total) % total;
+        const button = tabButtons[normalized];
+        if (!button) {
+          return;
+        }
+        button.focus();
+        const tabName = button.dataset.tab;
+        if (typeof tabName === "string" && tabName) {
+          setActiveTab(tabName);
+        }
+      }
+
+      tabButtons.forEach((button, index) => {
+        button.addEventListener("click", () => {
+          const tabName = button.dataset.tab;
+          if (typeof tabName === "string" && tabName) {
+            setActiveTab(tabName);
+          }
+        });
+        button.addEventListener("keydown", (event) => {
+          switch (event.key) {
+            case "ArrowRight":
+            case "ArrowDown":
+              event.preventDefault();
+              focusTabByIndex(index + 1);
+              break;
+            case "ArrowLeft":
+            case "ArrowUp":
+              event.preventDefault();
+              focusTabByIndex(index - 1);
+              break;
+            case "Home":
+              event.preventDefault();
+              focusTabByIndex(0);
+              break;
+            case "End":
+              event.preventDefault();
+              focusTabByIndex(tabButtons.length - 1);
+              break;
+            default:
+              break;
+          }
+        });
+      });
+
+      if (batteryRefreshButton) {
+        batteryRefreshButton.addEventListener("click", () => {
+          refreshBatteryStatus(true).catch((err) => console.error(err));
+        });
+      }
+
+      if (availableTabs.length) {
+        const initialTab = getTabFromHash(window.location.hash) || availableTabs[0];
+        setActiveTab(initialTab, { updateHash: false });
+      }
+
+      window.addEventListener("hashchange", () => {
+        const target = getTabFromHash(window.location.hash);
+        if (target) {
+          setActiveTab(target, { updateHash: false });
+        }
+      });
 
       function describeCameraErrors(camera) {
         if (!camera || !camera.errors) {
