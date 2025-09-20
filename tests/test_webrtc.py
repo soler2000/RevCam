@@ -80,6 +80,47 @@ def test_pipeline_video_track_drops_intermediate_frames():
     run_async(_test())
 
 
+class ReusedBufferCamera(BaseCamera):
+    def __init__(self) -> None:
+        self._buffer = np.zeros((2, 2, 3), dtype=np.uint8)
+        self._values = iter((0, 50))
+        self._last_value = 50
+
+    async def get_frame(self) -> np.ndarray:
+        try:
+            value = next(self._values)
+        except StopIteration:
+            value = self._last_value
+        self._buffer.fill(value)
+        self._last_value = value
+        await asyncio.sleep(0.001)
+        return self._buffer
+
+
+def test_pipeline_video_track_copies_camera_frames() -> None:
+    async def _test() -> None:
+        camera = ReusedBufferCamera()
+        pipeline = FramePipeline(lambda: Orientation())
+        track = PipelineVideoTrack(camera, pipeline, fps=30)
+        track.next_timestamp = AsyncMock(
+            side_effect=[(0, Fraction(1, 30)), (1, Fraction(1, 30))]
+        )
+        try:
+            first_frame = await track.recv()
+            await asyncio.sleep(0.02)
+            second_frame = await track.recv()
+            second_pixels = second_frame.to_ndarray(format="rgb24")
+            first_pixels = first_frame.to_ndarray(format="rgb24")
+        finally:
+            track.stop()
+            await asyncio.sleep(0)
+
+        assert np.all(first_pixels == 0)
+        assert np.all(second_pixels == 50)
+
+    run_async(_test())
+
+
 def test_webrtc_manager_proxies_offers_via_mediamtx():
     async def _test() -> None:
         client = StubMediaMTXClient()

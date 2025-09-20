@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import copy
 import logging
 from dataclasses import dataclass
 from fractions import Fraction
@@ -132,9 +133,23 @@ class PipelineVideoTrack(_VideoStreamTrack):
         try:
             while not self._stopped:
                 frame = await self._camera.get_frame()
+                frame = self._clone_camera_frame(frame)
                 await self._push_latest_frame(frame)
         except asyncio.CancelledError:
             raise
+
+    def _clone_camera_frame(self, frame):
+        copy_method = getattr(frame, "copy", None)
+        if callable(copy_method):
+            try:
+                return copy_method()
+            except Exception:  # pragma: no cover - defensive fallback
+                logger.debug("Failed to copy frame via copy()", exc_info=True)
+        try:
+            return copy.deepcopy(frame)
+        except Exception:  # pragma: no cover - defensive fallback
+            logger.debug("Failed to deepcopy camera frame", exc_info=True)
+            return frame
 
     async def _push_latest_frame(self, frame) -> None:
         while True:
