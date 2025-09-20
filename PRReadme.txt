@@ -83,9 +83,10 @@ and reboot. Stop any conflicting services (for example, `libcamera-vid` or
 ```bash
 uvicorn rev_cam.app:create_app --factory --host 0.0.0.0 --port 9000
 ```
-Open `http://<pi-ip>:9000` in your browser. The settings page exposes a camera
-source dropdown—select *PiCamera2* to use the hardware camera once diagnostics
-report it as available.
+Open `http://<pi-ip>:9000` in your browser. The settings page exposes camera
+source and resolution dropdowns—select *PiCamera2* to use the hardware camera
+and choose a resolution that fits your bandwidth and display needs once
+diagnostics report the device as available.
 
 7. Optional: enable the service on boot
 --------------------------------------

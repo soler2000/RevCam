@@ -276,7 +276,7 @@ def diagnose_camera_conflicts() -> list[str]:
 class Picamera2Camera(BaseCamera):
     """Camera implementation using the Picamera2 stack."""
 
-    def __init__(self) -> None:
+    def __init__(self, resolution: tuple[int, int] | None = None) -> None:
         try:
             from picamera2 import Picamera2
         except Exception as exc:  # pragma: no cover - hardware dependent
@@ -306,7 +306,11 @@ class Picamera2Camera(BaseCamera):
             camera_instance = Picamera2()
             self._camera = camera_instance
             _ensure_picamera_allocator(camera_instance)
-            config = camera_instance.create_video_configuration(main={"format": "RGB888"})
+            main_config: dict[str, object] = {"format": "RGB888"}
+            if resolution is not None:
+                width, height = resolution
+                main_config["size"] = (int(width), int(height))
+            config = camera_instance.create_video_configuration(main=main_config)
             camera_instance.configure(config)
             camera_instance.start()
             started = True
@@ -368,7 +372,7 @@ class Picamera2Camera(BaseCamera):
 class OpenCVCamera(BaseCamera):
     """Fallback implementation using OpenCV VideoCapture."""
 
-    def __init__(self, index: int = 0) -> None:
+    def __init__(self, index: int = 0, resolution: tuple[int, int] | None = None) -> None:
         try:
             import cv2
         except ImportError as exc:  # pragma: no cover - optional dependency
@@ -378,6 +382,10 @@ class OpenCVCamera(BaseCamera):
         self._capture = cv2.VideoCapture(index)
         if not self._capture.isOpened():
             raise CameraError(f"Failed to open camera index {index}")
+        if resolution is not None:
+            width, height = resolution
+            self._capture.set(cv2.CAP_PROP_FRAME_WIDTH, float(width))
+            self._capture.set(cv2.CAP_PROP_FRAME_HEIGHT, float(height))
 
     async def get_frame(self) -> np.ndarray:
         ret, frame = await asyncio.to_thread(self._capture.read)
@@ -392,9 +400,17 @@ class OpenCVCamera(BaseCamera):
 class SyntheticCamera(BaseCamera):
     """Generates synthetic frames for development and testing."""
 
-    def __init__(self, width: int = 640, height: int = 480) -> None:
-        self._width = width
-        self._height = height
+    def __init__(
+        self,
+        width: int = 640,
+        height: int = 480,
+        *,
+        resolution: tuple[int, int] | None = None,
+    ) -> None:
+        if resolution is not None:
+            width, height = resolution
+        self._width = int(width)
+        self._height = int(height)
         self._start = time.perf_counter()
 
     async def get_frame(self) -> np.ndarray:
@@ -415,7 +431,11 @@ def _normalise_choice(choice: str | None) -> str:
     return _CAMERA_ALIASES.get(normalised, normalised)
 
 
-def create_camera(choice: str | None = None) -> BaseCamera:
+def create_camera(
+    choice: str | None = None,
+    *,
+    resolution: tuple[int, int] | None = None,
+) -> BaseCamera:
     """Create the camera specified by *choice* or the environment.
 
     When ``choice`` is ``"auto"`` the function attempts to construct a
@@ -427,17 +447,17 @@ def create_camera(choice: str | None = None) -> BaseCamera:
 
     resolved_choice = _normalise_choice(choice)
     if resolved_choice == "synthetic":
-        return SyntheticCamera()
+        return SyntheticCamera(resolution=resolution)
     if resolved_choice == "opencv":
-        return OpenCVCamera()
+        return OpenCVCamera(resolution=resolution)
     if resolved_choice == "picamera":
-        return Picamera2Camera()
+        return Picamera2Camera(resolution=resolution)
     if resolved_choice == "auto":
         try:
-            return Picamera2Camera()
+            return Picamera2Camera(resolution=resolution)
         except CameraError as exc:
             logger.error("Picamera2 unavailable during auto selection: %s", exc)
-            return SyntheticCamera()
+            return SyntheticCamera(resolution=resolution)
     raise CameraError(f"Unknown camera choice: {choice}")
 
 

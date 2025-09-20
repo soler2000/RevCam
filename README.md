@@ -2,14 +2,15 @@
 
 RevCam is a low-latency reversing camera stack targeted at the Raspberry Pi Zero 2 W (Bookworm).
 It streams a live camera feed to iOS devices using an MJPEG pipeline and exposes a settings panel
-for configuring image orientation. The processing pipeline is modular so that future
-driver-assistance overlays can be injected on the server without major changes.
+for configuring image orientation and capture resolution. The processing pipeline is modular so
+that future driver-assistance overlays can be injected on the server without major changes.
 
 ## Features
 
 - Fast MJPEG video delivery optimised for mobile Safari (iPhone/iPad) with a
   pause/resume web player control and automatic reconnect behaviour.
-- Camera orientation controls (rotation and horizontal/vertical flips).
+- Camera orientation controls (rotation and horizontal/vertical flips) and preset resolution
+  options for balancing clarity against bandwidth.
 - Modular frame processing pipeline ready for future overlays (e.g. guidelines).
 - REST API for orientation control and camera management.
 

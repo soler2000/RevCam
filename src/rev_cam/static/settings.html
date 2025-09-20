@@ -131,6 +131,10 @@
         Camera source
         <select name="camera"></select>
       </label>
+      <label>
+        Resolution
+        <select name="resolution"></select>
+      </label>
       <h2 style="margin-bottom: 0.5rem; margin-top: 1.5rem;">Orientation</h2>
       <label>
         Rotation
@@ -155,6 +159,7 @@
       const statusLabel = document.getElementById("status");
       const versionValue = document.getElementById("version-value");
       const cameraLabels = new Map();
+      const resolutionLabels = new Map();
       const streamSection = document.getElementById("stream-section");
       const streamSummary = document.getElementById("stream-summary");
       const streamUrlElement = document.getElementById("stream-url");
@@ -281,14 +286,57 @@
           cameraSelect.value = camera.selected;
         }
 
-        let status = message;
+        const resolutionSelect = form.elements.namedItem("resolution");
+        if (!(resolutionSelect instanceof HTMLSelectElement)) {
+          throw new Error("Resolution select element missing");
+        }
+        resolutionSelect.innerHTML = "";
+        resolutionLabels.clear();
+        const resolutionInfo = camera && camera.resolution ? camera.resolution : null;
+        const resolutionOptions =
+          resolutionInfo && Array.isArray(resolutionInfo.options) ? resolutionInfo.options : [];
+        for (const option of resolutionOptions) {
+          const opt = document.createElement("option");
+          opt.value = option.value;
+          opt.textContent = option.label;
+          resolutionSelect.appendChild(opt);
+          resolutionLabels.set(option.value, option.label);
+        }
         if (
-          !status.toLowerCase().startsWith("error") &&
-          camera.active &&
-          camera.active !== camera.selected
+          resolutionInfo &&
+          typeof resolutionInfo.selected === "string" &&
+          resolutionLabels.has(resolutionInfo.selected)
         ) {
-          const activeLabel = cameraLabels.get(camera.active) || camera.active;
+          resolutionSelect.value = resolutionInfo.selected;
+        } else if (resolutionSelect.options.length > 0) {
+          resolutionSelect.selectedIndex = 0;
+        }
+
+        let status = message;
+        const initialStatusLower = typeof status === "string" ? status.toLowerCase() : "";
+        const selectedCamera = typeof camera.selected === "string" ? camera.selected : "";
+        const activeCamera = typeof camera.active === "string" ? camera.active : "";
+        if (
+          !initialStatusLower.startsWith("error") &&
+          activeCamera &&
+          selectedCamera &&
+          activeCamera !== selectedCamera
+        ) {
+          const activeLabel = cameraLabels.get(activeCamera) || activeCamera;
           status += ` (active: ${activeLabel})`;
+        }
+        if (
+          resolutionInfo &&
+          typeof resolutionInfo.active === "string" &&
+          typeof resolutionInfo.selected === "string" &&
+          resolutionInfo.active &&
+          resolutionInfo.selected &&
+          resolutionInfo.active !== resolutionInfo.selected
+        ) {
+          const activeLabel =
+            resolutionLabels.get(resolutionInfo.active) ||
+            resolutionInfo.active.replace(/x/gi, "×");
+          status += ` (active resolution: ${activeLabel})`;
         }
         const statusLower = typeof status === "string" ? status.toLowerCase() : "";
         const errorMessages = describeCameraErrors(camera).filter((detail) => {
@@ -421,10 +469,18 @@
           statusLabel.textContent = "Error: camera selector missing";
           return;
         }
+        const resolutionSelect = form.elements.namedItem("resolution");
+        if (!(resolutionSelect instanceof HTMLSelectElement)) {
+          statusLabel.textContent = "Error: resolution selector missing";
+          return;
+        }
         const cameraResponse = await fetch("/api/camera", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ source: cameraSelect.value }),
+          body: JSON.stringify({
+            source: cameraSelect.value,
+            resolution: resolutionSelect.value,
+          }),
         });
         if (!cameraResponse.ok) {
           let errorDetail = "Unable to update camera";

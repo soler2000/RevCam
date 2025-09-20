@@ -5,7 +5,7 @@ import json
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from threading import Lock
-from typing import Any, Dict, Mapping
+from typing import Any, Dict, Iterable, Mapping, Sequence
 
 from .camera import CAMERA_SOURCES, DEFAULT_CAMERA_CHOICE
 
@@ -25,6 +25,36 @@ class Orientation:
         return Orientation(rotation, self.flip_horizontal, self.flip_vertical)
 
 
+@dataclass(frozen=True, slots=True)
+class Resolution:
+    """Represents the desired capture resolution for the camera."""
+
+    width: int
+    height: int
+
+    def __post_init__(self) -> None:
+        if self.width <= 0 or self.height <= 0:
+            raise ValueError("Resolution dimensions must be positive integers")
+
+    def as_tuple(self) -> tuple[int, int]:
+        return (int(self.width), int(self.height))
+
+    def key(self) -> str:
+        return f"{self.width}x{self.height}"
+
+
+RESOLUTION_PRESETS: Mapping[str, Resolution] = {
+    "640x480": Resolution(640, 480),
+    "800x600": Resolution(800, 600),
+    "960x540": Resolution(960, 540),
+    "1280x720": Resolution(1280, 720),
+    "1920x1080": Resolution(1920, 1080),
+}
+
+DEFAULT_RESOLUTION_KEY = "1280x720"
+DEFAULT_RESOLUTION = RESOLUTION_PRESETS[DEFAULT_RESOLUTION_KEY]
+
+
 def _parse_orientation(data: Mapping[str, Any]) -> Orientation:
     try:
         rotation_raw = data.get("rotation", 0)
@@ -40,6 +70,58 @@ def _parse_orientation(data: Mapping[str, Any]) -> Orientation:
     return Orientation(rotation=rotation, flip_horizontal=flip_horizontal, flip_vertical=flip_vertical)
 
 
+def _parse_resolution(value: Any, *, default: Resolution) -> Resolution:
+    if value is None:
+        return default
+    if isinstance(value, Resolution):
+        return Resolution(value.width, value.height)
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if not text:
+            return default
+        normalised = text.replace("×", "x")
+        preset = RESOLUTION_PRESETS.get(normalised)
+        if preset:
+            return preset
+        if "x" in normalised:
+            parts = normalised.split("x", 1)
+            if len(parts) == 2:
+                try:
+                    width = int(parts[0].strip())
+                    height = int(parts[1].strip())
+                    return Resolution(width, height)
+                except ValueError as exc:
+                    raise ValueError("Resolution values must be integers") from exc
+        raise ValueError(f"Unknown resolution preset: {value}")
+    if isinstance(value, Mapping):
+        if "preset" in value:
+            return _parse_resolution(value.get("preset"), default=default)
+        width_raw = value.get("width")
+        height_raw = value.get("height")
+        if width_raw is None or height_raw is None:
+            raise ValueError("Resolution mapping must include 'width' and 'height'")
+        try:
+            width = int(width_raw)
+            height = int(height_raw)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Resolution width and height must be integers") from exc
+        return Resolution(width, height)
+    if isinstance(value, (Sequence, Iterable)):
+        iterator = iter(value)
+        try:
+            width_raw = next(iterator)
+            height_raw = next(iterator)
+        except StopIteration as exc:
+            raise ValueError("Resolution sequence must contain width and height") from exc
+        try:
+            width = int(width_raw)
+            height = int(height_raw)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Resolution width and height must be integers") from exc
+        return Resolution(width, height)
+    raise ValueError("Unsupported resolution value")
+
+
 class ConfigManager:
     """Stores configuration state on disk with thread-safety."""
 
@@ -47,14 +129,14 @@ class ConfigManager:
         self._path = config_path
         self._lock = Lock()
         self._ensure_parent()
-        self._orientation, self._camera = self._load()
+        self._orientation, self._camera, self._resolution = self._load()
 
     def _ensure_parent(self) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
 
-    def _load(self) -> tuple[Orientation, str]:
+    def _load(self) -> tuple[Orientation, str, Resolution]:
         if not self._path.exists():
-            return Orientation(), DEFAULT_CAMERA_CHOICE
+            return Orientation(), DEFAULT_CAMERA_CHOICE, DEFAULT_RESOLUTION
         try:
             payload = json.loads(self._path.read_text())
             if not isinstance(payload, dict):
@@ -71,7 +153,9 @@ class ConfigManager:
                     camera = DEFAULT_CAMERA_CHOICE
             else:
                 camera = DEFAULT_CAMERA_CHOICE
-            return orientation, camera
+            resolution_payload = payload.get("resolution")
+            resolution = _parse_resolution(resolution_payload, default=DEFAULT_RESOLUTION)
+            return orientation, camera, resolution
         except (OSError, ValueError) as exc:
             raise RuntimeError(f"Failed to load configuration: {exc}") from exc
 
@@ -79,6 +163,7 @@ class ConfigManager:
         payload: Dict[str, Any] = {
             "orientation": asdict(self._orientation),
             "camera": self._camera,
+            "resolution": {"width": self._resolution.width, "height": self._resolution.height},
         }
         self._path.write_text(json.dumps(payload, indent=2))
 
@@ -108,5 +193,26 @@ class ConfigManager:
             self._save()
         return normalised
 
+    def get_resolution(self) -> Resolution:
+        with self._lock:
+            return self._resolution
 
-__all__ = ["ConfigManager", "Orientation"]
+    def parse_resolution(self, value: Any) -> Resolution:
+        return _parse_resolution(value, default=self._resolution)
+
+    def set_resolution(self, value: Any) -> Resolution:
+        resolution = _parse_resolution(value, default=self._resolution)
+        with self._lock:
+            self._resolution = resolution
+            self._save()
+        return resolution
+
+
+__all__ = [
+    "ConfigManager",
+    "Orientation",
+    "Resolution",
+    "RESOLUTION_PRESETS",
+    "DEFAULT_RESOLUTION",
+    "DEFAULT_RESOLUTION_KEY",
+]
