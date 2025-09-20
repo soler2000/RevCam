@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
@@ -15,6 +16,7 @@ from .config import ConfigManager, Resolution, RESOLUTION_PRESETS
 from .pipeline import FramePipeline
 from .streaming import MJPEGStreamer
 from .version import APP_VERSION
+from .wifi import WiFiError, WiFiManager
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -37,7 +39,26 @@ class CameraPayload(BaseModel):
     resolution: str | None = None
 
 
-def create_app(config_path: Path | str = Path("data/config.json")) -> FastAPI:
+class WiFiConnectPayload(BaseModel):
+    ssid: str
+    password: str | None = None
+    development_mode: bool = False
+    rollback_seconds: float | None = None
+
+
+class WiFiHotspotPayload(BaseModel):
+    enabled: bool
+    ssid: str | None = None
+    password: str | None = None
+    development_mode: bool = False
+    rollback_seconds: float | None = None
+
+
+def create_app(
+    config_path: Path | str = Path("data/config.json"),
+    *,
+    wifi_manager: WiFiManager | None = None,
+) -> FastAPI:
     app = FastAPI(title="RevCam", version=APP_VERSION)
 
     logger = logging.getLogger(__name__)
@@ -56,6 +77,8 @@ def create_app(config_path: Path | str = Path("data/config.json")) -> FastAPI:
         i2c_bus_override = None
 
     battery_monitor = BatteryMonitor(capacity_mah=1000, i2c_bus=i2c_bus_override)
+    wifi_manager = wifi_manager or WiFiManager()
+
     pipeline = FramePipeline(lambda: config_manager.get_orientation())
     camera: BaseCamera | None = None
     streamer: MJPEGStreamer | None = None
@@ -63,6 +86,8 @@ def create_app(config_path: Path | str = Path("data/config.json")) -> FastAPI:
     active_camera_choice: str = "unknown"
     active_resolution: Resolution = config_manager.get_resolution()
     camera_errors: dict[str, str] = {}
+
+    app.state.wifi_manager = wifi_manager
 
     def _record_camera_error(source: str, message: str | None) -> None:
         if message:
@@ -142,6 +167,8 @@ def create_app(config_path: Path | str = Path("data/config.json")) -> FastAPI:
             await streamer.aclose()
         if camera:
             await camera.close()
+        if hasattr(wifi_manager, "close"):
+            await run_in_threadpool(wifi_manager.close)
 
     @app.get("/", response_class=HTMLResponse)
     async def index() -> str:
@@ -208,6 +235,56 @@ def create_app(config_path: Path | str = Path("data/config.json")) -> FastAPI:
     async def get_battery_status() -> dict[str, object | None]:
         reading = battery_monitor.read()
         return reading.to_dict()
+
+    @app.get("/api/wifi/status")
+    async def get_wifi_status() -> dict[str, object | None]:
+        try:
+            status = await run_in_threadpool(wifi_manager.get_status)
+        except WiFiError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        return status.to_dict()
+
+    @app.get("/api/wifi/networks")
+    async def list_wifi_networks() -> dict[str, object]:
+        try:
+            networks = await run_in_threadpool(wifi_manager.scan_networks)
+        except WiFiError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        return {"networks": [network.to_dict() for network in networks]}
+
+    @app.post("/api/wifi/connect")
+    async def connect_wifi(payload: WiFiConnectPayload) -> dict[str, object | None]:
+        try:
+            status = await run_in_threadpool(
+                wifi_manager.connect,
+                payload.ssid,
+                payload.password,
+                development_mode=payload.development_mode,
+                rollback_timeout=payload.rollback_seconds,
+            )
+        except WiFiError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return status.to_dict()
+
+    @app.post("/api/wifi/hotspot")
+    async def configure_wifi_hotspot(payload: WiFiHotspotPayload) -> dict[str, object | None]:
+        if payload.enabled:
+            try:
+                status = await run_in_threadpool(
+                    wifi_manager.enable_hotspot,
+                    payload.ssid or "",
+                    payload.password,
+                    development_mode=payload.development_mode,
+                    rollback_timeout=payload.rollback_seconds,
+                )
+            except WiFiError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+        else:
+            try:
+                status = await run_in_threadpool(wifi_manager.disable_hotspot)
+            except WiFiError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return status.to_dict()
 
     @app.post("/api/camera")
     async def update_camera(payload: CameraPayload) -> dict[str, object]:

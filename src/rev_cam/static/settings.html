@@ -99,6 +99,97 @@
         font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
         word-break: break-all;
       }
+      #wifi-section {
+        margin: 2rem 0 1.5rem;
+        padding: 1rem;
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.04);
+      }
+      #wifi-section h2,
+      #wifi-section h3 {
+        margin-top: 0;
+      }
+      #wifi-summary {
+        margin: 0 0 0.75rem;
+        opacity: 0.85;
+      }
+      #wifi-controls {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.75rem;
+        margin-bottom: 0.75rem;
+      }
+      #wifi-controls label {
+        margin: 0;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-size: 0.95rem;
+      }
+      #wifi-feedback {
+        min-height: 1.2rem;
+        font-size: 0.9rem;
+        opacity: 0.85;
+      }
+      #wifi-feedback.error {
+        color: #ff6b6b;
+        opacity: 1;
+      }
+      #wifi-network-list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+      }
+      .wifi-network {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.75rem;
+        padding: 0.85rem 1rem;
+        border-radius: 12px;
+        background: rgba(0, 0, 0, 0.35);
+      }
+      .wifi-network strong {
+        display: block;
+        font-size: 1rem;
+      }
+      .wifi-network span {
+        font-size: 0.9rem;
+        opacity: 0.8;
+      }
+      .wifi-network .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+      }
+      #wifi-connect-form {
+        margin-top: 1rem;
+        padding: 1rem;
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.05);
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+      }
+      #wifi-connect-form[hidden] {
+        display: none;
+      }
+      #wifi-hotspot-section {
+        margin-top: 1.5rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+      }
+      #wifi-hotspot-section .button-group {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+      }
     </style>
   </head>
   <body>
@@ -125,6 +216,60 @@
         </button>
       </div>
       <code id="stream-url">—</code>
+    </section>
+    <section id="wifi-section">
+      <h2>Wi-Fi</h2>
+      <p id="wifi-summary">Loading…</p>
+      <div id="wifi-controls">
+        <button type="button" id="wifi-refresh" class="secondary-button">Refresh status</button>
+        <button type="button" id="wifi-scan">Scan networks</button>
+        <label>
+          <input type="checkbox" id="wifi-dev-mode" /> Development mode (auto-rollback)
+        </label>
+      </div>
+      <div id="wifi-feedback" role="status" aria-live="polite"></div>
+      <ul id="wifi-network-list"></ul>
+      <form id="wifi-connect-form" hidden>
+        <h3 style="margin: 0;">Connect to network</h3>
+        <p id="wifi-connect-selected" style="margin: 0; opacity: 0.85;"></p>
+        <input type="hidden" name="ssid" />
+        <label>
+          Password
+          <input type="password" name="password" autocomplete="current-password" />
+        </label>
+        <label>
+          Rollback timeout (seconds)
+          <input type="number" name="rollback" min="5" max="180" step="5" value="30" />
+        </label>
+        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+          <button type="submit">Connect</button>
+          <button type="button" id="wifi-cancel-connect" class="secondary-button">Cancel</button>
+        </div>
+      </form>
+      <section id="wifi-hotspot-section">
+        <h3>Hotspot</h3>
+        <p style="margin: 0 0 0.5rem; opacity: 0.75;">
+          Development mode auto-rollback applies when enabling the hotspot.
+        </p>
+        <p id="wifi-hotspot-status" style="margin: 0; opacity: 0.85;">Hotspot disabled.</p>
+        <label>
+          Hotspot name
+          <input type="text" id="wifi-hotspot-ssid" placeholder="RevCam Hotspot" autocomplete="ssid" />
+        </label>
+        <label>
+          Hotspot password
+          <input
+            type="password"
+            id="wifi-hotspot-password"
+            placeholder="Optional (min 8 characters)"
+            autocomplete="new-password"
+          />
+        </label>
+        <div class="button-group">
+          <button type="button" id="wifi-enable-hotspot">Enable hotspot</button>
+          <button type="button" id="wifi-disable-hotspot" class="secondary-button">Disable hotspot</button>
+        </div>
+      </section>
     </section>
     <form id="orientation-form">
       <label>
@@ -167,6 +312,31 @@
       const copyStreamButton = document.getElementById("copy-stream-url");
       const copyButtonDefault = copyStreamButton ? copyStreamButton.textContent : "";
       let copyResetTimer = null;
+      const wifiSummary = document.getElementById("wifi-summary");
+      const wifiRefreshButton = document.getElementById("wifi-refresh");
+      const wifiScanButton = document.getElementById("wifi-scan");
+      const wifiFeedback = document.getElementById("wifi-feedback");
+      const wifiNetworkList = document.getElementById("wifi-network-list");
+      const wifiConnectForm = document.getElementById("wifi-connect-form");
+      const wifiConnectSelected = document.getElementById("wifi-connect-selected");
+      const wifiDevToggle = document.getElementById("wifi-dev-mode");
+      const wifiCancelConnect = document.getElementById("wifi-cancel-connect");
+      const wifiHotspotStatus = document.getElementById("wifi-hotspot-status");
+      const wifiHotspotSsid = document.getElementById("wifi-hotspot-ssid");
+      const wifiHotspotPassword = document.getElementById("wifi-hotspot-password");
+      const wifiEnableHotspot = document.getElementById("wifi-enable-hotspot");
+      const wifiDisableHotspot = document.getElementById("wifi-disable-hotspot");
+      const wifiConnectSsidInput = wifiConnectForm
+        ? wifiConnectForm.querySelector('input[name="ssid"]')
+        : null;
+      const wifiConnectPasswordInput = wifiConnectForm
+        ? wifiConnectForm.querySelector('input[name="password"]')
+        : null;
+      const wifiRollbackInput = wifiConnectForm
+        ? wifiConnectForm.querySelector('input[name="rollback"]')
+        : null;
+      const HOTSPOT_HOSTNAME = "motion.local";
+      const HOTSPOT_DEV_ROLLBACK_DEFAULT = 120;
 
       function describeCameraErrors(camera) {
         if (!camera || !camera.errors) {
@@ -190,6 +360,349 @@
           descriptions.push(combined);
         }
         return descriptions;
+      }
+
+      function formatSignalValue(signal) {
+        if (typeof signal !== "number" || Number.isNaN(signal)) {
+          return "—";
+        }
+        return `${signal}%`;
+      }
+
+      function summariseWifiStatus(status) {
+        if (!status) {
+          return "Wi-Fi status unavailable.";
+        }
+        const pieces = [];
+        const name = status.ssid || status.profile || "network";
+        if (status.hotspot_active) {
+          pieces.push(`Hotspot active (${name})`);
+          if (status.ip_address) {
+            pieces.push(`IP ${status.ip_address}`);
+          }
+          pieces.push(`Visit http://${HOTSPOT_HOSTNAME}:9000/`);
+        } else if (status.connected) {
+          const signalText = formatSignalValue(status.signal);
+          pieces.push(`Connected to ${name}${signalText !== "—" ? ` (${signalText})` : ""}`);
+          if (status.ip_address) {
+            pieces.push(`IP ${status.ip_address}`);
+          }
+        } else {
+          pieces.push("Not connected to Wi-Fi.");
+        }
+        if (status.detail) {
+          pieces.push(status.detail);
+        }
+        if (status.error) {
+          pieces.push(`Error: ${status.error}`);
+        }
+        return pieces.join(" ");
+      }
+
+      function setWifiFeedback(message, isError = false) {
+        if (!wifiFeedback) {
+          return;
+        }
+        wifiFeedback.textContent = message || "";
+        if (isError) {
+          wifiFeedback.classList.add("error");
+        } else {
+          wifiFeedback.classList.remove("error");
+        }
+      }
+
+      function hideWifiConnectForm() {
+        if (!wifiConnectForm) {
+          return;
+        }
+        wifiConnectForm.hidden = true;
+        if (wifiConnectSelected) {
+          wifiConnectSelected.textContent = "";
+        }
+        if (wifiConnectPasswordInput) {
+          wifiConnectPasswordInput.value = "";
+        }
+      }
+
+      function renderWifiNetworks(networks) {
+        if (!wifiNetworkList) {
+          return;
+        }
+        wifiNetworkList.innerHTML = "";
+        if (!Array.isArray(networks) || networks.length === 0) {
+          const empty = document.createElement("li");
+          empty.className = "wifi-network";
+          empty.textContent = "No Wi-Fi networks detected.";
+          wifiNetworkList.appendChild(empty);
+          return;
+        }
+        for (const network of networks) {
+          const item = document.createElement("li");
+          item.className = "wifi-network";
+          const info = document.createElement("div");
+          info.style.minWidth = "12rem";
+          const name = document.createElement("strong");
+          const ssid = typeof network.ssid === "string" && network.ssid.trim()
+            ? network.ssid.trim()
+            : "(hidden network)";
+          name.textContent = ssid;
+          info.appendChild(name);
+          const details = document.createElement("span");
+          const detailParts = [];
+          if (typeof network.signal === "number" && !Number.isNaN(network.signal)) {
+            detailParts.push(`${network.signal}%`);
+          }
+          if (network.security && typeof network.security === "string") {
+            detailParts.push(network.security);
+          }
+          if (network.frequency) {
+            const freqText = `${network.frequency} MHz`;
+            if (network.channel) {
+              detailParts.push(`${freqText} (ch ${network.channel})`);
+            } else {
+              detailParts.push(freqText);
+            }
+          }
+          if (network.known) {
+            detailParts.push("saved");
+          }
+          if (network.active) {
+            detailParts.push("active");
+          }
+          details.textContent = detailParts.length ? detailParts.join(" • ") : "Details unavailable";
+          info.appendChild(details);
+          item.appendChild(info);
+          const actions = document.createElement("div");
+          actions.className = "actions";
+          const connectButton = document.createElement("button");
+          connectButton.type = "button";
+          if (network.active) {
+            connectButton.textContent = "Connected";
+            connectButton.disabled = true;
+          } else if (network.hidden) {
+            connectButton.textContent = "Hidden network";
+            connectButton.disabled = true;
+          } else {
+            connectButton.textContent = "Connect";
+            connectButton.addEventListener("click", () => {
+              if (!wifiConnectForm || !wifiConnectSsidInput || !wifiConnectSelected) {
+                return;
+              }
+              wifiConnectForm.hidden = false;
+              wifiConnectSsidInput.value = ssid;
+              wifiConnectSelected.textContent = `Selected network: ${ssid}`;
+              if (wifiConnectPasswordInput) {
+                wifiConnectPasswordInput.value = "";
+                wifiConnectPasswordInput.placeholder = network.security
+                  ? `Security: ${network.security}`
+                  : "Password (if required)";
+              }
+              if (wifiRollbackInput && typeof wifiRollbackInput.value === "string" && !wifiRollbackInput.value) {
+                wifiRollbackInput.value = "30";
+              }
+            });
+          }
+          actions.appendChild(connectButton);
+          item.appendChild(actions);
+          wifiNetworkList.appendChild(item);
+        }
+      }
+
+      async function refreshWifiStatus() {
+        if (!wifiSummary) {
+          return null;
+        }
+        try {
+          const response = await fetch("/api/wifi/status");
+          if (!response.ok) {
+            throw new Error("Unable to fetch Wi-Fi status");
+          }
+          const status = await response.json();
+          wifiSummary.textContent = summariseWifiStatus(status);
+          if (wifiHotspotStatus) {
+            if (status.hotspot_active) {
+              const hotspotName = status.ssid || status.profile || "Hotspot";
+              const pieces = [`Hotspot active (${hotspotName})`];
+              if (status.ip_address) {
+                pieces.push(`IP ${status.ip_address}`);
+              }
+              pieces.push(`Visit http://${HOTSPOT_HOSTNAME}:9000/`);
+              wifiHotspotStatus.textContent = pieces.join(" • ");
+            } else {
+              wifiHotspotStatus.textContent = "Hotspot disabled.";
+            }
+          }
+          if (status.detail) {
+            setWifiFeedback(status.detail, false);
+          } else if (!wifiFeedback || !wifiFeedback.textContent) {
+            setWifiFeedback("", false);
+          }
+          return status;
+        } catch (err) {
+          console.error(err);
+          if (wifiSummary) {
+            const message = err instanceof Error ? err.message : "Wi-Fi status unavailable.";
+            wifiSummary.textContent = message;
+          }
+          return null;
+        }
+      }
+
+      async function scanWifiNetworks() {
+        if (!wifiNetworkList) {
+          return;
+        }
+        setWifiFeedback("Scanning for Wi-Fi networks…");
+        try {
+          const response = await fetch("/api/wifi/networks");
+          if (!response.ok) {
+            throw new Error("Unable to scan Wi-Fi networks");
+          }
+          const data = await response.json();
+          const networks = Array.isArray(data.networks) ? data.networks : [];
+          renderWifiNetworks(networks);
+          if (networks.length) {
+            setWifiFeedback(`Found ${networks.length} network${networks.length === 1 ? "" : "s"}.`);
+          } else {
+            setWifiFeedback("No Wi-Fi networks detected. Try scanning again.");
+          }
+        } catch (err) {
+          console.error(err);
+          setWifiFeedback("Unable to scan Wi-Fi networks.", true);
+        }
+      }
+
+      async function connectToWifi() {
+        if (!wifiConnectForm || !wifiConnectSsidInput) {
+          return;
+        }
+        const ssid = wifiConnectSsidInput.value.trim();
+        if (!ssid) {
+          setWifiFeedback("Select a Wi-Fi network before connecting.", true);
+          return;
+        }
+        const payload = {
+          ssid,
+          development_mode: wifiDevToggle ? !!wifiDevToggle.checked : false,
+        };
+        if (wifiConnectPasswordInput && wifiConnectPasswordInput.value) {
+          payload.password = wifiConnectPasswordInput.value;
+        }
+        if (wifiRollbackInput) {
+          const rollback = parseFloat(wifiRollbackInput.value);
+          if (!Number.isNaN(rollback) && rollback > 0) {
+            payload.rollback_seconds = rollback;
+          }
+        }
+        setWifiFeedback(`Connecting to ${ssid}…`);
+        try {
+          const response = await fetch("/api/wifi/connect", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          if (!response.ok) {
+            let errorDetail = "Unable to connect to Wi-Fi network.";
+            try {
+              const error = await response.json();
+              if (error && error.detail) {
+                errorDetail = error.detail;
+              }
+            } catch (parseErr) {
+              console.error(parseErr);
+            }
+            setWifiFeedback(errorDetail, true);
+            return;
+          }
+          const status = await response.json();
+          const successMessage = status.detail
+            ? status.detail
+            : `Joined ${status.ssid || ssid}.`;
+          setWifiFeedback(successMessage);
+          hideWifiConnectForm();
+          await refreshWifiStatus();
+          await scanWifiNetworks();
+        } catch (err) {
+          console.error(err);
+          setWifiFeedback("Connection attempt failed.", true);
+        }
+      }
+
+      async function toggleHotspot(enabled) {
+        let payload = { enabled };
+        if (enabled) {
+          const ssidValue = wifiHotspotSsid && typeof wifiHotspotSsid.value === "string"
+            ? wifiHotspotSsid.value.trim()
+            : "";
+          const passwordValue = wifiHotspotPassword && typeof wifiHotspotPassword.value === "string"
+            ? wifiHotspotPassword.value.trim()
+            : "";
+          if (passwordValue && passwordValue.length < 8) {
+            setWifiFeedback("Hotspot password must contain at least 8 characters.", true);
+            return;
+          }
+          const devModeEnabled = wifiDevToggle ? !!wifiDevToggle.checked : false;
+          payload = {
+            enabled: true,
+            ssid: ssidValue || undefined,
+            development_mode: devModeEnabled,
+          };
+          if (passwordValue) {
+            payload.password = passwordValue;
+          }
+          let rollbackSeconds = null;
+          let userProvidedRollback = NaN;
+          if (wifiRollbackInput && wifiRollbackInput.dataset.userEdited === "true") {
+            userProvidedRollback = parseFloat(wifiRollbackInput.value);
+          }
+          if (devModeEnabled) {
+            if (!Number.isNaN(userProvidedRollback) && userProvidedRollback > 0) {
+              rollbackSeconds = userProvidedRollback;
+            } else {
+              rollbackSeconds = HOTSPOT_DEV_ROLLBACK_DEFAULT;
+            }
+          } else if (!Number.isNaN(userProvidedRollback) && userProvidedRollback > 0) {
+            rollbackSeconds = userProvidedRollback;
+          }
+          if (typeof rollbackSeconds === "number" && rollbackSeconds > 0) {
+            payload.rollback_seconds = rollbackSeconds;
+          }
+          setWifiFeedback("Enabling hotspot…");
+        } else {
+          payload = { enabled: false };
+          setWifiFeedback("Disabling hotspot…");
+        }
+        try {
+          const response = await fetch("/api/wifi/hotspot", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          if (!response.ok) {
+            let errorDetail = enabled ? "Unable to enable hotspot." : "Unable to disable hotspot.";
+            try {
+              const error = await response.json();
+              if (error && error.detail) {
+                errorDetail = error.detail;
+              }
+            } catch (parseErr) {
+              console.error(parseErr);
+            }
+            setWifiFeedback(errorDetail, true);
+            return;
+          }
+          const status = await response.json();
+          const detailMessage = status.detail
+            ? status.detail
+            : enabled
+            ? `Hotspot enabled. Connect via http://${HOTSPOT_HOSTNAME}:9000/.`
+            : "Hotspot disabled.";
+          setWifiFeedback(detailMessage);
+          await refreshWifiStatus();
+        } catch (err) {
+          console.error(err);
+          setWifiFeedback(enabled ? "Unable to enable hotspot." : "Unable to disable hotspot.", true);
+        }
       }
 
       function updateVersion(camera) {
@@ -417,6 +930,49 @@
         });
       }
 
+      if (wifiRefreshButton) {
+        wifiRefreshButton.addEventListener("click", () => {
+          refreshWifiStatus().catch((err) => console.error(err));
+        });
+      }
+
+      if (wifiScanButton) {
+        wifiScanButton.addEventListener("click", () => {
+          scanWifiNetworks().catch((err) => console.error(err));
+        });
+      }
+
+      if (wifiCancelConnect) {
+        wifiCancelConnect.addEventListener("click", () => {
+          hideWifiConnectForm();
+        });
+      }
+
+      if (wifiConnectForm) {
+        wifiConnectForm.addEventListener("submit", (event) => {
+          event.preventDefault();
+          connectToWifi().catch((err) => console.error(err));
+        });
+      }
+
+      if (wifiRollbackInput) {
+        wifiRollbackInput.addEventListener("input", () => {
+          wifiRollbackInput.dataset.userEdited = "true";
+        });
+      }
+
+      if (wifiEnableHotspot) {
+        wifiEnableHotspot.addEventListener("click", () => {
+          toggleHotspot(true).catch((err) => console.error(err));
+        });
+      }
+
+      if (wifiDisableHotspot) {
+        wifiDisableHotspot.addEventListener("click", () => {
+          toggleHotspot(false).catch((err) => console.error(err));
+        });
+      }
+
       async function fetchSettings() {
         const [orientationResponse, cameraResponse] = await Promise.all([
           fetch("/api/orientation"),
@@ -512,6 +1068,18 @@
         console.error(err);
         statusLabel.textContent = err.message;
       });
+
+      refreshWifiStatus().catch((err) => {
+        console.error(err);
+        if (wifiSummary) {
+          const message = err instanceof Error ? err.message : "Wi-Fi status unavailable.";
+          wifiSummary.textContent = message;
+        }
+      });
+
+      if (wifiNetworkList) {
+        scanWifiNetworks().catch((err) => console.error(err));
+      }
     </script>
   </body>
 </html>

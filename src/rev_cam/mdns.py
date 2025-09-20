@@ -1,0 +1,322 @@
+"""Simple mDNS advertiser used to expose RevCam services."""
+from __future__ import annotations
+
+import ipaddress
+import logging
+import shutil
+import subprocess
+import threading
+import time
+
+try:  # pragma: no cover - import guard for optional dependency failures
+    from zeroconf import InterfaceChoice, ServiceInfo, Zeroconf
+except Exception as exc:  # pragma: no cover - dependency import failure
+    Zeroconf = None  # type: ignore[assignment]
+    ServiceInfo = None  # type: ignore[assignment]
+    InterfaceChoice = None  # type: ignore[assignment]
+    _zeroconf_error = exc
+else:
+    _zeroconf_error = None
+
+
+logger = logging.getLogger(__name__)
+
+
+class _BaseAdvertiser:
+    """Internal protocol for advertiser backends."""
+
+    def advertise(self, ip_address: str | None) -> None:  # pragma: no cover - interface
+        raise NotImplementedError
+
+    def clear(self) -> None:  # pragma: no cover - interface
+        raise NotImplementedError
+
+    def close(self) -> None:  # pragma: no cover - interface
+        raise NotImplementedError
+
+
+class _ZeroconfAdvertiser(_BaseAdvertiser):
+    """Advertise ``motion.local`` using the zeroconf Python package."""
+
+    def __init__(
+        self,
+        hostname: str,
+        service_name: str,
+        service_type: str,
+        port: int,
+    ) -> None:
+        if Zeroconf is None or ServiceInfo is None or InterfaceChoice is None:
+            reason = _zeroconf_error or "zeroconf library unavailable"
+            raise RuntimeError(reason)
+        self._hostname = hostname
+        self._service_name = service_name
+        self._service_type = service_type
+        self._port = port
+        self._zeroconf: Zeroconf | None = None
+        self._info: ServiceInfo | None = None
+        self._current_ip: str | None = None
+
+    # ------------------------------ helpers -----------------------------
+    def _ensure_zeroconf(self) -> Zeroconf:
+        if self._zeroconf is None:
+            self._zeroconf = Zeroconf(interfaces=InterfaceChoice.All)
+        return self._zeroconf
+
+    def _build_service_info(self, ip: ipaddress._BaseAddress) -> ServiceInfo:
+        service_name = f"{self._service_name}.{self._service_type}"
+        if not service_name.endswith("."):
+            service_name = f"{service_name}."
+        server = f"{self._hostname}."
+        return ServiceInfo(
+            type_=self._service_type,
+            name=service_name,
+            addresses=[ip.packed],
+            port=self._port,
+            server=server,
+            properties={"path": b"/"},
+        )
+
+    # ------------------------------ control ----------------------------
+    def advertise(self, ip_address: str | None) -> None:
+        if ip_address is None:
+            self.clear()
+            return
+        if ip_address == self._current_ip:
+            return
+        try:
+            parsed_ip = ipaddress.ip_address(ip_address)
+        except ValueError:
+            logger.warning("Ignoring invalid IP address for mDNS: %s", ip_address)
+            return
+        try:
+            zeroconf = self._ensure_zeroconf()
+        except OSError as exc:  # pragma: no cover - environment specific
+            logger.warning("Unable to start mDNS announcer: %s", exc)
+            return
+        if self._info is not None:
+            try:
+                zeroconf.unregister_service(self._info)
+            except Exception as exc:  # pragma: no cover - best effort cleanup
+                logger.debug("Ignoring mDNS unregister failure: %s", exc)
+            self._info = None
+        info = self._build_service_info(parsed_ip)
+        try:
+            zeroconf.register_service(info, allow_name_change=False)
+        except Exception as exc:  # pragma: no cover - zeroconf runtime issues
+            logger.warning("Failed to register mDNS service: %s", exc)
+            return
+        self._info = info
+        self._current_ip = ip_address
+
+    def clear(self) -> None:
+        if self._info is None:
+            self._current_ip = None
+            return
+        zeroconf = self._zeroconf
+        if zeroconf is not None:
+            try:
+                zeroconf.unregister_service(self._info)
+            except Exception as exc:  # pragma: no cover - best effort cleanup
+                logger.debug("Ignoring mDNS unregister failure: %s", exc)
+        self._info = None
+        self._current_ip = None
+
+    def close(self) -> None:
+        self.clear()
+        if self._zeroconf is not None:
+            try:
+                self._zeroconf.close()
+            finally:
+                self._zeroconf = None
+
+
+class _AvahiAdvertiser(_BaseAdvertiser):
+    """Advertise using the ``avahi-publish`` CLI as a lightweight fallback."""
+
+    def __init__(
+        self,
+        hostname: str,
+        service_name: str,
+        service_type: str,
+        port: int,
+    ) -> None:
+        del service_name, service_type, port  # Service metadata is unused for address records.
+        binary = shutil.which("avahi-publish")
+        if not binary:
+            raise FileNotFoundError("avahi-publish command not found")
+        self._binary = binary
+        self._hostname = hostname
+        self._process: subprocess.Popen[str] | None = None
+        self._current_ip: str | None = None
+        self._lock = threading.Lock()
+
+    def advertise(self, ip_address: str | None) -> None:
+        with self._lock:
+            if ip_address is None:
+                self._stop_process()
+                return
+            if self._process is not None and self._process.poll() is not None:
+                self._drain_process(self._process, unexpected=True)
+                self._process = None
+                self._current_ip = None
+            if ip_address == self._current_ip and self._process is not None:
+                return
+            self._stop_process()
+            self._start_process(ip_address)
+
+    def clear(self) -> None:
+        with self._lock:
+            self._stop_process()
+
+    def close(self) -> None:
+        self.clear()
+
+    # ------------------------------ helpers -----------------------------
+    def _start_process(self, ip_address: str) -> None:
+        command = [self._binary, "-a", "-R", self._hostname, ip_address]
+        try:
+            process = subprocess.Popen(
+                command,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+        except OSError as exc:
+            raise RuntimeError(f"failed to launch avahi-publish: {exc}") from exc
+        # avahi-publish exits immediately when it cannot register the record.
+        time.sleep(0.1)
+        if process.poll() is not None:
+            message = self._read_process_error(process)
+            raise RuntimeError(
+                f"avahi-publish exited with code {process.returncode}: {message}"
+            )
+        self._process = process
+        self._current_ip = ip_address
+
+    def _stop_process(self) -> None:
+        process = self._process
+        if process is None:
+            self._current_ip = None
+            return
+        process.terminate()
+        try:
+            process.wait(timeout=1.0)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=1.0)
+        self._drain_process(process, unexpected=False)
+        self._process = None
+        self._current_ip = None
+
+    def _drain_process(self, process: subprocess.Popen[str], *, unexpected: bool) -> None:
+        message = self._read_process_error(process)
+        if message:
+            if unexpected:
+                logger.warning("avahi-publish exited unexpectedly: %s", message)
+            else:
+                logger.debug("avahi-publish output: %s", message)
+        if process.stderr:
+            try:
+                process.stderr.close()
+            except Exception:  # pragma: no cover - best effort cleanup
+                pass
+
+    @staticmethod
+    def _read_process_error(process: subprocess.Popen[str]) -> str:
+        if process.stderr is None:
+            return ""
+        try:
+            data = process.stderr.read()
+        except Exception:  # pragma: no cover - best effort cleanup
+            return ""
+        return data.strip()
+
+
+class _NullAdvertiser(_BaseAdvertiser):
+    """No-op advertiser used when no backend is available."""
+
+    def advertise(self, ip_address: str | None) -> None:  # pragma: no cover - no behaviour
+        del ip_address
+
+    def clear(self) -> None:  # pragma: no cover - no behaviour
+        return
+
+    def close(self) -> None:  # pragma: no cover - no behaviour
+        return
+
+
+class MDNSAdvertiser(_BaseAdvertiser):
+    """Manage an mDNS advertisement for the RevCam HTTP service."""
+
+    def __init__(
+        self,
+        hostname: str = "motion.local",
+        *,
+        service_name: str = "RevCam",
+        service_type: str = "_http._tcp.local.",
+        port: int = 9000,
+    ) -> None:
+        cleaned = hostname.strip().rstrip(".")
+        if not cleaned:
+            raise ValueError("mDNS hostname must be provided")
+        if not cleaned.endswith(".local"):
+            cleaned = f"{cleaned}.local"
+        if not service_type.endswith("."):
+            service_type = f"{service_type}."
+        self._hostname = cleaned
+        self._service_name = service_name.strip() or "RevCam"
+        self._service_type = service_type
+        self._port = int(port)
+        self._backend = self._select_backend()
+
+    # ------------------------------ helpers -----------------------------
+    def _select_backend(self) -> _BaseAdvertiser:
+        errors: list[str] = []
+        if Zeroconf is not None and ServiceInfo is not None and InterfaceChoice is not None:
+            try:
+                return _ZeroconfAdvertiser(
+                    self._hostname,
+                    self._service_name,
+                    self._service_type,
+                    self._port,
+                )
+            except Exception as exc:  # pragma: no cover - rare runtime error
+                errors.append(f"zeroconf backend failed: {exc}")
+        elif _zeroconf_error is not None:
+            errors.append(f"zeroconf import failed: {_zeroconf_error}")
+        try:
+            return _AvahiAdvertiser(
+                self._hostname,
+                self._service_name,
+                self._service_type,
+                self._port,
+            )
+        except FileNotFoundError:
+            errors.append("avahi-publish utility not available")
+        except Exception as exc:  # pragma: no cover - rare runtime error
+            errors.append(f"avahi backend failed: {exc}")
+        if errors:
+            logger.warning(
+                "mDNS advertising disabled: %s. Install the 'zeroconf' Python package or "
+                "the 'avahi-utils' tools to enable motion.local announcements.",
+                "; ".join(errors),
+            )
+        else:  # pragma: no cover - defensive
+            logger.warning(
+                "mDNS advertising disabled: no backend available. Install the 'zeroconf' "
+                "package or the 'avahi-utils' tools to enable motion.local announcements.",
+            )
+        return _NullAdvertiser()
+
+    # ------------------------------ control ----------------------------
+    def advertise(self, ip_address: str | None) -> None:
+        self._backend.advertise(ip_address)
+
+    def clear(self) -> None:
+        self._backend.clear()
+
+    def close(self) -> None:
+        self._backend.close()
+
+
+__all__ = ["MDNSAdvertiser"]
