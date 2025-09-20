@@ -14,7 +14,7 @@ from .battery import BatteryMonitor, BatterySupervisor, create_battery_overlay
 from .camera import CAMERA_SOURCES, BaseCamera, CameraError, create_camera, identify_camera
 from .config import ConfigManager, Resolution, RESOLUTION_PRESETS, StreamSettings
 from .diagnostics import collect_diagnostics
-from .distance import DistanceMonitor, create_distance_overlay
+from .distance import DistanceCalibration, DistanceMonitor, create_distance_overlay
 from .pipeline import FramePipeline
 from .streaming import MJPEGStreamer, encode_frame_to_jpeg
 from .version import APP_VERSION
@@ -66,6 +66,11 @@ class DistanceZonesPayload(BaseModel):
     danger: float
 
 
+class DistanceCalibrationPayload(BaseModel):
+    offset_m: float
+    scale: float
+
+
 class BatteryLimitsPayload(BaseModel):
     warning_percent: float
     shutdown_percent: float
@@ -91,6 +96,33 @@ def create_app(
 
     config_manager = ConfigManager(Path(config_path))
 
+    CALIBRATION_OFFSET_LIMIT = 5.0
+    CALIBRATION_SCALE_MIN = 0.5
+    CALIBRATION_SCALE_MAX = 2.0
+
+    def _build_distance_calibration(offset_m: float, scale: float) -> DistanceCalibration:
+        try:
+            calibration = DistanceCalibration(offset_m, scale)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if abs(calibration.offset_m) > CALIBRATION_OFFSET_LIMIT:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Calibration offset must be between "
+                    f"{-CALIBRATION_OFFSET_LIMIT:g} and {CALIBRATION_OFFSET_LIMIT:g} metres"
+                ),
+            )
+        if not (CALIBRATION_SCALE_MIN <= calibration.scale <= CALIBRATION_SCALE_MAX):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Calibration scale must be between "
+                    f"{CALIBRATION_SCALE_MIN:g} and {CALIBRATION_SCALE_MAX:g}"
+                ),
+            )
+        return calibration
+
     i2c_bus_env = os.getenv("REVCAM_I2C_BUS")
     i2c_bus_override: int | None
     if i2c_bus_env:
@@ -111,7 +143,10 @@ def create_app(
         config_manager.get_battery_limits,
         logger=logger,
     )
-    distance_monitor = DistanceMonitor(i2c_bus=i2c_bus_override)
+    distance_monitor = DistanceMonitor(
+        i2c_bus=i2c_bus_override,
+        calibration=config_manager.get_distance_calibration(),
+    )
     wifi_manager = wifi_manager or WiFiManager()
 
     pipeline = FramePipeline(lambda: config_manager.get_orientation())
@@ -416,6 +451,7 @@ def create_app(
         payload = reading.to_dict()
         payload["zone"] = zones.classify(reading.distance_m)
         payload["zones"] = zones.to_dict()
+        payload["calibration"] = config_manager.get_distance_calibration().to_dict()
         return payload
 
     @app.get("/api/distance/zones")
@@ -433,6 +469,56 @@ def create_app(
         response = reading.to_dict()
         response["zone"] = zones.classify(reading.distance_m)
         response["zones"] = zones.to_dict()
+        response["calibration"] = config_manager.get_distance_calibration().to_dict()
+        return response
+
+    @app.get("/api/distance/calibration")
+    async def get_distance_calibration_settings() -> dict[str, object]:
+        calibration = config_manager.get_distance_calibration()
+        return {"calibration": calibration.to_dict()}
+
+    @app.post("/api/distance/calibration")
+    async def update_distance_calibration(
+        payload: DistanceCalibrationPayload,
+    ) -> dict[str, object | None]:
+        calibration = _build_distance_calibration(payload.offset_m, payload.scale)
+        try:
+            config_manager.set_distance_calibration(calibration)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        distance_monitor.set_calibration(calibration=calibration)
+        zones = config_manager.get_distance_zones()
+        reading = distance_monitor.read()
+        response = reading.to_dict()
+        response["zone"] = zones.classify(reading.distance_m)
+        response["zones"] = zones.to_dict()
+        response["calibration"] = calibration.to_dict()
+        return response
+
+    @app.post("/api/distance/calibration/zero")
+    async def zero_distance_calibration() -> dict[str, object | None]:
+        reading = distance_monitor.read()
+        if not (reading.available and reading.raw_distance_m is not None):
+            raise HTTPException(
+                status_code=503,
+                detail="Distance reading unavailable for calibration",
+            )
+        current = distance_monitor.get_calibration()
+        calibration = _build_distance_calibration(
+            -current.scale * reading.raw_distance_m,
+            current.scale,
+        )
+        try:
+            config_manager.set_distance_calibration(calibration)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        distance_monitor.set_calibration(calibration=calibration)
+        zones = config_manager.get_distance_zones()
+        refreshed = distance_monitor.read()
+        response = refreshed.to_dict()
+        response["zone"] = zones.classify(refreshed.distance_m)
+        response["zones"] = zones.to_dict()
+        response["calibration"] = calibration.to_dict()
         return response
 
     @app.get("/api/wifi/status")
