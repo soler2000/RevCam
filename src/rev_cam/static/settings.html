@@ -198,7 +198,7 @@
       #orientation-form h3 {
         margin-top: 0;
       }
-      #orientation-form .form-actions {
+      .form-actions {
         display: flex;
         align-items: center;
         gap: 0.75rem;
@@ -450,6 +450,9 @@
         min-height: 1rem;
       }
       #distance-zones-status {
+        font-size: 0.9rem;
+      }
+      #battery-limits-status {
         font-size: 0.9rem;
       }
       @media (max-width: 640px) {
@@ -764,8 +767,43 @@
             </div>
             <p class="battery-note">
               Battery data is shown when an INA219 sensor is connected.
+              The system will shut down automatically when the battery falls below the
+              configured shutdown threshold.
             </p>
           </section>
+          <form id="battery-limits-form" class="card">
+            <h2>Battery limits</h2>
+            <p class="muted">
+              Set the warning and shutdown thresholds used for on-screen alerts and automatic
+              shutdown.
+            </p>
+            <label>
+              Warning threshold (%)
+              <input
+                type="number"
+                name="warning_percent"
+                min="0"
+                max="100"
+                step="0.5"
+                inputmode="decimal"
+              />
+            </label>
+            <label>
+              Shutdown threshold (%)
+              <input
+                type="number"
+                name="shutdown_percent"
+                min="0"
+                max="100"
+                step="0.5"
+                inputmode="decimal"
+              />
+            </label>
+            <div class="form-actions">
+              <button type="submit">Save battery limits</button>
+              <span id="battery-limits-status" class="muted"></span>
+            </div>
+          </form>
         </section>
       </div>
     </div>
@@ -820,7 +858,37 @@
       const batteryVoltage = document.getElementById("battery-voltage");
       const batteryCurrent = document.getElementById("battery-current");
       const batteryCapacity = document.getElementById("battery-capacity");
+      const batteryLimitsForm = document.getElementById("battery-limits-form");
+      const batteryLimitsStatus = document.getElementById("battery-limits-status");
+      const batteryLimitsInputs = batteryLimitsForm
+        ? {
+            warning: batteryLimitsForm.querySelector('input[name="warning_percent"]'),
+            shutdown: batteryLimitsForm.querySelector('input[name="shutdown_percent"]'),
+          }
+        : null;
+      const batteryLimitsSubmit = batteryLimitsForm
+        ? batteryLimitsForm.querySelector('button[type="submit"]')
+        : null;
       let batteryLoading = false;
+      let batteryLimitsLoaded = false;
+      let batteryLimitsLoading = false;
+      let batteryLimitsStatusTimer = null;
+      if (batteryLimitsInputs) {
+        for (const input of Object.values(batteryLimitsInputs)) {
+          if (input instanceof HTMLInputElement) {
+            input.addEventListener("input", () => {
+              input.dataset.userEdited = "true";
+              if (batteryLimitsStatus) {
+                batteryLimitsStatus.textContent = "";
+              }
+              if (batteryLimitsStatusTimer) {
+                clearTimeout(batteryLimitsStatusTimer);
+                batteryLimitsStatusTimer = null;
+              }
+            });
+          }
+        }
+      }
       const form = document.getElementById("orientation-form");
       const statusLabel = document.getElementById("status");
       const versionValue = document.getElementById("version-value");
@@ -1166,6 +1234,89 @@
         }
       }
 
+      function updateBatteryLimitsInputs(limits, options = {}) {
+        if (!batteryLimitsInputs) {
+          return;
+        }
+        const { force = false, clearUserEdited = false } = options;
+        const entries = [
+          ["warning_percent", batteryLimitsInputs.warning],
+          ["shutdown_percent", batteryLimitsInputs.shutdown],
+        ];
+        for (const [property, input] of entries) {
+          if (!(input instanceof HTMLInputElement)) {
+            continue;
+          }
+          if (!force && input.dataset.userEdited === "true") {
+            continue;
+          }
+          let rawValue = undefined;
+          if (limits && typeof limits === "object" && property in limits) {
+            const candidate = limits[property];
+            if (typeof candidate === "number") {
+              rawValue = candidate;
+            } else if (typeof candidate === "string") {
+              const parsed = Number.parseFloat(candidate);
+              rawValue = Number.isFinite(parsed) ? parsed : undefined;
+            }
+          }
+          if (typeof rawValue === "number" && Number.isFinite(rawValue)) {
+            input.value = rawValue.toString();
+          } else {
+            input.value = "";
+          }
+          if (clearUserEdited) {
+            delete input.dataset.userEdited;
+          }
+        }
+      }
+
+      async function loadBatteryLimits({ showLoading = false, force = false } = {}) {
+        if (!batteryLimitsForm) {
+          return;
+        }
+        if (batteryLimitsLoading) {
+          return;
+        }
+        if (batteryLimitsLoaded && !force) {
+          return;
+        }
+        batteryLimitsLoading = true;
+        if (batteryLimitsStatusTimer) {
+          clearTimeout(batteryLimitsStatusTimer);
+          batteryLimitsStatusTimer = null;
+        }
+        if (batteryLimitsStatus && showLoading) {
+          batteryLimitsStatus.textContent = "Loading battery limits…";
+        }
+        if (batteryLimitsSubmit) {
+          batteryLimitsSubmit.disabled = true;
+        }
+        try {
+          const response = await fetch("/api/battery/limits", { cache: "no-store" });
+          if (!response.ok) {
+            throw new Error(`Battery limits request failed with status ${response.status}`);
+          }
+          const payload = await response.json();
+          updateBatteryLimitsInputs(payload, { force: true, clearUserEdited: true });
+          batteryLimitsLoaded = true;
+          if (batteryLimitsStatus) {
+            batteryLimitsStatus.textContent = "";
+          }
+        } catch (error) {
+          console.error("Battery limits load error", error);
+          batteryLimitsLoaded = false;
+          if (batteryLimitsStatus) {
+            batteryLimitsStatus.textContent = "Unable to load battery limits.";
+          }
+        } finally {
+          batteryLimitsLoading = false;
+          if (batteryLimitsSubmit) {
+            batteryLimitsSubmit.disabled = false;
+          }
+        }
+      }
+
       function setActiveTab(tabName, { updateHash = true } = {}) {
         if (!availableTabs.length) {
           return;
@@ -1202,6 +1353,8 @@
         }
         if (desired === "battery") {
           refreshBatteryStatus().catch((err) => console.error(err));
+          loadBatteryLimits({ showLoading: !batteryLimitsLoaded })
+            .catch((err) => console.error(err));
         }
       }
 
@@ -1340,6 +1493,102 @@
       if (batteryRefreshButton) {
         batteryRefreshButton.addEventListener("click", () => {
           refreshBatteryStatus(true).catch((err) => console.error(err));
+        });
+      }
+
+      if (batteryLimitsForm) {
+        batteryLimitsForm.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          if (!batteryLimitsInputs) {
+            return;
+          }
+          const warningInput = batteryLimitsInputs.warning;
+          const shutdownInput = batteryLimitsInputs.shutdown;
+          const warningValue =
+            warningInput instanceof HTMLInputElement
+              ? Number.parseFloat(warningInput.value)
+              : Number.NaN;
+          const shutdownValue =
+            shutdownInput instanceof HTMLInputElement
+              ? Number.parseFloat(shutdownInput.value)
+              : Number.NaN;
+          if (!Number.isFinite(warningValue) || !Number.isFinite(shutdownValue)) {
+            if (batteryLimitsStatus) {
+              batteryLimitsStatus.textContent = "Enter numeric thresholds for both values.";
+            }
+            return;
+          }
+          if (warningValue < 0 || warningValue > 100 || shutdownValue < 0 || shutdownValue > 100) {
+            if (batteryLimitsStatus) {
+              batteryLimitsStatus.textContent = "Thresholds must be between 0% and 100%.";
+            }
+            return;
+          }
+          if (warningValue < shutdownValue) {
+            if (batteryLimitsStatus) {
+              batteryLimitsStatus.textContent = "Warning must be greater than or equal to shutdown.";
+            }
+            return;
+          }
+          if (batteryLimitsStatusTimer) {
+            clearTimeout(batteryLimitsStatusTimer);
+            batteryLimitsStatusTimer = null;
+          }
+          if (batteryLimitsStatus) {
+            batteryLimitsStatus.textContent = "Saving…";
+          }
+          if (batteryLimitsSubmit) {
+            batteryLimitsSubmit.disabled = true;
+          }
+          try {
+            const response = await fetch("/api/battery/limits", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                warning_percent: warningValue,
+                shutdown_percent: shutdownValue,
+              }),
+            });
+            if (!response.ok) {
+              let errorDetail = "Unable to save battery limits.";
+              try {
+                const payload = await response.json();
+                if (payload && typeof payload.detail === "string") {
+                  errorDetail = payload.detail;
+                }
+              } catch (err) {
+                console.error(err);
+              }
+              if (batteryLimitsStatus) {
+                batteryLimitsStatus.textContent = errorDetail;
+              }
+              return;
+            }
+            const payload = await response.json();
+            updateBatteryLimitsInputs(payload, { force: true, clearUserEdited: true });
+            batteryLimitsLoaded = true;
+            if (batteryLimitsStatus) {
+              batteryLimitsStatus.textContent = "Battery limits saved";
+              batteryLimitsStatusTimer = window.setTimeout(() => {
+                if (
+                  batteryLimitsStatus &&
+                  batteryLimitsStatus.textContent === "Battery limits saved"
+                ) {
+                  batteryLimitsStatus.textContent = "";
+                }
+                batteryLimitsStatusTimer = null;
+              }, 3000);
+            }
+          } catch (err) {
+            console.error("Battery limits update error", err);
+            if (batteryLimitsStatus) {
+              batteryLimitsStatus.textContent = "Unable to save battery limits.";
+            }
+          } finally {
+            if (batteryLimitsSubmit) {
+              batteryLimitsSubmit.disabled = false;
+            }
+          }
         });
       }
 
