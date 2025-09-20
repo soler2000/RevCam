@@ -8,7 +8,12 @@ pytest.importorskip("numpy")
 
 import numpy as np
 
-from rev_cam.distance import DistanceMonitor, DistanceZones, create_distance_overlay
+from rev_cam.distance import (
+    DistanceCalibration,
+    DistanceMonitor,
+    DistanceZones,
+    create_distance_overlay,
+)
 
 
 class _SequenceSensor:
@@ -95,6 +100,36 @@ def test_distance_monitor_reports_unavailable_when_sensor_missing() -> None:
     assert reading.distance_m is None
     assert reading.error == "sensor offline"
     assert monitor.last_error == "sensor offline"
+
+
+def test_distance_monitor_applies_calibration() -> None:
+    sensor = _SequenceSensor([100.0])
+    calibration = DistanceCalibration(offset_m=-0.1, scale=0.01)
+    monitor = DistanceMonitor(
+        sensor_factory=lambda: sensor,
+        calibration=calibration,
+        update_interval=0.0,
+    )
+
+    reading = monitor.read()
+
+    assert reading.raw_distance_m == pytest.approx(1.0, rel=1e-6)
+    assert reading.distance_m == pytest.approx(0.0, abs=1e-6)
+
+
+def test_distance_monitor_set_calibration_updates_immediately() -> None:
+    sensor = _SequenceSensor([100.0, 100.0])
+    monitor = DistanceMonitor(sensor_factory=lambda: sensor, update_interval=5.0)
+
+    first = monitor.read()
+    assert first.distance_m == pytest.approx(1.0, rel=1e-6)
+
+    updated = monitor.set_calibration(offset_m=-0.25)
+    assert updated.offset_m == pytest.approx(-0.25, rel=1e-6)
+
+    second = monitor.read()
+    assert second.raw_distance_m == pytest.approx(1.0, rel=1e-6)
+    assert second.distance_m == pytest.approx(0.75, rel=1e-6)
 
 
 def test_distance_overlay_draws_on_frame() -> None:

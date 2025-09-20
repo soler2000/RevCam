@@ -66,6 +66,30 @@ class DistanceZones:
 DEFAULT_DISTANCE_ZONES = DistanceZones(caution=2.5, warning=1.5, danger=0.7)
 
 
+@dataclass(frozen=True, slots=True)
+class DistanceCalibration:
+    """Represents calibration adjustments applied to sensor readings."""
+
+    offset_m: float = 0.0
+    scale: float = 1.0
+
+    def __post_init__(self) -> None:
+        offset = float(self.offset_m)
+        scale = float(self.scale)
+        if not math.isfinite(offset):
+            raise ValueError("Calibration offset must be a finite value")
+        if not math.isfinite(scale) or scale <= 0:
+            raise ValueError("Calibration scale must be a positive, finite value")
+        object.__setattr__(self, "offset_m", offset)
+        object.__setattr__(self, "scale", scale)
+
+    def to_dict(self) -> dict[str, float]:
+        return {"offset_m": float(self.offset_m), "scale": float(self.scale)}
+
+
+DEFAULT_DISTANCE_CALIBRATION = DistanceCalibration()
+
+
 @dataclass(slots=True)
 class DistanceReading:
     """A processed distance reading expressed in metres."""
@@ -98,6 +122,7 @@ class DistanceMonitor:
         i2c_bus: int | None = None,
         i2c_address: int = DEFAULT_I2C_ADDRESS,
         smoothing_alpha: float = 0.6,
+        calibration: DistanceCalibration | None = None,
         history_size: int = 5,
         spike_threshold_m: float = 2.0,
         min_distance_m: float = 0.04,
@@ -131,6 +156,10 @@ class DistanceMonitor:
         self._last_reading: DistanceReading | None = None
         self._last_timestamp: float = 0.0
         self._lock = Lock()
+        if calibration is None:
+            self._calibration = DistanceCalibration()
+        else:
+            self._calibration = DistanceCalibration(calibration.offset_m, calibration.scale)
 
     @property
     def last_error(self) -> str | None:
@@ -313,6 +342,40 @@ class DistanceMonitor:
             self._ema = self._alpha * centre + (1.0 - self._alpha) * self._ema
         return float(round(self._ema, 4))
 
+    def _apply_calibration(self, distance_m: float) -> float:
+        calibration = self._calibration
+        return distance_m * calibration.scale + calibration.offset_m
+
+    def get_calibration(self) -> DistanceCalibration:
+        with self._lock:
+            calibration = self._calibration
+            return DistanceCalibration(calibration.offset_m, calibration.scale)
+
+    def set_calibration(
+        self,
+        calibration: DistanceCalibration | None = None,
+        *,
+        offset_m: float | None = None,
+        scale: float | None = None,
+    ) -> DistanceCalibration:
+        if calibration is not None and (offset_m is not None or scale is not None):
+            raise ValueError("Provide either a calibration object or offset/scale values, not both")
+        with self._lock:
+            current = self._calibration
+            if calibration is None:
+                new_calibration = DistanceCalibration(
+                    offset_m=current.offset_m if offset_m is None else offset_m,
+                    scale=current.scale if scale is None else scale,
+                )
+            else:
+                new_calibration = DistanceCalibration(calibration.offset_m, calibration.scale)
+            if new_calibration != current:
+                self._calibration = new_calibration
+                self._reset_smoothing()
+                self._last_reading = None
+                self._last_timestamp = 0.0
+            return self._calibration
+
     def _handle_invalid_sample(self, now: float, message: str) -> DistanceReading:
         last = self._last_reading
         if last and last.available and last.distance_m is not None:
@@ -379,7 +442,8 @@ class DistanceMonitor:
                 self._last_timestamp = now
                 return reading
 
-            smoothed = self._apply_smoothing(filtered)
+            calibrated = self._apply_calibration(filtered)
+            smoothed = self._apply_smoothing(calibrated)
             reading = DistanceReading(
                 available=True,
                 distance_m=smoothed,
@@ -475,9 +539,11 @@ def _render_distance_overlay(frame, reading: DistanceReading, zone: str | None):
 
     return frame
 __all__ = [
+    "DistanceCalibration",
     "DistanceMonitor",
     "DistanceReading",
     "DistanceZones",
+    "DEFAULT_DISTANCE_CALIBRATION",
     "DEFAULT_DISTANCE_ZONES",
     "create_distance_overlay",
 ]

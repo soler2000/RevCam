@@ -481,6 +481,25 @@
         margin: 0.75rem 0 0;
         min-height: 1rem;
       }
+      .distance-calibration-grid {
+        margin-top: 1rem;
+        display: grid;
+        gap: 1rem;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      }
+      .distance-calibration-grid label {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+        margin-bottom: 0;
+      }
+      .distance-calibration-note {
+        font-size: 0.9rem;
+        margin-top: 0.75rem;
+      }
+      #distance-calibration-status {
+        font-size: 0.9rem;
+      }
       .diagnostics-actions {
         margin: 0.75rem 0 1rem;
         display: flex;
@@ -766,6 +785,46 @@
             </div>
           </section>
 
+          <form id="distance-calibration-form" class="card">
+            <h2>Calibration</h2>
+            <p class="muted">
+              Adjust the offset and scale applied to the sensor to match real-world distances.
+            </p>
+            <div class="distance-calibration-grid">
+              <label>
+                Offset adjustment (m)
+                <input
+                  type="number"
+                  name="offset_m"
+                  min="-5"
+                  max="5"
+                  step="0.01"
+                  inputmode="decimal"
+                />
+              </label>
+              <label>
+                Scale factor
+                <input
+                  type="number"
+                  name="scale"
+                  min="0.5"
+                  max="2"
+                  step="0.01"
+                  inputmode="decimal"
+                />
+              </label>
+            </div>
+            <div class="form-actions">
+              <button type="submit">Save calibration</button>
+              <button type="button" id="distance-zero" class="secondary-button">Zero sensor</button>
+              <span id="distance-calibration-status" class="muted"></span>
+            </div>
+            <p class="distance-calibration-note muted">
+              Place the target at the zero point, refresh the reading, then choose “Zero sensor” to
+              automatically adjust the offset.
+            </p>
+          </form>
+
           <form id="distance-zones-form" class="card">
             <h2>Warning zones</h2>
             <p class="muted">
@@ -984,6 +1043,9 @@
         clear: "Clear",
         unavailable: "Unavailable",
       };
+      const CALIBRATION_OFFSET_LIMIT = 5.0;
+      const CALIBRATION_SCALE_MIN = 0.5;
+      const CALIBRATION_SCALE_MAX = 2.0;
       const distanceSummary = document.getElementById("distance-summary");
       const distanceValue = document.getElementById("distance-value");
       const distanceZone = document.getElementById("distance-zone");
@@ -998,7 +1060,17 @@
             danger: distanceZonesForm.querySelector('input[name="danger"]'),
           }
         : null;
+      const distanceCalibrationForm = document.getElementById("distance-calibration-form");
+      const distanceCalibrationStatus = document.getElementById("distance-calibration-status");
+      const distanceZeroButton = document.getElementById("distance-zero");
+      const distanceCalibrationInputs = distanceCalibrationForm
+        ? {
+            offset: distanceCalibrationForm.querySelector('input[name="offset_m"]'),
+            scale: distanceCalibrationForm.querySelector('input[name="scale"]'),
+          }
+        : null;
       let distanceLoading = false;
+      let distanceCalibrationStatusTimer = null;
       if (distanceInputs) {
         for (const input of Object.values(distanceInputs)) {
           if (input instanceof HTMLInputElement) {
@@ -1006,6 +1078,18 @@
               input.dataset.userEdited = "true";
               if (distanceZonesStatus) {
                 distanceZonesStatus.textContent = "";
+              }
+            });
+          }
+        }
+      }
+      if (distanceCalibrationInputs) {
+        for (const input of Object.values(distanceCalibrationInputs)) {
+          if (input instanceof HTMLInputElement) {
+            input.addEventListener("input", () => {
+              input.dataset.userEdited = "true";
+              if (distanceCalibrationStatus) {
+                distanceCalibrationStatus.textContent = "";
               }
             });
           }
@@ -1203,6 +1287,58 @@
         distanceZone.textContent = label.toUpperCase();
       }
 
+      function setDistanceCalibrationStatus(message, options = {}) {
+        if (!distanceCalibrationStatus) {
+          return;
+        }
+        if (distanceCalibrationStatusTimer) {
+          window.clearTimeout(distanceCalibrationStatusTimer);
+          distanceCalibrationStatusTimer = null;
+        }
+        distanceCalibrationStatus.textContent = message || "";
+        if (message && options.persistent !== true) {
+          distanceCalibrationStatusTimer = window.setTimeout(() => {
+            if (
+              distanceCalibrationStatus &&
+              distanceCalibrationStatus.textContent === message
+            ) {
+              distanceCalibrationStatus.textContent = "";
+            }
+            distanceCalibrationStatusTimer = null;
+          }, 4000);
+        }
+      }
+
+      function formatCalibrationValue(value, fractionDigits) {
+        if (typeof value !== "number" || !Number.isFinite(value)) {
+          return "";
+        }
+        const text = value.toFixed(fractionDigits);
+        return text.replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "");
+      }
+
+      function updateDistanceCalibrationInputs(calibration, forceUpdate = false) {
+        if (!distanceCalibrationInputs || typeof calibration !== "object" || calibration === null) {
+          return;
+        }
+        const offsetInput = distanceCalibrationInputs.offset;
+        const scaleInput = distanceCalibrationInputs.scale;
+        if (
+          offsetInput instanceof HTMLInputElement &&
+          (forceUpdate || offsetInput.dataset.userEdited !== "true")
+        ) {
+          offsetInput.value = formatCalibrationValue(calibration.offset_m, 2);
+          delete offsetInput.dataset.userEdited;
+        }
+        if (
+          scaleInput instanceof HTMLInputElement &&
+          (forceUpdate || scaleInput.dataset.userEdited !== "true")
+        ) {
+          scaleInput.value = formatCalibrationValue(calibration.scale, 3);
+          delete scaleInput.dataset.userEdited;
+        }
+      }
+
       function updateDistanceInputs(zones, forceUpdate = false) {
         if (!zones || !distanceInputs) {
           return;
@@ -1272,6 +1408,10 @@
         }
         if (data && data.zones) {
           updateDistanceInputs(data.zones, options.updateInputs === true);
+        }
+        if (data && data.calibration) {
+          const forceUpdate = options.updateCalibration === true || options.updateInputs === true;
+          updateDistanceCalibrationInputs(data.calibration, forceUpdate);
         }
       }
 
@@ -1847,6 +1987,108 @@
         });
       }
 
+      if (distanceCalibrationForm) {
+        distanceCalibrationForm.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          if (!distanceCalibrationInputs) {
+            return;
+          }
+          const offsetInput = distanceCalibrationInputs.offset;
+          const scaleInput = distanceCalibrationInputs.scale;
+          if (!(offsetInput instanceof HTMLInputElement) || !(scaleInput instanceof HTMLInputElement)) {
+            return;
+          }
+          const offset = Number.parseFloat(offsetInput.value);
+          const scale = Number.parseFloat(scaleInput.value);
+          if (!Number.isFinite(offset) || !Number.isFinite(scale)) {
+            setDistanceCalibrationStatus("Enter numeric values for offset and scale.");
+            return;
+          }
+          if (Math.abs(offset) > CALIBRATION_OFFSET_LIMIT) {
+            setDistanceCalibrationStatus(
+              `Offset must be between -${CALIBRATION_OFFSET_LIMIT} and ${CALIBRATION_OFFSET_LIMIT}.`,
+              { persistent: true },
+            );
+            return;
+          }
+          if (scale < CALIBRATION_SCALE_MIN || scale > CALIBRATION_SCALE_MAX) {
+            setDistanceCalibrationStatus(
+              `Scale must be between ${CALIBRATION_SCALE_MIN} and ${CALIBRATION_SCALE_MAX}.`,
+              { persistent: true },
+            );
+            return;
+          }
+          setDistanceCalibrationStatus("Saving…", { persistent: true });
+          try {
+            const response = await fetch("/api/distance/calibration", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ offset_m: offset, scale }),
+            });
+            if (!response.ok) {
+              let detail = "Unable to save calibration.";
+              try {
+                const payload = await response.json();
+                if (payload && typeof payload.detail === "string") {
+                  detail = payload.detail;
+                }
+              } catch (err) {
+                console.error(err);
+              }
+              setDistanceCalibrationStatus(detail, { persistent: true });
+              return;
+            }
+            const payload = await response.json();
+            applyDistanceData(payload, { updateInputs: true, updateCalibration: true });
+            setDistanceCalibrationStatus("Calibration saved");
+          } catch (error) {
+            console.error(error);
+            setDistanceCalibrationStatus("Unable to save calibration.", { persistent: true });
+          }
+        });
+      }
+
+      if (distanceZeroButton) {
+        distanceZeroButton.addEventListener("click", async () => {
+          if (distanceSummary) {
+            distanceSummary.textContent = "Zeroing sensor…";
+          }
+          setDistanceCalibrationStatus("Zeroing…", { persistent: true });
+          distanceZeroButton.disabled = true;
+          try {
+            const response = await fetch("/api/distance/calibration/zero", { method: "POST" });
+            if (!response.ok) {
+              let detail = "Unable to zero sensor.";
+              try {
+                const payload = await response.json();
+                if (payload && typeof payload.detail === "string") {
+                  detail = payload.detail;
+                }
+              } catch (err) {
+                console.error(err);
+              }
+              if (distanceSummary) {
+                distanceSummary.textContent = detail;
+              }
+              setDistanceCalibrationStatus(detail, { persistent: true });
+              return;
+            }
+            const payload = await response.json();
+            applyDistanceData(payload, { updateInputs: true, updateCalibration: true });
+            setDistanceCalibrationStatus("Sensor zeroed");
+          } catch (error) {
+            console.error(error);
+            const message = "Unable to zero sensor.";
+            if (distanceSummary) {
+              distanceSummary.textContent = message;
+            }
+            setDistanceCalibrationStatus(message, { persistent: true });
+          } finally {
+            distanceZeroButton.disabled = false;
+          }
+        });
+      }
+
       if (distanceZonesForm) {
         distanceZonesForm.addEventListener("submit", async (event) => {
           event.preventDefault();
@@ -1905,7 +2147,7 @@
               return;
             }
             const payload = await response.json();
-            applyDistanceData(payload, { updateInputs: true });
+            applyDistanceData(payload, { updateInputs: true, updateCalibration: true });
             if (distanceZonesStatus) {
               distanceZonesStatus.textContent = "Warning zones saved";
               setTimeout(() => {
@@ -2980,7 +3222,7 @@
       async function loadSettings() {
         const data = await fetchSettings();
         applySettings(data.orientation, data.camera);
-        applyDistanceData(data.distance, { updateInputs: true });
+        applyDistanceData(data.distance, { updateInputs: true, updateCalibration: true });
       }
 
       form.addEventListener("submit", async (event) => {
@@ -3037,7 +3279,7 @@
           try {
             const data = await fetchSettings();
             applySettings(data.orientation, data.camera, statusLabel.textContent);
-            applyDistanceData(data.distance, { updateInputs: true });
+            applyDistanceData(data.distance, { updateInputs: true, updateCalibration: true });
           } catch (err) {
             console.error(err);
           }
@@ -3046,7 +3288,7 @@
         try {
           const data = await fetchSettings();
           applySettings(data.orientation, data.camera, "Settings saved");
-          applyDistanceData(data.distance, { updateInputs: true });
+          applyDistanceData(data.distance, { updateInputs: true, updateCalibration: true });
         } catch (err) {
           console.error(err);
           statusLabel.textContent = "Settings saved";

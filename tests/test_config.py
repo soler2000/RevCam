@@ -13,6 +13,7 @@ from rev_cam.config import (
     DEFAULT_BATTERY_CAPACITY_MAH,
     DEFAULT_CAMERA_CHOICE,
 )
+from rev_cam.distance import DistanceCalibration
 
 
 def test_default_orientation(tmp_path: Path):
@@ -71,6 +72,29 @@ def test_distance_zones_persistence(tmp_path: Path):
     assert isinstance(updated, DistanceZones)
     reloaded = ConfigManager(config_file)
     assert reloaded.get_distance_zones() == updated
+
+
+def test_default_distance_calibration(tmp_path: Path) -> None:
+    manager = ConfigManager(tmp_path / "config.json")
+    calibration = manager.get_distance_calibration()
+    assert isinstance(calibration, DistanceCalibration)
+    assert calibration.offset_m == pytest.approx(0.0)
+    assert calibration.scale == pytest.approx(1.0)
+
+
+def test_distance_calibration_persistence(tmp_path: Path) -> None:
+    config_file = tmp_path / "config.json"
+    manager = ConfigManager(config_file)
+    updated = manager.set_distance_calibration(DistanceCalibration(offset_m=0.3, scale=1.1))
+    assert isinstance(updated, DistanceCalibration)
+    reloaded = ConfigManager(config_file)
+    assert reloaded.get_distance_calibration() == updated
+
+
+def test_distance_calibration_validation(tmp_path: Path) -> None:
+    manager = ConfigManager(tmp_path / "config.json")
+    with pytest.raises(ValueError):
+        manager.set_distance_calibration({"offset_m": "invalid", "scale": 1.0})
 
 
 def test_default_battery_limits(tmp_path: Path):

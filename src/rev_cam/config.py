@@ -20,7 +20,12 @@ except ImportError:  # pragma: no cover - fallback when optional dependencies mi
 from .battery import BatteryLimits, DEFAULT_BATTERY_LIMITS
 
 DEFAULT_BATTERY_CAPACITY_MAH = 1000
-from .distance import DEFAULT_DISTANCE_ZONES, DistanceZones
+from .distance import (
+    DEFAULT_DISTANCE_CALIBRATION,
+    DEFAULT_DISTANCE_ZONES,
+    DistanceCalibration,
+    DistanceZones,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -207,6 +212,34 @@ def _parse_distance_zones(value: Any, *, default: DistanceZones) -> DistanceZone
         raise ValueError("Distance zone values must be numeric") from exc
 
 
+def _parse_distance_calibration(
+    value: Any, *, default: DistanceCalibration
+) -> DistanceCalibration:
+    if value is None:
+        return default
+    if isinstance(value, DistanceCalibration):
+        return DistanceCalibration(value.offset_m, value.scale)
+    if isinstance(value, Mapping):
+        payload = value.get("calibration") if "calibration" in value else value
+        if not isinstance(payload, Mapping):
+            raise ValueError("Distance calibration must provide 'offset_m' and 'scale'")
+        offset_raw = payload.get("offset_m", payload.get("offset", default.offset_m))
+        scale_raw = payload.get("scale", payload.get("scale_factor", default.scale))
+    elif isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        items = list(value)
+        if len(items) != 2:
+            raise ValueError("Distance calibration sequence must contain two values")
+        offset_raw, scale_raw = items
+    else:
+        raise ValueError("Unsupported distance calibration value")
+    try:
+        offset = float(offset_raw)
+        scale = float(scale_raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Distance calibration values must be numeric") from exc
+    return DistanceCalibration(offset, scale)
+
+
 def _parse_battery_limits(value: Any, *, default: BatteryLimits) -> BatteryLimits:
     if value is None:
         return default
@@ -270,6 +303,7 @@ class ConfigManager:
             self._camera,
             self._resolution,
             self._distance_zones,
+            self._distance_calibration,
             self._battery_limits,
             self._battery_capacity,
             self._stream_settings,
@@ -280,13 +314,23 @@ class ConfigManager:
 
     def _load(
         self,
-    ) -> tuple[Orientation, str, Resolution, DistanceZones, BatteryLimits, int, StreamSettings]:
+    ) -> tuple[
+        Orientation,
+        str,
+        Resolution,
+        DistanceZones,
+        DistanceCalibration,
+        BatteryLimits,
+        int,
+        StreamSettings,
+    ]:
         if not self._path.exists():
             return (
                 Orientation(),
                 DEFAULT_CAMERA_CHOICE,
                 DEFAULT_RESOLUTION,
                 DEFAULT_DISTANCE_ZONES,
+                DEFAULT_DISTANCE_CALIBRATION,
                 DEFAULT_BATTERY_LIMITS,
                 DEFAULT_BATTERY_CAPACITY_MAH,
                 DEFAULT_STREAM_SETTINGS,
@@ -312,6 +356,9 @@ class ConfigManager:
 
             distance_payload = payload.get("distance")
             distance_zones = _parse_distance_zones(distance_payload, default=DEFAULT_DISTANCE_ZONES)
+            distance_calibration = _parse_distance_calibration(
+                distance_payload, default=DEFAULT_DISTANCE_CALIBRATION
+            )
 
             battery_payload = payload.get("battery")
             battery_limits = _parse_battery_limits(
@@ -331,6 +378,7 @@ class ConfigManager:
                 camera,
                 resolution,
                 distance_zones,
+                distance_calibration,
                 battery_limits,
                 battery_capacity,
                 stream_settings,
@@ -343,7 +391,10 @@ class ConfigManager:
             "orientation": asdict(self._orientation),
             "camera": self._camera,
             "resolution": {"width": self._resolution.width, "height": self._resolution.height},
-            "distance": {"zones": self._distance_zones.to_dict()},
+            "distance": {
+                "zones": self._distance_zones.to_dict(),
+                "calibration": self._distance_calibration.to_dict(),
+            },
             "battery": {
                 "limits": self._battery_limits.to_dict(),
                 "capacity_mah": self._battery_capacity,
@@ -402,6 +453,19 @@ class ConfigManager:
             self._distance_zones = zones
             self._save()
         return zones
+
+    def get_distance_calibration(self) -> DistanceCalibration:
+        with self._lock:
+            return self._distance_calibration
+
+    def set_distance_calibration(
+        self, data: Mapping[str, Any] | Sequence[object] | DistanceCalibration
+    ) -> DistanceCalibration:
+        calibration = _parse_distance_calibration(data, default=self._distance_calibration)
+        with self._lock:
+            self._distance_calibration = calibration
+            self._save()
+        return calibration
 
     def get_battery_limits(self) -> BatteryLimits:
         with self._lock:
