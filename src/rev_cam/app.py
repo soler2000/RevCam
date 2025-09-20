@@ -92,7 +92,7 @@ def create_app(config_path: Path | str = Path("data/config.json")) -> FastAPI:
             _record_camera_error(normalised, None)
             return camera_instance, identify_camera(camera_instance)
 
-    def _ensure_webrtc(current_camera: BaseCamera) -> None:
+    async def _ensure_webrtc(current_camera: BaseCamera) -> None:
         nonlocal webrtc_manager, webrtc_error
         if webrtc_manager is None:
             try:
@@ -104,15 +104,20 @@ def create_app(config_path: Path | str = Path("data/config.json")) -> FastAPI:
             else:
                 webrtc_error = None
         else:
-            webrtc_manager.camera = current_camera
-            webrtc_error = None
+            try:
+                await webrtc_manager.set_camera(current_camera)
+            except Exception as exc:  # pragma: no cover - defensive guard
+                logger.error("Failed to update WebRTC camera: %s", exc)
+                webrtc_error = str(exc)
+            else:
+                webrtc_error = None
 
     @app.on_event("startup")
     async def startup() -> None:  # pragma: no cover - framework hook
         nonlocal camera, active_camera_choice
         selection = config_manager.get_camera()
         camera, active_camera_choice = _build_camera(selection, fallback_to_synthetic=True)
-        _ensure_webrtc(camera)
+        await _ensure_webrtc(camera)
 
     @app.on_event("shutdown")
     async def shutdown() -> None:  # pragma: no cover - framework hook
@@ -181,7 +186,7 @@ def create_app(config_path: Path | str = Path("data/config.json")) -> FastAPI:
         old_camera = camera
         camera = new_camera
         config_manager.set_camera(selection)
-        _ensure_webrtc(camera)
+        await _ensure_webrtc(camera)
         if old_camera is not None:
             await old_camera.close()
         webrtc_info = {"enabled": webrtc_manager is not None}
