@@ -18,15 +18,13 @@ Prerequisites
 sudo apt update
 sudo apt install -y \
   git python3 python3-venv python3-pip \
-  python3-picamera2 python3-prctl \
+  python3-picamera2 python3-prctl python3-simplejpeg \
   libatlas-base-dev \
-  libavcodec-dev libavdevice-dev libavformat-dev libavutil-dev \
-  libswresample-dev libswscale-dev \
   libjpeg-dev zlib1g-dev pkg-config
 ```
-These packages provide the official Picamera2 stack alongside the libraries used
-by NumPy and PyAV. The same set is available through `./scripts/install_prereqs.sh`
-if you prefer a reusable helper.
+These packages provide the official Picamera2 stack alongside the JPEG encoder
+used by the streaming pipeline. The same set is available through
+`./scripts/install_prereqs.sh` if you prefer a reusable helper.
 
 2. Clone (or update) the RevCam repository
 -----------------------------------------
@@ -101,5 +99,5 @@ Troubleshooting
 * **Busy camera errors** – re-run `python -m rev_cam.diagnostics` to identify
   lingering processes. Disable the legacy camera interface and reboot if
   `kworker/R-mmal-vchiq` threads are reported.
-* **`av` missing** – re-run step 4. If compilation fails, verify the APT
-  packages listed in step 1 are installed.
+* **`simplejpeg` missing** – re-run step 4. If installation fails, verify the
+  APT packages listed in step 1 are installed.

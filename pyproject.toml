@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rev-cam"
-version = "0.1.7"
+version = "0.2.0"
 description = "Low-latency Raspberry Pi reversing camera MJPEG server"
 readme = "README.md"
 authors = [{name = "RevCam Team"}]
@@ -13,13 +13,14 @@ dependencies = [
     "fastapi>=0.109",
     "uvicorn[standard]>=0.27",
     "numpy>=1.24",
-    "av>=10.0",
+    "simplejpeg>=2.1",
     "pydantic>=2.5"
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=7.4"
+    "pytest>=7.4",
+    "httpx>=0.25"
 ]
 
 dynamic = ["classifiers"]

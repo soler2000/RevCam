@@ -94,3 +94,28 @@ def test_mjpeg_stream_endpoint(client: TestClient) -> None:
         iterator = response.iter_bytes()
         first_chunk = next(iterator)
         assert b"--frame" in first_chunk
+
+
+def test_stream_error_surfaces_when_streamer_unavailable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class _BrokenStreamer:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            raise RuntimeError("encoder offline")
+
+    monkeypatch.setattr("rev_cam.app.MJPEGStreamer", _BrokenStreamer)
+    config_path = tmp_path / "config.json"
+    app = create_app(config_path)
+    with TestClient(app) as test_client:
+        response = test_client.get("/api/camera")
+        assert response.status_code == 200
+        payload = response.json()
+        stream_info = payload["stream"]
+        assert stream_info["enabled"] is False
+        assert stream_info["endpoint"] is None
+        assert stream_info["error"] == "encoder offline"
+
+        stream_response = test_client.get("/stream/mjpeg")
+        assert stream_response.status_code == 503
+        detail = stream_response.json()["detail"]
+        assert "encoder offline" in detail

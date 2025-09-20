@@ -7,8 +7,9 @@ that future driver-assistance overlays can be injected on the server without maj
 
 ## Features
 
-- Fast MJPEG video delivery optimised for mobile Safari (iPhone/iPad) with a
-  pause/resume web player control and automatic reconnect behaviour.
+- Fast MJPEG video delivery with a dedicated low-latency broadcaster tuned for
+  mobile Safari (iPhone/iPad), plus pause/resume controls and automatic
+  reconnect behaviour.
 - Camera orientation controls (rotation and horizontal/vertical flips) and preset resolution
   options for balancing clarity against bandwidth.
 - Modular frame processing pipeline ready for future overlays (e.g. guidelines).
@@ -44,11 +45,11 @@ building everything from PyPI. Follow these steps on the Pi:
 
    ```bash
    sudo apt update
-   sudo apt install python3-picamera2 python3-prctl
+   sudo apt install python3-picamera2 python3-prctl python3-simplejpeg
    ```
 
    Prefer a single command? Run the bundled helper, which also installs
-   build prerequisites for PyAV and other native wheels:
+   the native JPEG encoder used by the streaming pipeline:
 
    ```bash
    ./scripts/install_prereqs.sh
@@ -63,10 +64,10 @@ building everything from PyPI. Follow these steps on the Pi:
    python -m pip install --upgrade pip
    ```
 
-3. Install RevCam from the source tree. On Pi hardware some wheels (such as
-   PyAV) may still be built locally, so this step can take a short while.
-   Seeing a long list ending with `Successfully installed ...` means the step
-   finished successfully. You can either run the convenience script:
+3. Install RevCam from the source tree. On Pi hardware this step pulls
+   pre-built wheels from PiWheels, so it usually completes quickly. Seeing a
+   long list ending with `Successfully installed ...` means the step finished
+   successfully. You can either run the convenience script:
 
    ```bash
    ./scripts/install.sh --pi
@@ -140,7 +141,7 @@ REVCAM_REPO="https://github.com/soler2000/RevCam.git"
 REVCAM_REF="main"  # replace with a branch or pull/<ID>/head for PR testing
 
 sudo apt update
-sudo apt install -y python3-picamera2 python3-prctl
+sudo apt install -y python3-picamera2 python3-prctl python3-simplejpeg
 
 if [ ! -d RevCam ]; then
   git clone "$REVCAM_REPO" RevCam
@@ -191,7 +192,7 @@ uvicorn rev_cam.app:create_app --factory --host 0.0.0.0 --port 9000
 ### Fast branch updates without rebuilding dependencies
 
 If you frequently test branches that rebuild native packages (for example
-`av` or `numpy`), use `git worktree` to reuse the same repository clone and
+`numpy`), use `git worktree` to reuse the same repository clone and
 virtual environment. Build the dependencies once on your main checkout, then
 create lightweight worktrees for feature branches:
 

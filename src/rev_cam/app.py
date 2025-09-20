@@ -42,6 +42,7 @@ def create_app(config_path: Path | str = Path("data/config.json")) -> FastAPI:
     pipeline = FramePipeline(lambda: config_manager.get_orientation())
     camera: BaseCamera | None = None
     streamer: MJPEGStreamer | None = None
+    stream_error: str | None = None
     active_camera_choice: str = "unknown"
     active_resolution: Resolution = config_manager.get_resolution()
     camera_errors: dict[str, str] = {}
@@ -100,7 +101,7 @@ def create_app(config_path: Path | str = Path("data/config.json")) -> FastAPI:
 
     @app.on_event("startup")
     async def startup() -> None:  # pragma: no cover - framework hook
-        nonlocal camera, active_camera_choice, streamer, active_resolution
+        nonlocal camera, active_camera_choice, streamer, active_resolution, stream_error
         selection = config_manager.get_camera()
         resolution = config_manager.get_resolution()
         camera, active_camera_choice = _build_camera(
@@ -109,10 +110,20 @@ def create_app(config_path: Path | str = Path("data/config.json")) -> FastAPI:
             fallback_to_synthetic=True,
         )
         active_resolution = resolution
-        streamer = MJPEGStreamer(camera=camera, pipeline=pipeline)
+        try:
+            streamer = MJPEGStreamer(camera=camera, pipeline=pipeline)
+        except RuntimeError as exc:
+            logger.error("Failed to initialise MJPEG streamer: %s", exc)
+            stream_error = str(exc)
+            streamer = None
+        else:
+            stream_error = None
 
     @app.on_event("shutdown")
     async def shutdown() -> None:  # pragma: no cover - framework hook
+        nonlocal streamer
+        if streamer is not None:
+            await streamer.aclose()
         if camera:
             await camera.close()
 
@@ -161,7 +172,7 @@ def create_app(config_path: Path | str = Path("data/config.json")) -> FastAPI:
             "enabled": streamer is not None,
             "endpoint": "/stream/mjpeg" if streamer else None,
             "content_type": streamer.media_type if streamer else None,
-            "error": None,
+            "error": stream_error,
         }
         return {
             "selected": config_manager.get_camera(),
@@ -179,7 +190,7 @@ def create_app(config_path: Path | str = Path("data/config.json")) -> FastAPI:
 
     @app.post("/api/camera")
     async def update_camera(payload: CameraPayload) -> dict[str, object]:
-        nonlocal camera, active_camera_choice, streamer, active_resolution
+        nonlocal camera, active_camera_choice, streamer, active_resolution, stream_error
         selection = payload.source.strip().lower()
         if selection not in CAMERA_SOURCES:
             raise HTTPException(status_code=400, detail="Unknown camera source")
@@ -199,7 +210,7 @@ def create_app(config_path: Path | str = Path("data/config.json")) -> FastAPI:
                 "enabled": streamer is not None,
                 "endpoint": "/stream/mjpeg" if streamer else None,
                 "content_type": streamer.media_type if streamer else None,
-                "error": None,
+                "error": stream_error,
             }
             return {
                 "selected": selection,
@@ -244,9 +255,17 @@ def create_app(config_path: Path | str = Path("data/config.json")) -> FastAPI:
                 active_camera_choice = restored_active
                 active_resolution = old_resolution
                 if streamer is None and camera is not None:
-                    streamer = MJPEGStreamer(camera=camera, pipeline=pipeline)
+                    try:
+                        streamer = MJPEGStreamer(camera=camera, pipeline=pipeline)
+                    except RuntimeError as streamer_exc:
+                        logger.error("Failed to initialise MJPEG streamer: %s", streamer_exc)
+                        stream_error = str(streamer_exc)
+                        streamer = None
+                    else:
+                        stream_error = None
                 elif streamer is not None and camera is not None:
                     streamer.camera = camera
+                    stream_error = None
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
         camera = new_camera
@@ -254,14 +273,22 @@ def create_app(config_path: Path | str = Path("data/config.json")) -> FastAPI:
         config_manager.set_camera(selection)
         config_manager.set_resolution(requested_resolution)
         if streamer is None:
-            streamer = MJPEGStreamer(camera=camera, pipeline=pipeline)
+            try:
+                streamer = MJPEGStreamer(camera=camera, pipeline=pipeline)
+            except RuntimeError as exc:
+                logger.error("Failed to initialise MJPEG streamer: %s", exc)
+                stream_error = str(exc)
+                streamer = None
+            else:
+                stream_error = None
         else:
             streamer.camera = camera
+            stream_error = None
         stream_info = {
             "enabled": streamer is not None,
             "endpoint": "/stream/mjpeg" if streamer else None,
             "content_type": streamer.media_type if streamer else None,
-            "error": None,
+            "error": stream_error,
         }
         return {
             "selected": selection,
@@ -277,7 +304,10 @@ def create_app(config_path: Path | str = Path("data/config.json")) -> FastAPI:
     @app.get("/stream/mjpeg")
     async def stream_mjpeg():
         if streamer is None:
-            raise HTTPException(status_code=503, detail="Streaming service unavailable")
+            raise HTTPException(
+                status_code=503,
+                detail=stream_error or "Streaming service unavailable",
+            )
         response = StreamingResponse(streamer.stream(), media_type=streamer.media_type)
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
         response.headers["Pragma"] = "no-cache"

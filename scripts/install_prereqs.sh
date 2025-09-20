@@ -50,13 +50,8 @@ packages=(
     python3-pip
     python3-picamera2
     python3-prctl
+    python3-simplejpeg
     libatlas-base-dev
-    libavcodec-dev
-    libavdevice-dev
-    libavformat-dev
-    libavutil-dev
-    libswresample-dev
-    libswscale-dev
     libjpeg-dev
     zlib1g-dev
     pkg-config
