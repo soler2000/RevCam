@@ -97,6 +97,19 @@ pip install adafruit-blinka adafruit-circuitpython-ina219
 Once available the live view automatically polls the sensor and displays the
 pack percentage, voltage, and current draw in the header.
 
+If your sensor is attached to a non-default Linux I²C bus, set the
+`REVCAM_I2C_BUS` environment variable before starting RevCam. For example, to
+use bus 29:
+
+```bash
+export REVCAM_I2C_BUS=29
+uvicorn rev_cam.app:create_app --factory --host 0.0.0.0 --port 9000
+```
+
+When overriding the bus number install the optional
+`adafruit-circuitpython-extended-bus` package so RevCam can open the desired
+adapter.
+
 ### Development machine installation
 
 For local development on non-Pi machines a regular virtual environment is

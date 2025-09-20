@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import sys
+import types
+
 import pytest
 
 from rev_cam.battery import BatteryMonitor, BatteryReading
@@ -59,3 +62,41 @@ def test_battery_monitor_surfaces_sensor_error() -> None:
     assert "ina219 not detected" in reading.error
     assert monitor.last_error is not None
     assert "ina219 not detected" in monitor.last_error
+
+
+def test_battery_monitor_supports_extended_i2c_bus(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: dict[str, object] = {}
+
+    class _StubINA219:
+        def __init__(self, bus: object) -> None:
+            calls["bus"] = bus
+            self.bus_voltage = 3.95
+            self.shunt_voltage = 0.0
+            self.current = None
+
+    class _StubExtendedI2C:
+        def __init__(self, bus_number: int) -> None:
+            calls["bus_number"] = bus_number
+
+    board_stub = types.ModuleType("board")
+
+    def _fail_board_i2c() -> None:
+        raise AssertionError("board.I2C should not be used when a bus override is provided")
+
+    board_stub.I2C = _fail_board_i2c  # type: ignore[assignment]
+
+    monkeypatch.setitem(sys.modules, "adafruit_ina219", types.SimpleNamespace(INA219=_StubINA219))
+    monkeypatch.setitem(
+        sys.modules,
+        "adafruit_extended_bus",
+        types.SimpleNamespace(ExtendedI2C=_StubExtendedI2C),
+    )
+    monkeypatch.setitem(sys.modules, "board", board_stub)
+
+    monitor = BatteryMonitor(i2c_bus=29)
+
+    reading = monitor.read()
+
+    assert reading.available is True
+    assert calls["bus_number"] == 29
+    assert calls["bus"] is not None

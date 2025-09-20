@@ -57,11 +57,18 @@ class BatteryMonitor:
         (4.2, 100.0),
     )
 
-    def __init__(self, capacity_mah: int = 1000, sensor_factory: SensorFactory | None = None) -> None:
+    def __init__(
+        self,
+        capacity_mah: int = 1000,
+        sensor_factory: SensorFactory | None = None,
+        *,
+        i2c_bus: int | None = None,
+    ) -> None:
         self.capacity_mah = capacity_mah
         self._sensor_factory = sensor_factory
         self._sensor: object | None = None
         self._last_error: str | None = None
+        self._i2c_bus = i2c_bus
 
     @property
     def last_error(self) -> str | None:
@@ -73,15 +80,33 @@ class BatteryMonitor:
         """Attempt to instantiate the INA219 driver."""
 
         try:  # Import lazily so unit tests do not require the dependencies.
-            import board  # type: ignore
             from adafruit_ina219 import INA219  # type: ignore
         except Exception as exc:  # pragma: no cover - import varies by environment
             raise RuntimeError("INA219 driver unavailable") from exc
 
-        try:
-            i2c = board.I2C()  # type: ignore[attr-defined]
-        except Exception as exc:  # pragma: no cover - hardware specific
-            raise RuntimeError("Unable to access I2C bus") from exc
+        bus_number = self._i2c_bus
+        if bus_number is not None:
+            try:
+                from adafruit_extended_bus import ExtendedI2C  # type: ignore
+            except Exception as exc:  # pragma: no cover - optional dependency
+                raise RuntimeError(
+                    "Extended I2C support unavailable; install adafruit-circuitpython-extended-bus"
+                ) from exc
+
+            try:
+                i2c = ExtendedI2C(bus_number)  # type: ignore[call-arg]
+            except Exception as exc:  # pragma: no cover - hardware specific
+                raise RuntimeError(f"Unable to access I2C bus {bus_number}: {exc}") from exc
+        else:
+            try:
+                import board  # type: ignore
+            except Exception as exc:  # pragma: no cover - import varies by environment
+                raise RuntimeError("INA219 driver unavailable") from exc
+
+            try:
+                i2c = board.I2C()  # type: ignore[attr-defined]
+            except Exception as exc:  # pragma: no cover - hardware specific
+                raise RuntimeError("Unable to access I2C bus") from exc
 
         try:
             return INA219(i2c)  # type: ignore[call-arg]
