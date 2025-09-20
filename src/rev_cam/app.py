@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from .battery import BatteryMonitor, BatterySupervisor, create_battery_overlay
 from .camera import CAMERA_SOURCES, BaseCamera, CameraError, create_camera, identify_camera
 from .config import ConfigManager, Resolution, RESOLUTION_PRESETS, StreamSettings
+from .diagnostics import collect_diagnostics
 from .distance import DistanceMonitor, create_distance_overlay
 from .pipeline import FramePipeline
 from .streaming import MJPEGStreamer, encode_frame_to_jpeg
@@ -278,6 +279,19 @@ def create_app(
             "flip_horizontal": orientation.flip_horizontal,
             "flip_vertical": orientation.flip_vertical,
         }
+
+    @app.get("/api/diagnostics")
+    async def get_diagnostics() -> dict[str, object]:
+        try:
+            return await run_in_threadpool(collect_diagnostics)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.exception("Diagnostics collection failed")
+            detail = str(exc).strip()
+            if detail:
+                message = f"Unable to collect diagnostics: {detail}"
+            else:
+                message = "Unable to collect diagnostics"
+            raise HTTPException(status_code=500, detail=message) from exc
 
     @app.post("/api/orientation")
     async def update_orientation(payload: OrientationPayload) -> dict[str, int | bool]:

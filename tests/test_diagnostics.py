@@ -11,6 +11,21 @@ pytest.importorskip("numpy")
 import rev_cam.diagnostics as diagnostics
 
 
+def test_collect_diagnostics(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(diagnostics, "diagnose_camera_conflicts", lambda: ["service"])
+    monkeypatch.setattr(
+        diagnostics,
+        "diagnose_picamera_stack",
+        lambda: {"status": "ok", "details": []},
+    )
+
+    payload = diagnostics.collect_diagnostics()
+
+    assert payload["version"] == diagnostics.APP_VERSION
+    assert payload["camera_conflicts"] == ["service"]
+    assert payload["picamera"] == {"status": "ok", "details": []}
+
+
 def test_run_outputs_conflicts(capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(diagnostics, "diagnose_camera_conflicts", lambda: ["service running"])
     monkeypatch.setattr(

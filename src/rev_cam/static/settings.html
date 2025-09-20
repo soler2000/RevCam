@@ -481,6 +481,48 @@
         margin: 0.75rem 0 0;
         min-height: 1rem;
       }
+      .diagnostics-actions {
+        margin: 0.75rem 0 1rem;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.75rem;
+      }
+      .diagnostics-status {
+        font-size: 0.9rem;
+        opacity: 0.85;
+      }
+      .diagnostics-error {
+        margin: 0.75rem 0 0;
+        font-size: 0.95rem;
+        color: #ff6b6b;
+      }
+      .diagnostics-results h3 {
+        margin: 1rem 0 0.5rem;
+        font-size: 1rem;
+      }
+      .diagnostics-results h4 {
+        margin: 0.75rem 0 0.35rem;
+        font-size: 0.95rem;
+      }
+      .diagnostics-list {
+        margin: 0.35rem 0 0.75rem 1.25rem;
+        padding: 0;
+      }
+      .diagnostics-list li {
+        margin: 0.3rem 0;
+      }
+      .diagnostics-empty {
+        margin: 0.35rem 0 0.75rem;
+        font-size: 0.95rem;
+        opacity: 0.8;
+      }
+      .diagnostics-picamera-status.ok {
+        color: #30d158;
+      }
+      .diagnostics-picamera-status.error {
+        color: #ff9f0a;
+      }
       #distance-zones-status {
         font-size: 0.9rem;
       }
@@ -656,6 +698,49 @@
               <div id="status">Loading…</div>
             </div>
           </form>
+
+          <section id="diagnostics-card" class="card">
+            <h2>Diagnostics</h2>
+            <p class="muted">
+              Check for conflicting camera services and validate the Picamera2 Python stack.
+            </p>
+            <div class="diagnostics-actions">
+              <button type="button" id="diagnostics-refresh" class="secondary-button">
+                Run diagnostics
+              </button>
+              <span
+                id="diagnostics-status"
+                class="diagnostics-status"
+                role="status"
+                aria-live="polite"
+              ></span>
+            </div>
+            <div id="diagnostics-results" class="diagnostics-results" hidden>
+              <p id="diagnostics-summary" class="muted"></p>
+              <div>
+                <h3>Camera conflicts</h3>
+                <p id="diagnostics-no-conflicts" class="diagnostics-empty">
+                  No conflicting services detected.
+                </p>
+                <ul id="diagnostics-conflicts" class="diagnostics-list" hidden></ul>
+              </div>
+              <div>
+                <h3>Picamera2 stack</h3>
+                <p id="diagnostics-picamera-status" class="diagnostics-picamera-status"></p>
+                <ul id="diagnostics-picamera-details" class="diagnostics-list" hidden></ul>
+                <div id="diagnostics-picamera-hints-block" hidden>
+                  <h4>Hints</h4>
+                  <ul id="diagnostics-picamera-hints" class="diagnostics-list"></ul>
+                </div>
+              </div>
+            </div>
+            <p
+              id="diagnostics-error"
+              class="diagnostics-error"
+              role="alert"
+              aria-live="assertive"
+            ></p>
+          </section>
         </section>
 
         <section
@@ -926,6 +1011,21 @@
           }
         }
       }
+      const diagnosticsButton = document.getElementById("diagnostics-refresh");
+      const diagnosticsStatus = document.getElementById("diagnostics-status");
+      const diagnosticsResults = document.getElementById("diagnostics-results");
+      const diagnosticsSummary = document.getElementById("diagnostics-summary");
+      const diagnosticsConflicts = document.getElementById("diagnostics-conflicts");
+      const diagnosticsNoConflicts = document.getElementById("diagnostics-no-conflicts");
+      const diagnosticsPicameraStatus = document.getElementById("diagnostics-picamera-status");
+      const diagnosticsPicameraDetails = document.getElementById("diagnostics-picamera-details");
+      const diagnosticsPicameraHintsBlock = document.getElementById(
+        "diagnostics-picamera-hints-block",
+      );
+      const diagnosticsPicameraHints = document.getElementById("diagnostics-picamera-hints");
+      const diagnosticsError = document.getElementById("diagnostics-error");
+      let diagnosticsLoading = false;
+      let diagnosticsStatusTimer = null;
       const batterySummary = document.getElementById("battery-summary");
       const batteryRefreshButton = document.getElementById("battery-refresh");
       const batteryIndicator = document.getElementById("battery-indicator");
@@ -1172,6 +1272,162 @@
         }
         if (data && data.zones) {
           updateDistanceInputs(data.zones, options.updateInputs === true);
+        }
+      }
+
+      function renderDiagnosticsList(element, items) {
+        if (!element) {
+          return 0;
+        }
+        const entries = Array.isArray(items)
+          ? items
+              .map((item) => (typeof item === "string" ? item.trim() : ""))
+              .filter((item) => item.length > 0)
+          : [];
+        if (entries.length === 0) {
+          element.hidden = true;
+          element.replaceChildren();
+          return 0;
+        }
+        const fragment = document.createDocumentFragment();
+        for (const entry of entries) {
+          const listItem = document.createElement("li");
+          listItem.textContent = entry;
+          fragment.appendChild(listItem);
+        }
+        element.replaceChildren(fragment);
+        element.hidden = false;
+        return entries.length;
+      }
+
+      function applyDiagnostics(data) {
+        if (!diagnosticsResults) {
+          return;
+        }
+        diagnosticsResults.hidden = false;
+        if (diagnosticsError) {
+          diagnosticsError.textContent = "";
+        }
+        if (diagnosticsSummary) {
+          const version =
+            data && typeof data.version === "string" ? data.version.trim() : "";
+          diagnosticsSummary.textContent = version ? `Application version ${version}` : "";
+          diagnosticsSummary.hidden = version.length === 0;
+        }
+        const conflicts = data && Array.isArray(data.camera_conflicts)
+          ? data.camera_conflicts
+          : [];
+        const conflictCount = renderDiagnosticsList(diagnosticsConflicts, conflicts);
+        if (diagnosticsNoConflicts) {
+          diagnosticsNoConflicts.hidden = conflictCount > 0;
+        }
+        const picamera =
+          data && typeof data.picamera === "object" && data.picamera !== null
+            ? data.picamera
+            : {};
+        if (diagnosticsPicameraStatus) {
+          const statusText =
+            typeof picamera.status === "string" ? picamera.status.trim() : "";
+          const classes = diagnosticsPicameraStatus.classList;
+          classes.remove("ok", "error");
+          let summary;
+          if (statusText.toLowerCase() === "ok") {
+            summary = "Picamera2 Python stack: OK";
+            classes.add("ok");
+          } else if (statusText) {
+            summary = `Picamera2 Python stack status: ${statusText}`;
+            classes.add("error");
+          } else {
+            summary = "Picamera2 Python stack status unknown.";
+          }
+          const numpyVersion =
+            typeof picamera.numpy_version === "string"
+              ? picamera.numpy_version.trim()
+              : "";
+          if (numpyVersion) {
+            summary = `${summary} • NumPy ${numpyVersion}`;
+          }
+          diagnosticsPicameraStatus.textContent = summary;
+        }
+        const detailsCount = renderDiagnosticsList(
+          diagnosticsPicameraDetails,
+          picamera && Array.isArray(picamera.details) ? picamera.details : [],
+        );
+        if (diagnosticsPicameraDetails) {
+          diagnosticsPicameraDetails.hidden = detailsCount === 0;
+        }
+        const hintsCount = renderDiagnosticsList(
+          diagnosticsPicameraHints,
+          picamera && Array.isArray(picamera.hints) ? picamera.hints : [],
+        );
+        if (diagnosticsPicameraHintsBlock) {
+          diagnosticsPicameraHintsBlock.hidden = hintsCount === 0;
+        }
+      }
+
+      async function refreshDiagnostics() {
+        if (diagnosticsLoading) {
+          return;
+        }
+        diagnosticsLoading = true;
+        if (diagnosticsStatusTimer) {
+          clearTimeout(diagnosticsStatusTimer);
+          diagnosticsStatusTimer = null;
+        }
+        if (diagnosticsStatus) {
+          diagnosticsStatus.textContent = "Running diagnostics…";
+        }
+        if (diagnosticsButton) {
+          diagnosticsButton.disabled = true;
+        }
+        if (diagnosticsError) {
+          diagnosticsError.textContent = "";
+        }
+        try {
+          const response = await fetch("/api/diagnostics", { cache: "no-store" });
+          if (!response.ok) {
+            let errorDetail = `Diagnostics request failed with status ${response.status}`;
+            try {
+              const errorPayload = await response.json();
+              if (errorPayload && typeof errorPayload.detail === "string") {
+                const detail = errorPayload.detail.trim();
+                if (detail) {
+                  errorDetail = detail;
+                }
+              }
+            } catch (err) {
+              console.error(err);
+            }
+            throw new Error(errorDetail);
+          }
+          const payload = await response.json();
+          applyDiagnostics(payload);
+          if (diagnosticsStatus) {
+            diagnosticsStatus.textContent = "Diagnostics updated";
+            diagnosticsStatusTimer = window.setTimeout(() => {
+              if (diagnosticsStatus) {
+                diagnosticsStatus.textContent = "";
+              }
+              diagnosticsStatusTimer = null;
+            }, 4000);
+          }
+        } catch (error) {
+          console.error("Diagnostics fetch failed", error);
+          const message =
+            error instanceof Error && error.message
+              ? error.message
+              : "Unable to collect diagnostics.";
+          if (diagnosticsError) {
+            diagnosticsError.textContent = message;
+          }
+          if (diagnosticsStatus) {
+            diagnosticsStatus.textContent = "Diagnostics failed";
+          }
+        } finally {
+          diagnosticsLoading = false;
+          if (diagnosticsButton) {
+            diagnosticsButton.disabled = false;
+          }
         }
       }
 
@@ -1578,6 +1834,12 @@
           }
         });
       });
+
+      if (diagnosticsButton) {
+        diagnosticsButton.addEventListener("click", () => {
+          refreshDiagnostics().catch((err) => console.error(err));
+        });
+      }
 
       if (distanceRefreshButton) {
         distanceRefreshButton.addEventListener("click", () => {
