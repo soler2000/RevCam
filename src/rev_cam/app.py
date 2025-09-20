@@ -10,7 +10,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
-from .battery import BatteryMonitor
+from .battery import BatteryMonitor, BatterySupervisor, create_battery_overlay
 from .camera import CAMERA_SOURCES, BaseCamera, CameraError, create_camera, identify_camera
 from .config import ConfigManager, Resolution, RESOLUTION_PRESETS
 from .distance import DistanceMonitor, create_distance_overlay
@@ -61,6 +61,11 @@ class DistanceZonesPayload(BaseModel):
     danger: float
 
 
+class BatteryLimitsPayload(BaseModel):
+    warning_percent: float
+    shutdown_percent: float
+
+
 def create_app(
     config_path: Path | str = Path("data/config.json"),
     *,
@@ -84,10 +89,18 @@ def create_app(
         i2c_bus_override = None
 
     battery_monitor = BatteryMonitor(capacity_mah=1000, i2c_bus=i2c_bus_override)
+    battery_supervisor = BatterySupervisor(
+        battery_monitor,
+        config_manager.get_battery_limits,
+        logger=logger,
+    )
     distance_monitor = DistanceMonitor(i2c_bus=i2c_bus_override)
     wifi_manager = wifi_manager or WiFiManager()
 
     pipeline = FramePipeline(lambda: config_manager.get_orientation())
+    pipeline.add_overlay(
+        create_battery_overlay(battery_monitor, config_manager.get_battery_limits)
+    )
     pipeline.add_overlay(
         create_distance_overlay(distance_monitor, config_manager.get_distance_zones)
     )
@@ -100,6 +113,7 @@ def create_app(
 
     app.state.wifi_manager = wifi_manager
     app.state.distance_monitor = distance_monitor
+    app.state.battery_supervisor = battery_supervisor
 
     def _record_camera_error(source: str, message: str | None) -> None:
         if message:
@@ -171,6 +185,7 @@ def create_app(
             streamer = None
         else:
             stream_error = None
+        battery_supervisor.start()
 
     @app.on_event("shutdown")
     async def shutdown() -> None:  # pragma: no cover - framework hook
@@ -179,6 +194,7 @@ def create_app(
             await streamer.aclose()
         if camera:
             await camera.close()
+        await battery_supervisor.aclose()
         if hasattr(wifi_manager, "close"):
             await run_in_threadpool(wifi_manager.close)
 
@@ -247,6 +263,19 @@ def create_app(
     async def get_battery_status() -> dict[str, object | None]:
         reading = battery_monitor.read()
         return reading.to_dict()
+
+    @app.get("/api/battery/limits")
+    async def get_battery_limits() -> dict[str, float]:
+        limits = config_manager.get_battery_limits()
+        return limits.to_dict()
+
+    @app.post("/api/battery/limits")
+    async def update_battery_limits(payload: BatteryLimitsPayload) -> dict[str, float]:
+        try:
+            limits = config_manager.set_battery_limits(payload.model_dump())
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return limits.to_dict()
 
     @app.get("/api/distance")
     async def get_distance_status() -> dict[str, object | None]:

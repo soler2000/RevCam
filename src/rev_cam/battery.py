@@ -2,10 +2,63 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
+import math
+import subprocess
 from dataclasses import dataclass
-from typing import Callable, Iterable, Sequence
+from typing import Awaitable, Callable, Iterable, Sequence
+
+try:  # pragma: no cover - optional dependency on numpy for overlays
+    import numpy as _np
+except ImportError:  # pragma: no cover - optional dependency
+    _np = None
+
+from .overlay_text import (
+    apply_background as _apply_background,
+    draw_text as _draw_text,
+    measure_text as _measure_text,
+)
 
 SensorFactory = Callable[[], object]
+
+
+@dataclass(frozen=True, slots=True)
+class BatteryLimits:
+    """Represents configurable warning and shutdown thresholds."""
+
+    warning_percent: float = 20.0
+    shutdown_percent: float = 5.0
+
+    def __post_init__(self) -> None:
+        warning = float(self.warning_percent)
+        shutdown = float(self.shutdown_percent)
+        if not (0.0 <= warning <= 100.0 and 0.0 <= shutdown <= 100.0):
+            raise ValueError("Battery thresholds must be between 0 and 100")
+        if warning < shutdown:
+            raise ValueError("Warning threshold must be greater than shutdown threshold")
+        object.__setattr__(self, "warning_percent", warning)
+        object.__setattr__(self, "shutdown_percent", shutdown)
+
+    def classify(self, percentage: float | None) -> str | None:
+        """Classify *percentage* relative to the configured thresholds."""
+
+        if percentage is None or not math.isfinite(percentage):
+            return None
+        if percentage <= self.shutdown_percent:
+            return "shutdown"
+        if percentage <= self.warning_percent:
+            return "warning"
+        return "normal"
+
+    def to_dict(self) -> dict[str, float]:
+        return {
+            "warning_percent": float(self.warning_percent),
+            "shutdown_percent": float(self.shutdown_percent),
+        }
+
+
+DEFAULT_BATTERY_LIMITS = BatteryLimits()
 
 
 @dataclass(slots=True)
@@ -232,6 +285,230 @@ class BatteryMonitor:
         return reading
 
 
+class BatterySupervisor:
+    """Background task that triggers a shutdown when the pack is depleted."""
+
+    def __init__(
+        self,
+        monitor: BatteryMonitor,
+        limits_provider: Callable[[], BatteryLimits],
+        *,
+        check_interval: float = 30.0,
+        shutdown_handler: Callable[[BatteryReading], Awaitable[None] | None] | None = None,
+        logger: logging.Logger | None = None,
+    ) -> None:
+        if check_interval <= 0:
+            raise ValueError("check_interval must be positive")
+        self._monitor = monitor
+        self._limits_provider = limits_provider
+        self._check_interval = float(check_interval)
+        self._shutdown_handler = shutdown_handler or self._default_shutdown
+        self._logger = logger or logging.getLogger(__name__)
+        self._task: asyncio.Task[None] | None = None
+        self._stop_event: asyncio.Event | None = None
+        self._shutdown_requested = False
+
+    def start(self) -> None:
+        """Start the background polling task."""
+
+        if self._task is not None:
+            return
+        loop = asyncio.get_running_loop()
+        self._stop_event = asyncio.Event()
+        self._task = loop.create_task(self._run())
+
+    async def aclose(self) -> None:
+        """Stop the supervisor and wait for the worker to exit."""
+
+        task = self._task
+        if task is None:
+            return
+        assert self._stop_event is not None
+        self._stop_event.set()
+        try:
+            await task
+        finally:
+            self._task = None
+            self._stop_event = None
+            self._shutdown_requested = False
+
+    async def _run(self) -> None:
+        assert self._stop_event is not None
+        try:
+            while not self._stop_event.is_set():
+                await self._poll_once()
+                try:
+                    await asyncio.wait_for(
+                        self._stop_event.wait(), timeout=self._check_interval
+                    )
+                except asyncio.TimeoutError:
+                    continue
+        except asyncio.CancelledError:  # pragma: no cover - defensive guard
+            raise
+
+    async def _poll_once(self) -> None:
+        loop = asyncio.get_running_loop()
+        try:
+            reading = await loop.run_in_executor(None, self._monitor.read)
+        except Exception:  # pragma: no cover - defensive guard
+            self._logger.exception("Battery monitor raised an unexpected exception")
+            return
+
+        if not reading.available or reading.charging:
+            return
+
+        try:
+            limits = self._limits_provider()
+        except Exception:  # pragma: no cover - defensive guard
+            self._logger.exception("Battery limits provider raised an exception")
+            return
+
+        state = limits.classify(reading.percentage)
+        if state != "shutdown" or self._shutdown_requested:
+            return
+
+        await self._trigger_shutdown(reading)
+
+    async def _trigger_shutdown(self, reading: BatteryReading) -> None:
+        self._shutdown_requested = True
+        handler = self._shutdown_handler
+        try:
+            result = handler(reading)
+            if asyncio.iscoroutine(result):
+                await result
+        except Exception:  # pragma: no cover - defensive guard
+            self._logger.exception("Battery shutdown handler failed")
+        finally:
+            if self._stop_event is not None:
+                self._stop_event.set()
+
+    @staticmethod
+    def _default_shutdown(reading: BatteryReading) -> None:
+        del reading  # Unused but kept for signature consistency.
+        message = "Low battery detected - shutting down"
+        logger = logging.getLogger(__name__)
+        commands = [
+            ["sudo", "shutdown", "-h", "now", message],
+            ["shutdown", "-h", "now", message],
+        ]
+        for command in commands:
+            try:
+                subprocess.run(command, check=False)
+                return
+            except FileNotFoundError:
+                continue
+            except Exception:  # pragma: no cover - depends on platform
+                logger.exception("Failed to invoke shutdown command: %s", command[0])
+                return
+        logger.error("Shutdown command not found; unable to power off automatically")
+
+
+_BATTERY_COLOURS = {
+    "charging": (48, 209, 88),
+    "normal": (10, 132, 255),
+    "warning": (255, 159, 10),
+    "critical": (255, 69, 58),
+    "unknown": (255, 214, 10),
+    "unavailable": (142, 142, 147),
+}
+
+_BATTERY_LABELS = {
+    "charging": "CHARGING",
+    "normal": "BATTERY",
+    "warning": "LOW",
+    "critical": "CRITICAL",
+    "unknown": "UNKNOWN",
+    "unavailable": "UNAVAILABLE",
+}
+
+
+def create_battery_overlay(
+    monitor: BatteryMonitor, limits_provider: Callable[[], BatteryLimits]
+):
+    """Return an overlay function that renders the current battery status."""
+
+    def _overlay(frame):
+        if _np is None or not isinstance(frame, _np.ndarray):  # pragma: no cover - optional path
+            monitor.read()
+            return frame
+
+        reading = monitor.read()
+        try:
+            limits = limits_provider()
+        except Exception:  # pragma: no cover - defensive guard
+            limits = DEFAULT_BATTERY_LIMITS
+        return _render_battery_overlay(frame, reading, limits)
+
+    return _overlay
+
+
+def _render_battery_overlay(frame, reading: BatteryReading, limits: BatteryLimits):
+    if _np is None or not isinstance(frame, _np.ndarray):  # pragma: no cover - optional guard
+        return frame
+
+    height, width = frame.shape[:2]
+    if height < 24 or width < 60:
+        return frame
+
+    status = _classify_reading(reading, limits)
+    colour = _BATTERY_COLOURS.get(status, _BATTERY_COLOURS["unavailable"])
+    label = _BATTERY_LABELS.get(status, _BATTERY_LABELS["unavailable"])
+
+    if reading.available and reading.percentage is not None and math.isfinite(reading.percentage):
+        main_text = f"{reading.percentage:.0f}%"
+    else:
+        main_text = "---"
+
+    lines = [main_text, label]
+
+    if reading.voltage is not None and math.isfinite(reading.voltage):
+        lines.append(f"{reading.voltage:.2f}V")
+
+    scale = max(2, min(width, height) // 200)
+    padding = 4 * scale
+    line_spacing = 2 * scale
+    glyph_width = 5 * scale
+    glyph_height = 7 * scale
+    char_spacing = 1 * scale
+
+    line_widths = [_measure_text(line, glyph_width, char_spacing) for line in lines]
+    box_width = max(line_widths) + padding * 2
+    box_height = glyph_height * len(lines) + padding * 2 + line_spacing * (len(lines) - 1)
+
+    margin = padding * 2
+    x = width - box_width - margin
+    y = margin
+    if x < padding:
+        x = padding
+    if y + box_height > height:
+        y = max(0, height - box_height - padding)
+
+    _apply_background(frame, x, y, box_width, box_height, colour)
+
+    text_x = x + padding
+    text_y = y + padding
+    for line in lines:
+        _draw_text(frame, line, text_x, text_y, scale, colour)
+        text_y += glyph_height + line_spacing
+
+    return frame
+
+
+def _classify_reading(reading: BatteryReading, limits: BatteryLimits) -> str:
+    if not reading.available:
+        return "unavailable"
+    if reading.charging:
+        return "charging"
+    state = limits.classify(reading.percentage)
+    if state == "shutdown":
+        return "critical"
+    if state == "warning":
+        return "warning"
+    if state == "normal":
+        return "normal"
+    return "unknown"
+
+
 def _pairwise(values: Sequence[tuple[float, float]]) -> Iterable[tuple[tuple[float, float], tuple[float, float]]]:
     """Yield successive pairs from *values*."""
 
@@ -239,4 +516,11 @@ def _pairwise(values: Sequence[tuple[float, float]]) -> Iterable[tuple[tuple[flo
         yield values[index - 1], values[index]
 
 
-__all__ = ["BatteryMonitor", "BatteryReading"]
+__all__ = [
+    "BatteryMonitor",
+    "BatteryReading",
+    "BatteryLimits",
+    "DEFAULT_BATTERY_LIMITS",
+    "BatterySupervisor",
+    "create_battery_overlay",
+]
