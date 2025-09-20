@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import sys
 import types
 
+import numpy as np
 import pytest
 
 import rev_cam.camera as camera_module
@@ -431,4 +433,45 @@ def test_diagnose_camera_conflicts_reports_processes(monkeypatch: pytest.MonkeyP
     assert any("libcamera-apps" in hint for hint in hints)
     assert any("Processes currently" in hint for hint in hints)
     assert any("legacy camera" in hint.lower() for hint in hints)
+
+
+def test_picamera_frames_are_returned_in_rgb(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Frames captured from Picamera2 should be converted from BGR to RGB order."""
+
+    sample_frame = np.array([[[11, 22, 33], [44, 55, 66]]], dtype=np.uint8)
+
+    class DummyCamera:
+        def __init__(self) -> None:
+            self._closed = False
+
+        def create_video_configuration(self, **_: object) -> object:
+            return object()
+
+        def configure(self, _: object) -> None:
+            return None
+
+        def start(self) -> None:
+            return None
+
+        def capture_array(self) -> np.ndarray:
+            return sample_frame
+
+        def stop(self) -> None:
+            return None
+
+        def close(self) -> None:
+            self._closed = True
+
+    module = types.SimpleNamespace(Picamera2=DummyCamera)
+    monkeypatch.setitem(sys.modules, "picamera2", module)
+
+    camera = Picamera2Camera()
+    try:
+        frame = asyncio.run(camera.get_frame())
+        assert frame.shape == sample_frame.shape
+        assert np.array_equal(frame[..., 0], sample_frame[..., 2])
+        assert np.array_equal(frame[..., 1], sample_frame[..., 1])
+        assert np.array_equal(frame[..., 2], sample_frame[..., 0])
+    finally:
+        asyncio.run(camera.close())
 
