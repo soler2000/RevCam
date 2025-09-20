@@ -1,7 +1,7 @@
 import numpy as np
 
 from rev_cam.config import Orientation
-from rev_cam.pipeline import FramePipeline
+from rev_cam.pipeline import FramePipeline, compose_overlays
 
 
 def make_frame():
@@ -69,3 +69,40 @@ def test_overlays_do_not_modify_original_frame():
     assert np.array_equal(frame, original)
     assert not np.shares_memory(processed, frame)
     assert (processed[0, 0] == 255).all()
+
+
+def test_overlays_with_orientation_do_not_modify_original_frame():
+    frame = np.zeros((2, 2, 3), dtype=np.uint8)
+    pipeline = FramePipeline(lambda: orientation_provider(flip_h=True))
+
+    def draw_in_place(data: np.ndarray) -> np.ndarray:
+        data[0, 0] = 255
+        return data
+
+    pipeline.add_overlay(draw_in_place)
+    original = frame.copy()
+
+    processed = pipeline.process(frame)
+
+    assert np.array_equal(frame, original)
+    assert not np.shares_memory(processed, frame)
+    expected = np.flip(original, axis=1).copy()
+    expected[0, 0] = 255
+    assert np.array_equal(processed, expected)
+
+
+def test_composed_overlays_do_not_modify_original_frame():
+    frame = np.zeros((2, 2, 3), dtype=np.uint8)
+
+    def draw_in_place(data: np.ndarray) -> np.ndarray:
+        data[1, 1] = 128
+        return data
+
+    composed = compose_overlays([draw_in_place])
+    original = frame.copy()
+
+    processed = composed(frame)
+
+    assert np.array_equal(frame, original)
+    assert not np.shares_memory(processed, frame)
+    assert (processed[1, 1] == 128).all()
