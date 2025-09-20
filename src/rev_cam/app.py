@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 from .battery import BatteryMonitor, BatterySupervisor, create_battery_overlay
 from .camera import CAMERA_SOURCES, BaseCamera, CameraError, create_camera, identify_camera
-from .config import ConfigManager, Resolution, RESOLUTION_PRESETS
+from .config import ConfigManager, Resolution, RESOLUTION_PRESETS, StreamSettings
 from .distance import DistanceMonitor, create_distance_overlay
 from .pipeline import FramePipeline
 from .streaming import MJPEGStreamer, encode_frame_to_jpeg
@@ -72,6 +72,11 @@ class BatteryLimitsPayload(BaseModel):
 
 class BatteryCapacityPayload(BaseModel):
     capacity_mah: int
+
+
+class StreamSettingsPayload(BaseModel):
+    fps: int | None = None
+    jpeg_quality: int | None = None
 
 
 def create_app(
@@ -150,7 +155,10 @@ def create_app(
             logger.exception("Snapshot pipeline processing failed")
             raise HTTPException(status_code=500, detail="Failed to process snapshot") from exc
 
-        quality = streamer.jpeg_quality if streamer is not None else 85
+        if streamer is not None:
+            quality = streamer.jpeg_quality
+        else:
+            quality = config_manager.get_stream_settings().jpeg_quality
 
         try:
             jpeg_bytes = await run_in_threadpool(
@@ -227,8 +235,14 @@ def create_app(
             fallback_to_synthetic=True,
         )
         active_resolution = resolution
+        stream_settings = config_manager.get_stream_settings()
         try:
-            streamer = MJPEGStreamer(camera=camera, pipeline=pipeline)
+            streamer = MJPEGStreamer(
+                camera=camera,
+                pipeline=pipeline,
+                fps=stream_settings.fps,
+                jpeg_quality=stream_settings.jpeg_quality,
+            )
         except RuntimeError as exc:
             logger.error("Failed to initialise MJPEG streamer: %s", exc)
             stream_error = str(exc)
@@ -282,6 +296,12 @@ def create_app(
         options = [{"value": value, "label": label} for value, label in CAMERA_SOURCES.items()]
         errors = {source: message for source, message in camera_errors.items() if message}
         current_resolution = config_manager.get_resolution()
+        stream_settings = config_manager.get_stream_settings()
+        active_stream_settings = (
+            {"fps": streamer.fps, "jpeg_quality": streamer.jpeg_quality}
+            if streamer is not None
+            else None
+        )
         resolution_options = [
             {
                 "value": key,
@@ -294,6 +314,8 @@ def create_app(
             "endpoint": "/stream/mjpeg" if streamer else None,
             "content_type": streamer.media_type if streamer else None,
             "error": stream_error,
+            "settings": stream_settings.to_dict(),
+            "active": active_stream_settings,
         }
         return {
             "selected": config_manager.get_camera(),
@@ -308,6 +330,37 @@ def create_app(
                 "options": resolution_options,
             },
         }
+
+    @app.post("/api/stream/settings")
+    async def update_stream_settings(payload: StreamSettingsPayload) -> dict[str, object | None]:
+        nonlocal streamer
+        data = payload.model_dump(exclude_none=True)
+        if not data:
+            raise HTTPException(status_code=400, detail="No streaming settings provided")
+        try:
+            settings = config_manager.set_stream_settings(data)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        if streamer is not None:
+            try:
+                streamer.apply_settings(
+                    fps=settings.fps,
+                    jpeg_quality=settings.jpeg_quality,
+                )
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.exception("Failed to apply streaming settings")
+                raise HTTPException(status_code=500, detail="Unable to apply streaming settings") from exc
+
+        response: dict[str, object | None] = settings.to_dict()
+        if streamer is not None:
+            response["active"] = {
+                "fps": streamer.fps,
+                "jpeg_quality": streamer.jpeg_quality,
+            }
+        else:
+            response["active"] = None
+        return response
 
     @app.get("/api/battery")
     async def get_battery_status() -> dict[str, object | None]:
@@ -447,11 +500,19 @@ def create_app(
             and selection == current_selection
             and requested_resolution == current_resolution
         ):
+            stream_settings = config_manager.get_stream_settings()
+            active_stream_settings = (
+                {"fps": streamer.fps, "jpeg_quality": streamer.jpeg_quality}
+                if streamer is not None
+                else None
+            )
             stream_info = {
                 "enabled": streamer is not None,
                 "endpoint": "/stream/mjpeg" if streamer else None,
                 "content_type": streamer.media_type if streamer else None,
                 "error": stream_error,
+                "settings": stream_settings.to_dict(),
+                "active": active_stream_settings,
             }
             return {
                 "selected": selection,
@@ -497,7 +558,13 @@ def create_app(
                 active_resolution = old_resolution
                 if streamer is None and camera is not None:
                     try:
-                        streamer = MJPEGStreamer(camera=camera, pipeline=pipeline)
+                        stream_settings = config_manager.get_stream_settings()
+                        streamer = MJPEGStreamer(
+                            camera=camera,
+                            pipeline=pipeline,
+                            fps=stream_settings.fps,
+                            jpeg_quality=stream_settings.jpeg_quality,
+                        )
                     except RuntimeError as streamer_exc:
                         logger.error("Failed to initialise MJPEG streamer: %s", streamer_exc)
                         stream_error = str(streamer_exc)
@@ -515,7 +582,13 @@ def create_app(
         config_manager.set_resolution(requested_resolution)
         if streamer is None:
             try:
-                streamer = MJPEGStreamer(camera=camera, pipeline=pipeline)
+                stream_settings = config_manager.get_stream_settings()
+                streamer = MJPEGStreamer(
+                    camera=camera,
+                    pipeline=pipeline,
+                    fps=stream_settings.fps,
+                    jpeg_quality=stream_settings.jpeg_quality,
+                )
             except RuntimeError as exc:
                 logger.error("Failed to initialise MJPEG streamer: %s", exc)
                 stream_error = str(exc)
@@ -525,11 +598,19 @@ def create_app(
         else:
             streamer.camera = camera
             stream_error = None
+        stream_settings = config_manager.get_stream_settings()
+        active_stream_settings = (
+            {"fps": streamer.fps, "jpeg_quality": streamer.jpeg_quality}
+            if streamer is not None
+            else None
+        )
         stream_info = {
             "enabled": streamer is not None,
             "endpoint": "/stream/mjpeg" if streamer else None,
             "content_type": streamer.media_type if streamer else None,
             "error": stream_error,
+            "settings": stream_settings.to_dict(),
+            "active": active_stream_settings,
         }
         return {
             "selected": selection,

@@ -91,6 +91,34 @@ class MJPEGStreamer:
             ) from _SIMPLEJPEG_IMPORT_ERROR
         self._frame_interval = 1.0 / float(self.fps)
 
+    def apply_settings(
+        self,
+        *,
+        fps: int | None = None,
+        jpeg_quality: int | None = None,
+    ) -> None:
+        """Update streaming parameters at runtime."""
+
+        update_interval = False
+        if fps is not None:
+            new_fps = int(fps)
+            if new_fps <= 0:
+                raise ValueError("fps must be positive")
+            if new_fps != self.fps:
+                self.fps = new_fps
+                update_interval = True
+
+        if jpeg_quality is not None:
+            new_quality = int(jpeg_quality)
+            if new_quality < 1:
+                new_quality = 1
+            elif new_quality > 100:
+                new_quality = 100
+            self.jpeg_quality = new_quality
+
+        if update_interval:
+            self._frame_interval = 1.0 / float(self.fps)
+
     @property
     def media_type(self) -> str:
         """Return the MIME type advertised for MJPEG responses."""

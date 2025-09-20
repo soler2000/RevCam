@@ -61,3 +61,28 @@ def test_encode_frame_respects_simplejpeg_capabilities(
     assert kwargs["colorspace"] == "RGB"
     for name, expected in expected_flags.items():
         assert (name in kwargs) is expected
+
+
+def test_streamer_apply_settings_updates_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
+    stub = _StubSimplejpeg()
+    monkeypatch.setattr(streaming, "simplejpeg", stub, raising=False)
+    monkeypatch.setattr(streaming, "_SIMPLEJPEG_IMPORT_ERROR", None, raising=False)
+    monkeypatch.setattr(streaming, "_SIMPLEJPEG_ENCODE_KWARGS", set(), raising=False)
+
+    pipeline = FramePipeline(lambda: Orientation())
+    streamer = streaming.MJPEGStreamer(camera=_StubCamera(), pipeline=pipeline)
+
+    original_interval = streamer._frame_interval
+    streamer.apply_settings(fps=10)
+    assert streamer.fps == 10
+    assert streamer._frame_interval == pytest.approx(0.1, rel=1e-6)
+    assert streamer._frame_interval != original_interval
+
+    streamer.apply_settings(jpeg_quality=150)
+    assert streamer.jpeg_quality == 100
+
+    streamer.apply_settings(jpeg_quality=0)
+    assert streamer.jpeg_quality == 1
+
+    with pytest.raises(ValueError):
+        streamer.apply_settings(fps=0)

@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from pathlib import Path
+
 import pytest
 
 from rev_cam.battery import BatteryLimits
@@ -7,6 +9,7 @@ from rev_cam.config import (
     ConfigManager,
     DistanceZones,
     Orientation,
+    StreamSettings,
     DEFAULT_BATTERY_CAPACITY_MAH,
     DEFAULT_CAMERA_CHOICE,
 )
@@ -98,3 +101,30 @@ def test_battery_capacity_persistence(tmp_path: Path):
     assert updated == 2400
     reloaded = ConfigManager(config_file)
     assert reloaded.get_battery_capacity() == 2400
+
+
+def test_default_stream_settings(tmp_path: Path) -> None:
+    manager = ConfigManager(tmp_path / "config.json")
+    settings = manager.get_stream_settings()
+    assert isinstance(settings, StreamSettings)
+    assert settings.fps == 20
+    assert settings.jpeg_quality == 85
+
+
+def test_stream_settings_persistence(tmp_path: Path) -> None:
+    config_file = tmp_path / "config.json"
+    manager = ConfigManager(config_file)
+    updated = manager.set_stream_settings({"fps": 18, "jpeg_quality": 70})
+    assert isinstance(updated, StreamSettings)
+    assert updated.fps == 18
+    assert updated.jpeg_quality == 70
+    reloaded = ConfigManager(config_file)
+    assert reloaded.get_stream_settings() == updated
+
+
+def test_stream_settings_validation(tmp_path: Path) -> None:
+    manager = ConfigManager(tmp_path / "config.json")
+    with pytest.raises(ValueError):
+        manager.set_stream_settings({"fps": 0})
+    with pytest.raises(ValueError):
+        manager.set_stream_settings({"jpeg_quality": 120})
