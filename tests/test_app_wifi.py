@@ -7,7 +7,7 @@ pytest.importorskip("httpx")
 from fastapi.testclient import TestClient
 
 from rev_cam.app import create_app
-from rev_cam.wifi import WiFiManager, WiFiNetwork, WiFiStatus
+from rev_cam.wifi import WiFiError, WiFiManager, WiFiNetwork, WiFiStatus
 
 
 class FakeWiFiBackend:
@@ -43,6 +43,8 @@ class FakeWiFiBackend:
                 active=False,
             ),
         ]
+        self.hotspot_error: str | None = None
+        self.hotspot_inactive: bool = False
 
     def get_status(self) -> WiFiStatus:
         return self.status
@@ -93,6 +95,20 @@ class FakeWiFiBackend:
         return self.status
 
     def start_hotspot(self, ssid: str, password: str | None) -> WiFiStatus:
+        if self.hotspot_error:
+            raise WiFiError(self.hotspot_error)
+        if self.hotspot_inactive:
+            self.status = WiFiStatus(
+                connected=True,
+                ssid=ssid or "RevCam Hotspot",
+                signal=None,
+                ip_address="192.168.4.1",
+                mode="station",
+                hotspot_active=False,
+                profile="rev-hotspot",
+                detail="Activating hotspot…",
+            )
+            return self.status
         self.status = WiFiStatus(
             connected=True,
             ssid=ssid or "RevCam Hotspot",
@@ -175,3 +191,38 @@ def test_wifi_hotspot_toggle(client: TestClient) -> None:
     disable = client.post("/api/wifi/hotspot", json={"enabled": False})
     assert disable.status_code == 200
     assert disable.json()["hotspot_active"] is False
+
+
+def test_wifi_hotspot_development_mode_rolls_back(client: TestClient) -> None:
+    backend = getattr(client, "backend", None)
+    assert backend is not None
+    backend.hotspot_inactive = True
+    response = client.post(
+        "/api/wifi/hotspot",
+        json={
+            "enabled": True,
+            "ssid": "RevCam-AP",
+            "development_mode": True,
+            "rollback_seconds": 0.05,
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["hotspot_active"] is False
+    assert "restored" in (payload.get("detail") or "").lower()
+    assert backend.connect_attempts[-1][0] == "Home"
+
+
+def test_wifi_hotspot_permission_error(client: TestClient) -> None:
+    backend = getattr(client, "backend", None)
+    assert backend is not None
+    backend.hotspot_error = (
+        "Error: Failed to setup a Wi-Fi hotspot: Not authorized to control networking."
+    )
+    response = client.post(
+        "/api/wifi/hotspot",
+        json={"enabled": True, "ssid": "RevCam-AP"},
+    )
+    assert response.status_code == 400
+    payload = response.json()
+    assert "not authorized" in payload["detail"].lower()

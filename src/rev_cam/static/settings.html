@@ -248,6 +248,9 @@
       </form>
       <section id="wifi-hotspot-section">
         <h3>Hotspot</h3>
+        <p style="margin: 0 0 0.5rem; opacity: 0.75;">
+          Development mode auto-rollback applies when enabling the hotspot.
+        </p>
         <p id="wifi-hotspot-status" style="margin: 0; opacity: 0.85;">Hotspot disabled.</p>
         <label>
           Hotspot name
@@ -633,9 +636,16 @@
           payload = {
             enabled: true,
             ssid: ssidValue || undefined,
+            development_mode: wifiDevToggle ? !!wifiDevToggle.checked : false,
           };
           if (passwordValue) {
             payload.password = passwordValue;
+          }
+          if (wifiRollbackInput) {
+            const rollback = parseFloat(wifiRollbackInput.value);
+            if (!Number.isNaN(rollback) && rollback > 0) {
+              payload.rollback_seconds = rollback;
+            }
           }
           setWifiFeedback("Enabling hotspot…");
         } else {

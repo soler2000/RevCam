@@ -50,6 +50,8 @@ class WiFiHotspotPayload(BaseModel):
     enabled: bool
     ssid: str | None = None
     password: str | None = None
+    development_mode: bool = False
+    rollback_seconds: float | None = None
 
 
 def create_app(
@@ -270,6 +272,8 @@ def create_app(
                     wifi_manager.enable_hotspot,
                     payload.ssid or "",
                     payload.password,
+                    development_mode=payload.development_mode,
+                    rollback_timeout=payload.rollback_seconds,
                 )
             except WiFiError as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc

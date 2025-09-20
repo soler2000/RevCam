@@ -422,16 +422,73 @@ class WiFiManager:
         )
         return restored
 
-    def enable_hotspot(self, ssid: str, password: str | None = None) -> WiFiStatus:
+    def enable_hotspot(
+        self,
+        ssid: str,
+        password: str | None = None,
+        *,
+        development_mode: bool = False,
+        rollback_timeout: float | None = None,
+    ) -> WiFiStatus:
         if not isinstance(ssid, str) or not ssid.strip():
             raise WiFiError("Hotspot SSID must be provided")
         cleaned_ssid = ssid.strip()
         if password is not None and password.strip() and len(password.strip()) < 8:
             raise WiFiError("Hotspot password must be at least 8 characters")
         cleaned_password = password.strip() if isinstance(password, str) and password.strip() else None
-        status = self._backend.start_hotspot(cleaned_ssid, cleaned_password)
+        try:
+            previous_status = self._backend.get_status()
+        except WiFiError:
+            previous_status = None
+            previous_profile = None
+        else:
+            previous_profile = previous_status.profile if previous_status.profile else None
+        try:
+            status = self._backend.start_hotspot(cleaned_ssid, cleaned_password)
+        except WiFiError as exc:
+            message = str(exc).strip()
+            lower_message = message.lower()
+            if "not authorized" in lower_message or "not authorised" in lower_message:
+                raise WiFiError(
+                    "Unable to enable hotspot: not authorized to control networking. "
+                    "Ensure RevCam has permission to manage NetworkManager."
+                ) from exc
+            raise WiFiError(f"Unable to enable hotspot: {message}") from exc
         self._hotspot_profile = status.profile or self._hotspot_profile
-        return status
+        if not development_mode:
+            return status
+        timeout = self._rollback_timeout if rollback_timeout is None else max(0.0, rollback_timeout)
+        if timeout <= 0:
+            return status
+        if status.hotspot_active:
+            return status
+        deadline = time.monotonic() + timeout
+        current = status
+        while time.monotonic() < deadline:
+            if current.hotspot_active:
+                self._hotspot_profile = current.profile or self._hotspot_profile
+                return current
+            time.sleep(self._poll_interval)
+            current = self._backend.get_status()
+        if previous_profile:
+            restored = self._backend.activate_profile(previous_profile)
+            previous_name = (
+                previous_status.ssid if previous_status and previous_status.ssid else previous_profile
+            )
+            restored.detail = (
+                f"Hotspot {cleaned_ssid} did not become active within {int(math.ceil(timeout))}s; "
+                f"restored {previous_name}."
+            )
+            if previous_status and previous_status.hotspot_active:
+                self._hotspot_profile = previous_profile
+            elif not restored.hotspot_active:
+                self._hotspot_profile = None
+            return restored
+        current.detail = (
+            f"Hotspot {cleaned_ssid} did not become active within {int(math.ceil(timeout))}s and "
+            "no previous connection was available to restore."
+        )
+        return current
 
     def disable_hotspot(self) -> WiFiStatus:
         status = self._backend.stop_hotspot(self._hotspot_profile)
