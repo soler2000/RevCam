@@ -7,6 +7,7 @@ from rev_cam.config import (
     ConfigManager,
     DistanceZones,
     Orientation,
+    DEFAULT_BATTERY_CAPACITY_MAH,
     DEFAULT_CAMERA_CHOICE,
 )
 
@@ -83,3 +84,17 @@ def test_battery_limits_persistence(tmp_path: Path):
     assert isinstance(updated, BatteryLimits)
     reloaded = ConfigManager(config_file)
     assert reloaded.get_battery_limits() == updated
+
+
+def test_default_battery_capacity(tmp_path: Path):
+    manager = ConfigManager(tmp_path / "config.json")
+    assert manager.get_battery_capacity() == DEFAULT_BATTERY_CAPACITY_MAH
+
+
+def test_battery_capacity_persistence(tmp_path: Path):
+    config_file = tmp_path / "config.json"
+    manager = ConfigManager(config_file)
+    updated = manager.set_battery_capacity(2400)
+    assert updated == 2400
+    reloaded = ConfigManager(config_file)
+    assert reloaded.get_battery_capacity() == 2400

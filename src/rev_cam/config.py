@@ -18,6 +18,8 @@ except ImportError:  # pragma: no cover - fallback when optional dependencies mi
     }
     DEFAULT_CAMERA_CHOICE = "auto"
 from .battery import BatteryLimits, DEFAULT_BATTERY_LIMITS
+
+DEFAULT_BATTERY_CAPACITY_MAH = 1000
 from .distance import DEFAULT_DISTANCE_ZONES, DistanceZones
 
 
@@ -184,6 +186,31 @@ def _parse_battery_limits(value: Any, *, default: BatteryLimits) -> BatteryLimit
         raise ValueError("Battery limit values must be numeric") from exc
 
 
+def _parse_battery_capacity(value: Any, *, default: int) -> int:
+    if value is None:
+        return default
+    candidate: Any
+    if isinstance(value, Mapping):
+        if "capacity_mah" in value:
+            candidate = value.get("capacity_mah")
+        elif "battery" in value and isinstance(value["battery"], Mapping):
+            # Allow callers to pass the entire configuration payload.
+            return _parse_battery_capacity(value["battery"], default=default)
+        else:
+            return default
+    else:
+        candidate = value
+    try:
+        capacity = int(float(candidate))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Battery capacity must be numeric") from exc
+    if capacity <= 0:
+        raise ValueError("Battery capacity must be positive")
+    if not (50 <= capacity <= 200_000):
+        raise ValueError("Battery capacity must be between 50 and 200000 mAh")
+    return capacity
+
+
 class ConfigManager:
     """Stores configuration state on disk with thread-safety."""
 
@@ -197,12 +224,15 @@ class ConfigManager:
             self._resolution,
             self._distance_zones,
             self._battery_limits,
+            self._battery_capacity,
         ) = self._load()
 
     def _ensure_parent(self) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
 
-    def _load(self) -> tuple[Orientation, str, Resolution, DistanceZones, BatteryLimits]:
+    def _load(
+        self,
+    ) -> tuple[Orientation, str, Resolution, DistanceZones, BatteryLimits, int]:
         if not self._path.exists():
             return (
                 Orientation(),
@@ -210,6 +240,7 @@ class ConfigManager:
                 DEFAULT_RESOLUTION,
                 DEFAULT_DISTANCE_ZONES,
                 DEFAULT_BATTERY_LIMITS,
+                DEFAULT_BATTERY_CAPACITY_MAH,
             )
         try:
             payload = json.loads(self._path.read_text())
@@ -237,8 +268,18 @@ class ConfigManager:
             battery_limits = _parse_battery_limits(
                 battery_payload, default=DEFAULT_BATTERY_LIMITS
             )
+            battery_capacity = _parse_battery_capacity(
+                battery_payload, default=DEFAULT_BATTERY_CAPACITY_MAH
+            )
 
-            return orientation, camera, resolution, distance_zones, battery_limits
+            return (
+                orientation,
+                camera,
+                resolution,
+                distance_zones,
+                battery_limits,
+                battery_capacity,
+            )
         except (OSError, ValueError) as exc:
             raise RuntimeError(f"Failed to load configuration: {exc}") from exc
 
@@ -248,7 +289,10 @@ class ConfigManager:
             "camera": self._camera,
             "resolution": {"width": self._resolution.width, "height": self._resolution.height},
             "distance": {"zones": self._distance_zones.to_dict()},
-            "battery": {"limits": self._battery_limits.to_dict()},
+            "battery": {
+                "limits": self._battery_limits.to_dict(),
+                "capacity_mah": self._battery_capacity,
+            },
         }
         self._path.write_text(json.dumps(payload, indent=2))
 
@@ -313,6 +357,17 @@ class ConfigManager:
             self._battery_limits = limits
             self._save()
         return limits
+
+    def get_battery_capacity(self) -> int:
+        with self._lock:
+            return self._battery_capacity
+
+    def set_battery_capacity(self, value: Any) -> int:
+        capacity = _parse_battery_capacity(value, default=self._battery_capacity)
+        with self._lock:
+            self._battery_capacity = capacity
+            self._save()
+        return capacity
 
 
 __all__ = [
