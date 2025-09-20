@@ -46,6 +46,7 @@ class FakeWiFiBackend:
         ]
         self.hotspot_error: str | None = None
         self.hotspot_inactive: bool = False
+        self.forget_attempts: list[str] = []
 
     def get_status(self) -> WiFiStatus:
         return self.status
@@ -134,6 +135,24 @@ class FakeWiFiBackend:
             detail="Hotspot disabled",
         )
         return self.status
+
+    def forget(self, profile_or_ssid: str) -> None:
+        identifier = (profile_or_ssid or "").strip()
+        self.forget_attempts.append(identifier)
+        self.networks = [network for network in self.networks if network.ssid != identifier]
+        if self.status.profile == identifier:
+            self.status = WiFiStatus(
+                connected=False,
+                ssid=None,
+                signal=None,
+                ip_address=None,
+                mode="station",
+                hotspot_active=False,
+                profile=None,
+                detail=f"Removed saved network {identifier}.",
+            )
+        else:
+            self.status.detail = f"Removed saved network {identifier}."
 
 
 class FakeMDNSAdvertiser:
@@ -274,3 +293,21 @@ def test_wifi_hotspot_permission_error(client: TestClient) -> None:
     assert response.status_code == 400
     payload = response.json()
     assert "not authorized" in payload["detail"].lower()
+
+
+def test_wifi_forget_endpoint_removes_network(client: TestClient) -> None:
+    backend = getattr(client, "backend", None)
+    assert backend is not None
+    assert any(network.ssid == "Home" for network in backend.networks)
+
+    response = client.post("/api/wifi/forget", json={"identifier": "Home"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert "removed saved network" in (payload.get("detail") or "").lower()
+
+    assert backend.forget_attempts[-1] == "Home"
+
+    refreshed = client.get("/api/wifi/networks")
+    assert refreshed.status_code == 200
+    networks = refreshed.json().get("networks", [])
+    assert all(network.get("ssid") != "Home" for network in networks)

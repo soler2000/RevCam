@@ -55,6 +55,10 @@ class WiFiHotspotPayload(BaseModel):
     rollback_seconds: float | None = None
 
 
+class WiFiForgetPayload(BaseModel):
+    identifier: str
+
+
 class DistanceZonesPayload(BaseModel):
     caution: float
     warning: float
@@ -412,6 +416,17 @@ def create_app(
                 status = await run_in_threadpool(wifi_manager.disable_hotspot)
             except WiFiError as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return status.to_dict()
+
+    @app.post("/api/wifi/forget")
+    async def forget_wifi_network(payload: WiFiForgetPayload) -> dict[str, object | None]:
+        try:
+            status = await run_in_threadpool(
+                wifi_manager.forget_network,
+                payload.identifier,
+            )
+        except WiFiError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         return status.to_dict()
 
     @app.post("/api/camera")
