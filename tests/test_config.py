@@ -2,8 +2,12 @@ from pathlib import Path
 
 import pytest
 
-from rev_cam.camera import DEFAULT_CAMERA_CHOICE
-from rev_cam.config import ConfigManager, Orientation
+from rev_cam.config import (
+    ConfigManager,
+    DistanceZones,
+    Orientation,
+    DEFAULT_CAMERA_CHOICE,
+)
 
 
 def test_default_orientation(tmp_path: Path):
@@ -46,3 +50,19 @@ def test_camera_requires_non_empty_string(tmp_path: Path):
         manager.set_camera("")
     with pytest.raises(ValueError):
         manager.set_camera("unknown")
+
+
+def test_default_distance_zones(tmp_path: Path):
+    manager = ConfigManager(tmp_path / "config.json")
+    zones = manager.get_distance_zones()
+    assert isinstance(zones, DistanceZones)
+    assert zones.caution >= zones.warning >= zones.danger > 0
+
+
+def test_distance_zones_persistence(tmp_path: Path):
+    config_file = tmp_path / "config.json"
+    manager = ConfigManager(config_file)
+    updated = manager.set_distance_zones({"caution": 3.0, "warning": 1.8, "danger": 0.6})
+    assert isinstance(updated, DistanceZones)
+    reloaded = ConfigManager(config_file)
+    assert reloaded.get_distance_zones() == updated

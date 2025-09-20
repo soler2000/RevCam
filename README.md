@@ -115,6 +115,24 @@ adapter.
 RevCam expects the INA219 to respond at address `0x43`. If the sensor has been
 configured differently adjust the jumper configuration accordingly.
 
+### Distance monitoring requirements
+
+The VL53L1X time-of-flight sensor powers the distance overlay. Install the
+CircuitPython dependencies inside the same environment as RevCam:
+
+```bash
+pip install adafruit-blinka adafruit-circuitpython-vl53l1x
+```
+
+With those packages missing the distance panel reports **driver unavailable**
+when it cannot import the VL53L1X driver or supporting `board` module.
+
+Just like the INA219, the VL53L1X defaults to the Pi's primary I²C controller at
+address `0x29`. When connecting the sensor to a different bus export
+`REVCAM_I2C_BUS` before launching the server and install the optional
+`adafruit-circuitpython-extended-bus` helper so RevCam can open the alternate
+adapter.
+
 ### Development machine installation
 
 For local development on non-Pi machines a regular virtual environment is

@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from .battery import BatteryMonitor
 from .camera import CAMERA_SOURCES, BaseCamera, CameraError, create_camera, identify_camera
 from .config import ConfigManager, Resolution, RESOLUTION_PRESETS
+from .distance import DistanceMonitor, create_distance_overlay
 from .pipeline import FramePipeline
 from .streaming import MJPEGStreamer
 from .version import APP_VERSION
@@ -54,6 +55,12 @@ class WiFiHotspotPayload(BaseModel):
     rollback_seconds: float | None = None
 
 
+class DistanceZonesPayload(BaseModel):
+    caution: float
+    warning: float
+    danger: float
+
+
 def create_app(
     config_path: Path | str = Path("data/config.json"),
     *,
@@ -77,9 +84,13 @@ def create_app(
         i2c_bus_override = None
 
     battery_monitor = BatteryMonitor(capacity_mah=1000, i2c_bus=i2c_bus_override)
+    distance_monitor = DistanceMonitor(i2c_bus=i2c_bus_override)
     wifi_manager = wifi_manager or WiFiManager()
 
     pipeline = FramePipeline(lambda: config_manager.get_orientation())
+    pipeline.add_overlay(
+        create_distance_overlay(distance_monitor, config_manager.get_distance_zones)
+    )
     camera: BaseCamera | None = None
     streamer: MJPEGStreamer | None = None
     stream_error: str | None = None
@@ -88,6 +99,7 @@ def create_app(
     camera_errors: dict[str, str] = {}
 
     app.state.wifi_manager = wifi_manager
+    app.state.distance_monitor = distance_monitor
 
     def _record_camera_error(source: str, message: str | None) -> None:
         if message:
@@ -235,6 +247,32 @@ def create_app(
     async def get_battery_status() -> dict[str, object | None]:
         reading = battery_monitor.read()
         return reading.to_dict()
+
+    @app.get("/api/distance")
+    async def get_distance_status() -> dict[str, object | None]:
+        zones = config_manager.get_distance_zones()
+        reading = distance_monitor.read()
+        payload = reading.to_dict()
+        payload["zone"] = zones.classify(reading.distance_m)
+        payload["zones"] = zones.to_dict()
+        return payload
+
+    @app.get("/api/distance/zones")
+    async def get_distance_zones() -> dict[str, object]:
+        zones = config_manager.get_distance_zones()
+        return {"zones": zones.to_dict()}
+
+    @app.post("/api/distance/zones")
+    async def update_distance_zones(payload: DistanceZonesPayload) -> dict[str, object | None]:
+        try:
+            zones = config_manager.set_distance_zones(payload.model_dump())
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        reading = distance_monitor.read()
+        response = reading.to_dict()
+        response["zone"] = zones.classify(reading.distance_m)
+        response["zones"] = zones.to_dict()
+        return response
 
     @app.get("/api/wifi/status")
     async def get_wifi_status() -> dict[str, object | None]:
