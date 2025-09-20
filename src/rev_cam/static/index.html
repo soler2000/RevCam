@@ -64,12 +64,88 @@
         font-size: 0.9rem;
         opacity: 0.8;
       }
+      #battery-indicator {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        margin-left: auto;
+        min-width: 0;
+      }
+      #battery-status {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        line-height: 1.1;
+      }
+      #battery-text {
+        font-weight: 600;
+        font-size: 0.9rem;
+      }
+      #battery-details {
+        font-size: 0.7rem;
+        opacity: 0.7;
+        white-space: nowrap;
+      }
+      .battery-icon {
+        position: relative;
+        width: 2.4rem;
+        height: 1rem;
+        border: 2px solid currentColor;
+        border-radius: 3px;
+        box-sizing: border-box;
+        display: inline-flex;
+        align-items: stretch;
+        color: #f5f5f5;
+      }
+      .battery-icon::after {
+        content: "";
+        position: absolute;
+        right: -6px;
+        top: 25%;
+        width: 4px;
+        height: 50%;
+        border-radius: 1px;
+        background: currentColor;
+      }
+      .battery-level {
+        width: 0%;
+        background: currentColor;
+        transition: width 0.3s ease;
+      }
+      .battery-icon.low {
+        color: #ff453a;
+      }
+      .battery-icon.charging {
+        color: #30d158;
+      }
+      .battery-icon.unavailable {
+        color: rgba(245, 245, 245, 0.4);
+      }
+      @media (max-width: 520px) {
+        #battery-indicator {
+          width: 100%;
+          margin-left: 0;
+          justify-content: flex-start;
+        }
+        #battery-status {
+          align-items: flex-start;
+        }
+      }
     </style>
   </head>
   <body>
     <header>
       <strong>RevCam</strong>
       <div id="status">Initialising…</div>
+      <div id="battery-indicator" aria-live="polite" aria-label="Battery unavailable">
+        <span class="battery-icon unavailable" id="battery-icon" aria-hidden="true">
+          <span class="battery-level" id="battery-level"></span>
+        </span>
+        <div id="battery-status">
+          <span id="battery-text">—%</span>
+          <span id="battery-details">Battery unavailable</span>
+        </div>
+      </div>
     </header>
     <main>
       <img id="stream" alt="Camera feed" />
@@ -86,8 +162,109 @@
       const reconnectButton = document.getElementById("reconnect");
       const streamElement = document.getElementById("stream");
       const toggleButton = document.getElementById("toggle-stream");
+      const batteryIndicator = document.getElementById("battery-indicator");
+      const batteryIcon = document.getElementById("battery-icon");
+      const batteryLevel = document.getElementById("battery-level");
+      const batteryText = document.getElementById("battery-text");
+      const batteryDetails = document.getElementById("battery-details");
       let reconnectTimer = null;
+      let batteryTimer = null;
       let shouldStream = false;
+
+      function updateBatteryUI(data) {
+        if (!batteryIcon || !batteryLevel || !batteryText || !batteryDetails) {
+          return;
+        }
+        batteryIcon.classList.remove("low", "charging", "unavailable");
+
+        if (!data || data.available !== true || typeof data.percentage !== "number") {
+          batteryIcon.classList.add("unavailable");
+          batteryLevel.style.width = "0%";
+          batteryText.textContent = "—";
+          const fallback =
+            data && typeof data.error === "string" && data.error.trim()
+              ? data.error.trim()
+              : "Battery unavailable";
+          batteryDetails.textContent = fallback;
+          if (batteryIndicator) {
+            batteryIndicator.setAttribute("aria-label", fallback);
+          }
+          return;
+        }
+
+        const rawPercentage = Number(data.percentage);
+        if (!Number.isFinite(rawPercentage)) {
+          batteryIcon.classList.add("unavailable");
+          batteryLevel.style.width = "0%";
+          batteryText.textContent = "—";
+          batteryDetails.textContent = "Battery unavailable";
+          if (batteryIndicator) {
+            batteryIndicator.setAttribute("aria-label", "Battery unavailable");
+          }
+          return;
+        }
+
+        const percentage = Math.max(0, Math.min(100, rawPercentage));
+        batteryLevel.style.width = `${percentage}%`;
+        const rounded = Math.round(percentage);
+        batteryText.textContent = `${rounded}%`;
+
+        if (data.charging === true) {
+          batteryIcon.classList.add("charging");
+        } else if (percentage <= 20) {
+          batteryIcon.classList.add("low");
+        }
+
+        const detailParts = [];
+        if (typeof data.voltage === "number" && Number.isFinite(data.voltage)) {
+          detailParts.push(`${data.voltage.toFixed(2)} V`);
+        }
+        if (typeof data.current_ma === "number" && Number.isFinite(data.current_ma)) {
+          const magnitude = Math.abs(data.current_ma);
+          const decimals = magnitude >= 100 ? 0 : magnitude >= 10 ? 1 : 2;
+          const formatted = magnitude.toFixed(decimals);
+          const suffix = data.charging === true ? "charging" : "draw";
+          detailParts.push(`${formatted} mA ${suffix}`);
+        } else if (data.charging === true) {
+          detailParts.push("Charging");
+        }
+        const detailText = detailParts.join(" · ") || "Battery OK";
+        batteryDetails.textContent = detailText;
+        if (batteryIndicator) {
+          batteryIndicator.setAttribute(
+            "aria-label",
+            `Battery ${rounded}%, ${detailParts.join(", ") || "status"}`,
+          );
+        }
+      }
+
+      async function refreshBattery() {
+        if (!batteryIcon || !batteryLevel) {
+          return;
+        }
+        try {
+          const response = await fetch("/api/battery", { cache: "no-store" });
+          if (!response.ok) {
+            throw new Error(`Battery request failed with ${response.status}`);
+          }
+          const payload = await response.json();
+          updateBatteryUI(payload);
+        } catch (error) {
+          console.error("Battery status error", error);
+          updateBatteryUI({ available: false, error: "Battery offline" });
+        }
+      }
+
+      function scheduleBatteryUpdates(interval = 15000) {
+        if (!batteryIcon || !batteryLevel || !batteryText || !batteryDetails) {
+          return;
+        }
+        if (batteryTimer) {
+          clearInterval(batteryTimer);
+        }
+        refreshBattery();
+        batteryTimer = setInterval(refreshBattery, interval);
+      }
 
       function clearReconnectTimer() {
         if (reconnectTimer) {
@@ -153,6 +330,20 @@
         }
       });
 
+      window.addEventListener("beforeunload", () => {
+        clearReconnectTimer();
+        if (batteryTimer) {
+          clearInterval(batteryTimer);
+        }
+      });
+
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "visible") {
+          refreshBattery();
+        }
+      });
+
+      scheduleBatteryUpdates();
       startStream();
     </script>
   </body>

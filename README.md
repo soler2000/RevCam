@@ -14,6 +14,8 @@ that future driver-assistance overlays can be injected on the server without maj
   options for balancing clarity against bandwidth.
 - Modular frame processing pipeline ready for future overlays (e.g. guidelines).
 - REST API for orientation control and camera management.
+- Optional battery indicator when an INA219 sensor is connected, showing live
+  percentage, voltage, and current draw in the viewer.
 
 ## Project layout
 
@@ -81,6 +83,19 @@ building everything from PyPI. Follow these steps on the Pi:
 
    The `--prefer-binary` flag asks `pip` to fetch pre-built wheels when
    available, and the PiWheels index provides ARM builds for most dependencies.
+
+### Battery monitoring requirements
+
+Battery telemetry is optional. To enable it connect an INA219 current/voltage
+sensor to the Pi's I²C bus and install the CircuitPython driver inside the
+RevCam virtual environment:
+
+```bash
+pip install adafruit-blinka adafruit-circuitpython-ina219
+```
+
+Once available the live view automatically polls the sensor and displays the
+pack percentage, voltage, and current draw in the header.
 
 ### Development machine installation
 

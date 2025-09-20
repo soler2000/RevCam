@@ -8,6 +8,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
+from .battery import BatteryMonitor
 from .camera import CAMERA_SOURCES, BaseCamera, CameraError, create_camera, identify_camera
 from .config import ConfigManager, Resolution, RESOLUTION_PRESETS
 from .pipeline import FramePipeline
@@ -39,6 +40,7 @@ def create_app(config_path: Path | str = Path("data/config.json")) -> FastAPI:
     app = FastAPI(title="RevCam", version=APP_VERSION)
 
     config_manager = ConfigManager(Path(config_path))
+    battery_monitor = BatteryMonitor(capacity_mah=1000)
     pipeline = FramePipeline(lambda: config_manager.get_orientation())
     camera: BaseCamera | None = None
     streamer: MJPEGStreamer | None = None
@@ -187,6 +189,11 @@ def create_app(config_path: Path | str = Path("data/config.json")) -> FastAPI:
                 "options": resolution_options,
             },
         }
+
+    @app.get("/api/battery")
+    async def get_battery_status() -> dict[str, object | None]:
+        reading = battery_monitor.read()
+        return reading.to_dict()
 
     @app.post("/api/camera")
     async def update_camera(payload: CameraPayload) -> dict[str, object]:
