@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import time
 from contextlib import asynccontextmanager
@@ -20,8 +21,15 @@ try:  # pragma: no cover - dependency availability varies by platform
 except ImportError as exc:  # pragma: no cover - dependency availability varies
     simplejpeg = None
     _SIMPLEJPEG_IMPORT_ERROR = exc
+    _SIMPLEJPEG_ENCODE_KWARGS: set[str] = set()
 else:  # pragma: no cover - dependency availability varies
     _SIMPLEJPEG_IMPORT_ERROR = None
+    try:  # pragma: no cover - dependency availability varies
+        _SIMPLEJPEG_ENCODE_KWARGS = set(
+            inspect.signature(simplejpeg.encode_jpeg).parameters
+        )
+    except (TypeError, ValueError):  # pragma: no cover - C-extension signature unsupported
+        _SIMPLEJPEG_ENCODE_KWARGS = set()
 
 
 @dataclass
@@ -179,13 +187,16 @@ class MJPEGStreamer:
         if array.dtype != np.uint8:
             array = np.clip(array, 0, 255).astype(np.uint8)
 
-        return simplejpeg.encode_jpeg(
-            array,
-            quality=int(self.jpeg_quality),
-            colorspace="RGB",
-            fastdct=True,
-            fastupsample=True,
-        )
+        encode_kwargs: dict[str, object] = {
+            "quality": int(self.jpeg_quality),
+            "colorspace": "RGB",
+        }
+        if "fastdct" in _SIMPLEJPEG_ENCODE_KWARGS:
+            encode_kwargs["fastdct"] = True
+        if "fastupsample" in _SIMPLEJPEG_ENCODE_KWARGS:
+            encode_kwargs["fastupsample"] = True
+
+        return simplejpeg.encode_jpeg(array, **encode_kwargs)
 
     def _render_chunk(self, payload: bytes) -> bytes:
         header = (
