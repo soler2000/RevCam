@@ -55,6 +55,21 @@ def test_distance_monitor_filters_invalid_samples() -> None:
     assert third.error is None
 
 
+def test_distance_monitor_recovers_from_legitimate_jump() -> None:
+    sensor = _SequenceSensor([20.0, 500.0, 500.0])
+    monitor = DistanceMonitor(sensor_factory=lambda: sensor, update_interval=0.0)
+
+    first = monitor.read()
+    second = monitor.read()
+    third = monitor.read()
+
+    assert first.distance_m == pytest.approx(0.2, rel=1e-6)
+    assert second.distance_m == pytest.approx(first.distance_m)
+    assert second.error == "Filtered invalid distance sample"
+    assert third.distance_m == pytest.approx(5.0, rel=1e-6)
+    assert third.error is None
+
+
 def test_distance_monitor_reports_unavailable_when_sensor_missing() -> None:
     def _failing_factory() -> object:
         raise RuntimeError("sensor offline")

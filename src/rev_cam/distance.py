@@ -118,6 +118,8 @@ class DistanceMonitor:
         self._max_distance = max_distance_m
         self._min_interval = max(0.0, float(update_interval))
         self._ema: float | None = None
+        self._spike_candidate: float | None = None
+        self._spike_rejects: int = 0
         self._last_error: str | None = None
         self._last_reading: DistanceReading | None = None
         self._last_timestamp: float = 0.0
@@ -243,15 +245,39 @@ class DistanceMonitor:
             distance_m = raw / 100.0
         return distance_m
 
+    def _reset_smoothing(self) -> None:
+        self._history.clear()
+        self._ema = None
+
+    def _reset_spike_tracking(self) -> None:
+        self._spike_candidate = None
+        self._spike_rejects = 0
+
     def _filter_measurement(self, distance_m: float) -> float | None:
         if not math.isfinite(distance_m):
+            self._reset_spike_tracking()
             return None
         if distance_m <= 0:
+            self._reset_spike_tracking()
             return None
         if distance_m < self._min_distance or distance_m > self._max_distance:
+            self._reset_spike_tracking()
             return None
-        if self._ema is not None and abs(distance_m - self._ema) > self._spike_threshold:
-            return None
+        if self._ema is not None:
+            delta = abs(distance_m - self._ema)
+            if delta > self._spike_threshold:
+                candidate = self._spike_candidate
+                if candidate is None or abs(distance_m - candidate) > self._spike_threshold:
+                    self._spike_candidate = distance_m
+                    self._spike_rejects = 1
+                    return None
+                self._spike_rejects += 1
+                if self._spike_rejects < 2:
+                    return None
+                self._reset_smoothing()
+                self._reset_spike_tracking()
+                return distance_m
+        self._reset_spike_tracking()
         return distance_m
 
     def _apply_smoothing(self, value: float) -> float:
