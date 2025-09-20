@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
+from .battery import BatteryMonitor
 from .camera import CAMERA_SOURCES, BaseCamera, CameraError, create_camera, identify_camera
 from .config import ConfigManager, Resolution, RESOLUTION_PRESETS
 from .pipeline import FramePipeline
@@ -38,7 +40,22 @@ class CameraPayload(BaseModel):
 def create_app(config_path: Path | str = Path("data/config.json")) -> FastAPI:
     app = FastAPI(title="RevCam", version=APP_VERSION)
 
+    logger = logging.getLogger(__name__)
+
     config_manager = ConfigManager(Path(config_path))
+
+    i2c_bus_env = os.getenv("REVCAM_I2C_BUS")
+    i2c_bus_override: int | None
+    if i2c_bus_env:
+        try:
+            i2c_bus_override = int(i2c_bus_env, 0)
+        except ValueError:
+            logger.warning("Invalid REVCAM_I2C_BUS value %r; ignoring", i2c_bus_env)
+            i2c_bus_override = None
+    else:
+        i2c_bus_override = None
+
+    battery_monitor = BatteryMonitor(capacity_mah=1000, i2c_bus=i2c_bus_override)
     pipeline = FramePipeline(lambda: config_manager.get_orientation())
     camera: BaseCamera | None = None
     streamer: MJPEGStreamer | None = None
@@ -46,7 +63,6 @@ def create_app(config_path: Path | str = Path("data/config.json")) -> FastAPI:
     active_camera_choice: str = "unknown"
     active_resolution: Resolution = config_manager.get_resolution()
     camera_errors: dict[str, str] = {}
-    logger = logging.getLogger(__name__)
 
     def _record_camera_error(source: str, message: str | None) -> None:
         if message:
@@ -187,6 +203,11 @@ def create_app(config_path: Path | str = Path("data/config.json")) -> FastAPI:
                 "options": resolution_options,
             },
         }
+
+    @app.get("/api/battery")
+    async def get_battery_status() -> dict[str, object | None]:
+        reading = battery_monitor.read()
+        return reading.to_dict()
 
     @app.post("/api/camera")
     async def update_camera(payload: CameraPayload) -> dict[str, object]:
