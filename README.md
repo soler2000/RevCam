@@ -16,6 +16,8 @@ that future driver-assistance overlays can be injected on the server without maj
 - REST API for orientation control and camera management.
 - Optional battery indicator when an INA219 sensor is connected, showing live
   percentage, voltage, and current draw in the viewer.
+- One-tap snapshot capture via REST endpoint and the live viewer download
+  control.
 - Built-in mDNS advertisement so `motion.local:9000` resolves on iOS clients
   even when the RevCam hotspot is active.
 
@@ -83,8 +85,23 @@ building everything from PyPI. Follow these steps on the Pi:
    pip install --prefer-binary --extra-index-url https://www.piwheels.org/simple -e .
    ```
 
-   The `--prefer-binary` flag asks `pip` to fetch pre-built wheels when
-   available, and the PiWheels index provides ARM builds for most dependencies.
+The `--prefer-binary` flag asks `pip` to fetch pre-built wheels when
+available, and the PiWheels index provides ARM builds for most dependencies.
+
+### Saving snapshots
+
+The live view footer includes a **Save snapshot** button that fetches a still
+image without interrupting the MJPEG stream. RevCam exposes the same capture
+functionality via two HTTP endpoints:
+
+- `GET /api/camera/snapshot` returns a JPEG with headers suitable for API
+  clients and short-term caching disabled.
+- `GET /snapshot.jpg` provides the same image with a friendlier path for direct
+  browser access.
+
+Both endpoints run the captured frame through the configured pipeline and
+return the processed output, so overlays and orientation adjustments are
+preserved in the saved image.
 
 ### Battery monitoring requirements
 

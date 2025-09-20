@@ -32,6 +32,40 @@ else:  # pragma: no cover - dependency availability varies
         _SIMPLEJPEG_ENCODE_KWARGS = set()
 
 
+def encode_frame_to_jpeg(
+    frame: np.ndarray | list,
+    *,
+    quality: int,
+) -> bytes:
+    """Encode an RGB frame into JPEG bytes using the configured quality."""
+
+    if simplejpeg is None:  # pragma: no cover - dependency availability varies
+        raise RuntimeError(
+            "simplejpeg is required for JPEG encoding"
+        ) from _SIMPLEJPEG_IMPORT_ERROR
+
+    array = np.asarray(frame)
+    if array.ndim != 3:
+        raise ValueError("Expected an RGB frame for MJPEG encoding")
+    if array.shape[2] == 1:
+        array = np.repeat(array, 3, axis=2)
+    elif array.shape[2] > 3:
+        array = array[..., :3]
+    if array.dtype != np.uint8:
+        array = np.clip(array, 0, 255).astype(np.uint8)
+
+    encode_kwargs: dict[str, object] = {
+        "quality": int(quality),
+        "colorspace": "RGB",
+    }
+    if "fastdct" in _SIMPLEJPEG_ENCODE_KWARGS:
+        encode_kwargs["fastdct"] = True
+    if "fastupsample" in _SIMPLEJPEG_ENCODE_KWARGS:
+        encode_kwargs["fastupsample"] = True
+
+    return simplejpeg.encode_jpeg(array, **encode_kwargs)
+
+
 @dataclass
 class MJPEGStreamer:
     """Encode frames from a camera into an MJPEG stream."""
@@ -177,26 +211,7 @@ class MJPEGStreamer:
     def _encode_frame(self, frame: np.ndarray | list) -> bytes:
         """Encode an RGB frame into JPEG bytes."""
 
-        array = np.asarray(frame)
-        if array.ndim != 3:
-            raise ValueError("Expected an RGB frame for MJPEG encoding")
-        if array.shape[2] == 1:
-            array = np.repeat(array, 3, axis=2)
-        elif array.shape[2] > 3:
-            array = array[..., :3]
-        if array.dtype != np.uint8:
-            array = np.clip(array, 0, 255).astype(np.uint8)
-
-        encode_kwargs: dict[str, object] = {
-            "quality": int(self.jpeg_quality),
-            "colorspace": "RGB",
-        }
-        if "fastdct" in _SIMPLEJPEG_ENCODE_KWARGS:
-            encode_kwargs["fastdct"] = True
-        if "fastupsample" in _SIMPLEJPEG_ENCODE_KWARGS:
-            encode_kwargs["fastupsample"] = True
-
-        return simplejpeg.encode_jpeg(array, **encode_kwargs)
+        return encode_frame_to_jpeg(frame, quality=self.jpeg_quality)
 
     def _render_chunk(self, payload: bytes) -> bytes:
         header = (
@@ -208,4 +223,4 @@ class MJPEGStreamer:
         return header + payload + b"\r\n"
 
 
-__all__ = ["MJPEGStreamer"]
+__all__ = ["MJPEGStreamer", "encode_frame_to_jpeg"]
