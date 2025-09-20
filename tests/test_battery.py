@@ -68,8 +68,9 @@ def test_battery_monitor_supports_extended_i2c_bus(monkeypatch: pytest.MonkeyPat
     calls: dict[str, object] = {}
 
     class _StubINA219:
-        def __init__(self, bus: object) -> None:
+        def __init__(self, bus: object, *, addr: int = BatteryMonitor.DEFAULT_I2C_ADDRESS) -> None:
             calls["bus"] = bus
+            calls["addr"] = addr
             self.bus_voltage = 3.95
             self.shunt_voltage = 0.0
             self.current = None
@@ -100,3 +101,30 @@ def test_battery_monitor_supports_extended_i2c_bus(monkeypatch: pytest.MonkeyPat
     assert reading.available is True
     assert calls["bus_number"] == 29
     assert calls["bus"] is not None
+    assert calls["addr"] == BatteryMonitor.DEFAULT_I2C_ADDRESS
+
+
+def test_battery_monitor_reports_address_hint_on_init_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _FailingINA219:
+        def __init__(self, bus: object, *, addr: int = BatteryMonitor.DEFAULT_I2C_ADDRESS) -> None:
+            raise RuntimeError("No device at address 0x40")
+
+    class _StubBoard:
+        @staticmethod
+        def I2C() -> object:
+            return object()
+
+    monkeypatch.setitem(sys.modules, "adafruit_ina219", types.SimpleNamespace(INA219=_FailingINA219))
+    monkeypatch.setitem(sys.modules, "board", types.SimpleNamespace(I2C=_StubBoard.I2C))
+
+    monitor = BatteryMonitor()
+
+    reading = monitor.read()
+
+    assert reading.available is False
+    assert reading.error is not None
+    assert "0x43" in reading.error
+    assert "Failed to initialise INA219" in reading.error
+    assert monitor.last_error == reading.error

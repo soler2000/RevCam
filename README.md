@@ -110,6 +110,9 @@ When overriding the bus number install the optional
 `adafruit-circuitpython-extended-bus` package so RevCam can open the desired
 adapter.
 
+RevCam expects the INA219 to respond at address `0x43`. If the sensor has been
+configured differently adjust the jumper configuration accordingly.
+
 ### Development machine installation
 
 For local development on non-Pi machines a regular virtual environment is

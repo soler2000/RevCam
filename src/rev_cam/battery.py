@@ -42,6 +42,8 @@ class BatteryMonitor:
     error message so the caller can surface it to the UI.
     """
 
+    DEFAULT_I2C_ADDRESS = 0x43
+
     _LIPO_VOLTAGE_CURVE: Sequence[tuple[float, float]] = (
         (3.0, 0.0),
         (3.2, 5.0),
@@ -63,12 +65,14 @@ class BatteryMonitor:
         sensor_factory: SensorFactory | None = None,
         *,
         i2c_bus: int | None = None,
+        i2c_address: int = DEFAULT_I2C_ADDRESS,
     ) -> None:
         self.capacity_mah = capacity_mah
         self._sensor_factory = sensor_factory
         self._sensor: object | None = None
         self._last_error: str | None = None
         self._i2c_bus = i2c_bus
+        self._i2c_address = i2c_address
 
     @property
     def last_error(self) -> str | None:
@@ -109,9 +113,14 @@ class BatteryMonitor:
                 raise RuntimeError("Unable to access I2C bus") from exc
 
         try:
-            return INA219(i2c)  # type: ignore[call-arg]
+            return INA219(i2c, addr=self._i2c_address)  # type: ignore[call-arg]
         except Exception as exc:  # pragma: no cover - hardware specific
-            raise RuntimeError(f"Failed to initialise INA219: {exc}") from exc
+            raise RuntimeError(
+                (
+                    "Failed to initialise INA219 "
+                    f"(expected address 0x{self._i2c_address:02X}): {exc}"
+                )
+            ) from exc
 
     def _obtain_sensor(self) -> object | None:
         if self._sensor is not None:
