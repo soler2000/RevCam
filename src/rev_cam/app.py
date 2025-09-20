@@ -3,20 +3,16 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
 from .camera import CAMERA_SOURCES, BaseCamera, CameraError, create_camera, identify_camera
 from .config import ConfigManager
 from .pipeline import FramePipeline
-from .webrtc import WebRTCManager
+from .streaming import MJPEGStreamer
 from .version import APP_VERSION
-
-if TYPE_CHECKING:  # pragma: no cover - imported for type checking only
-    from aiortc import RTCSessionDescription
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -26,11 +22,6 @@ def _load_static(name: str) -> str:
     if not path.exists():  # pragma: no cover - sanity check
         raise FileNotFoundError(f"Static asset {name!r} missing")
     return path.read_text(encoding="utf-8")
-
-
-class OfferPayload(BaseModel):
-    sdp: str
-    type: Literal["offer"]
 
 
 class OrientationPayload(BaseModel):
@@ -49,8 +40,7 @@ def create_app(config_path: Path | str = Path("data/config.json")) -> FastAPI:
     config_manager = ConfigManager(Path(config_path))
     pipeline = FramePipeline(lambda: config_manager.get_orientation())
     camera: BaseCamera | None = None
-    webrtc_manager: WebRTCManager | None = None
-    webrtc_error: str | None = None
+    streamer: MJPEGStreamer | None = None
     active_camera_choice: str = "unknown"
     camera_errors: dict[str, str] = {}
     logger = logging.getLogger(__name__)
@@ -92,32 +82,15 @@ def create_app(config_path: Path | str = Path("data/config.json")) -> FastAPI:
             _record_camera_error(normalised, None)
             return camera_instance, identify_camera(camera_instance)
 
-    def _ensure_webrtc(current_camera: BaseCamera) -> None:
-        nonlocal webrtc_manager, webrtc_error
-        if webrtc_manager is None:
-            try:
-                webrtc_manager = WebRTCManager(camera=current_camera, pipeline=pipeline)
-            except RuntimeError as exc:
-                logger.warning("WebRTC disabled: %s", exc)
-                webrtc_manager = None
-                webrtc_error = str(exc)
-            else:
-                webrtc_error = None
-        else:
-            webrtc_manager.camera = current_camera
-            webrtc_error = None
-
     @app.on_event("startup")
     async def startup() -> None:  # pragma: no cover - framework hook
-        nonlocal camera, active_camera_choice
+        nonlocal camera, active_camera_choice, streamer
         selection = config_manager.get_camera()
         camera, active_camera_choice = _build_camera(selection, fallback_to_synthetic=True)
-        _ensure_webrtc(camera)
+        streamer = MJPEGStreamer(camera=camera, pipeline=pipeline)
 
     @app.on_event("shutdown")
     async def shutdown() -> None:  # pragma: no cover - framework hook
-        if webrtc_manager:
-            await webrtc_manager.shutdown()
         if camera:
             await camera.close()
 
@@ -154,21 +127,24 @@ def create_app(config_path: Path | str = Path("data/config.json")) -> FastAPI:
     async def get_camera_config() -> dict[str, object]:
         options = [{"value": value, "label": label} for value, label in CAMERA_SOURCES.items()]
         errors = {source: message for source, message in camera_errors.items() if message}
-        webrtc_info = {"enabled": webrtc_manager is not None}
-        if webrtc_error:
-            webrtc_info["error"] = webrtc_error
+        stream_info = {
+            "enabled": streamer is not None,
+            "endpoint": "/stream/mjpeg" if streamer else None,
+            "content_type": streamer.media_type if streamer else None,
+            "error": None,
+        }
         return {
             "selected": config_manager.get_camera(),
             "active": active_camera_choice,
             "options": options,
             "errors": errors,
             "version": APP_VERSION,
-            "webrtc": webrtc_info,
+            "stream": stream_info,
         }
 
     @app.post("/api/camera")
     async def update_camera(payload: CameraPayload) -> dict[str, object]:
-        nonlocal camera, active_camera_choice
+        nonlocal camera, active_camera_choice, streamer
         selection = payload.source.strip().lower()
         if selection not in CAMERA_SOURCES:
             raise HTTPException(status_code=400, detail="Unknown camera source")
@@ -181,30 +157,33 @@ def create_app(config_path: Path | str = Path("data/config.json")) -> FastAPI:
         old_camera = camera
         camera = new_camera
         config_manager.set_camera(selection)
-        _ensure_webrtc(camera)
+        if streamer is None:
+            streamer = MJPEGStreamer(camera=camera, pipeline=pipeline)
+        else:
+            streamer.camera = camera
         if old_camera is not None:
             await old_camera.close()
-        webrtc_info = {"enabled": webrtc_manager is not None}
-        if webrtc_error:
-            webrtc_info["error"] = webrtc_error
+        stream_info = {
+            "enabled": streamer is not None,
+            "endpoint": "/stream/mjpeg" if streamer else None,
+            "content_type": streamer.media_type if streamer else None,
+            "error": None,
+        }
         return {
             "selected": selection,
             "active": active_camera_choice,
             "version": APP_VERSION,
-            "webrtc": webrtc_info,
+            "stream": stream_info,
         }
 
-    @app.post("/api/offer")
-    async def webrtc_offer(payload: OfferPayload) -> dict[str, str]:
-        if webrtc_manager is None:
-            raise HTTPException(status_code=503, detail="WebRTC service unavailable")
-        try:
-            from aiortc import RTCSessionDescription
-        except ImportError as exc:  # pragma: no cover - mirrors WebRTCManager guard
-            raise HTTPException(status_code=503, detail="WebRTC support requires aiortc to be installed") from exc
-        offer = RTCSessionDescription(sdp=payload.sdp, type=payload.type)
-        answer = await webrtc_manager.handle_offer(offer)
-        return {"sdp": answer.sdp, "type": answer.type}
+    @app.get("/stream/mjpeg")
+    async def stream_mjpeg():
+        if streamer is None:
+            raise HTTPException(status_code=503, detail="Streaming service unavailable")
+        response = StreamingResponse(streamer.stream(), media_type=streamer.media_type)
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        return response
 
     return app
 

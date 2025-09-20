@@ -57,9 +57,8 @@ packages=(
     libavutil-dev
     libswresample-dev
     libswscale-dev
-    libopus-dev
-    libvpx-dev
-    libsrtp2-dev
+    libjpeg-dev
+    zlib1g-dev
     pkg-config
 )
 

@@ -164,16 +164,25 @@
           }
           return true;
         });
-        if (camera.webrtc && camera.webrtc.error) {
-          const webrtcDetail = String(camera.webrtc.error).trim();
-          if (webrtcDetail) {
-            const webrtcMessage = `WebRTC disabled: ${webrtcDetail}`;
-            const webrtcLower = webrtcMessage.toLowerCase();
+        if (camera.stream) {
+          const streamDetail = camera.stream.error ? String(camera.stream.error).trim() : "";
+          if (streamDetail) {
+            const streamMessage = `Streaming disabled: ${streamDetail}`;
+            const streamLower = streamMessage.toLowerCase();
             const alreadyIncluded =
-              statusLower.includes(webrtcLower) ||
-              errorMessages.some((detail) => detail.toLowerCase() === webrtcLower);
+              statusLower.includes(streamLower) ||
+              errorMessages.some((detail) => detail.toLowerCase() === streamLower);
             if (!alreadyIncluded) {
-              errorMessages.push(webrtcMessage);
+              errorMessages.push(streamMessage);
+            }
+          } else if (camera.stream.enabled === false) {
+            const disabledMessage = "Streaming disabled";
+            const disabledLower = disabledMessage.toLowerCase();
+            const alreadyIncluded =
+              statusLower.includes(disabledLower) ||
+              errorMessages.some((detail) => detail.toLowerCase() === disabledLower);
+            if (!alreadyIncluded) {
+              errorMessages.push(disabledMessage);
             }
           }
         }

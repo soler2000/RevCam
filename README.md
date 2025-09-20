@@ -1,16 +1,16 @@
 # RevCam
 
 RevCam is a low-latency reversing camera stack targeted at the Raspberry Pi Zero 2 W (Bookworm).
-It streams a live camera feed to iOS devices through WebRTC and exposes a settings panel for
-configuring image orientation. The processing pipeline is modular so that future driver-assistance
-overlays can be injected on the server without major changes.
+It streams a live camera feed to iOS devices using an MJPEG pipeline and exposes a settings panel
+for configuring image orientation. The processing pipeline is modular so that future
+driver-assistance overlays can be injected on the server without major changes.
 
 ## Features
 
-- Fast WebRTC video delivery optimised for mobile Safari (iPhone/iPad).
+- Fast MJPEG video delivery optimised for mobile Safari (iPhone/iPad).
 - Camera orientation controls (rotation and horizontal/vertical flips).
 - Modular frame processing pipeline ready for future overlays (e.g. guidelines).
-- REST API for orientation control and WebRTC signalling.
+- REST API for orientation control and camera management.
 
 ## Project layout
 
@@ -22,7 +22,7 @@ src/
     camera.py             # Camera source abstractions
     config.py             # Orientation persistence and validation
     pipeline.py           # Frame processing pipeline (orientation + overlays)
-    webrtc.py             # WebRTC track implementation
+    streaming.py          # MJPEG streaming helpers
   rev_cam/static/
     index.html            # Viewer client
     settings.html         # Settings UI
@@ -46,7 +46,7 @@ building everything from PyPI. Follow these steps on the Pi:
    ```
 
    Prefer a single command? Run the bundled helper, which also installs
-   build prerequisites for `aiortc` and other native wheels:
+   build prerequisites for PyAV and other native wheels:
 
    ```bash
    ./scripts/install_prereqs.sh
@@ -61,10 +61,10 @@ building everything from PyPI. Follow these steps on the Pi:
    python -m pip install --upgrade pip
    ```
 
-3. Install RevCam from the source tree. On Pi hardware some wheels still need to
-   be built locally (`aiortc`, `pylibsrtp`, `av`), so this step can take several
-   minutes. Seeing a long list ending with `Successfully installed ...` means
-   the step finished successfully. You can either run the convenience script:
+3. Install RevCam from the source tree. On Pi hardware some wheels (such as
+   PyAV) may still be built locally, so this step can take a short while.
+   Seeing a long list ending with `Successfully installed ...` means the step
+   finished successfully. You can either run the convenience script:
 
    ```bash
    ./scripts/install.sh --pi
@@ -188,8 +188,8 @@ uvicorn rev_cam.app:create_app --factory --host 0.0.0.0 --port 9000
 
 ### Fast branch updates without rebuilding dependencies
 
-If you frequently test branches that rebuild heavy packages like `aiortc`,
-`pylibsrtp`, or `av`, use `git worktree` to reuse the same repository clone and
+If you frequently test branches that rebuild native packages (for example
+`av` or `numpy`), use `git worktree` to reuse the same repository clone and
 virtual environment. Build the dependencies once on your main checkout, then
 create lightweight worktrees for feature branches:
 
@@ -236,7 +236,7 @@ uvicorn rev_cam.app:create_app --factory --host 0.0.0.0 --port 8000
 
 Then open `http://<pi-address>:8000` on the iOS device to view the stream. Access the
 settings panel at `/settings` to adjust the camera orientation. Changes are persisted
-and applied immediately to the outgoing WebRTC stream.
+and applied immediately to the outgoing MJPEG stream.
 
 ## Testing
 

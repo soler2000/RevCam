@@ -39,8 +39,10 @@ def test_camera_endpoint_reports_picamera_error(client: TestClient) -> None:
     assert "picamera" in payload["errors"]
     assert "picamera backend unavailable" in payload["errors"]["picamera"]
     assert payload["version"] == APP_VERSION
-    assert payload["webrtc"]["enabled"] is False
-    assert "aiortc" in payload["webrtc"]["error"].lower()
+    stream_info = payload["stream"]
+    assert stream_info["enabled"] is True
+    assert stream_info["endpoint"] == "/stream/mjpeg"
+    assert "multipart/x-mixed-replace" in stream_info["content_type"]
 
 
 def test_camera_update_surfaces_failure(client: TestClient) -> None:
@@ -52,5 +54,17 @@ def test_camera_update_surfaces_failure(client: TestClient) -> None:
     refreshed = client.get("/api/camera").json()
     assert "picamera backend unavailable" in refreshed["errors"]["picamera"]
     assert refreshed["version"] == APP_VERSION
-    assert refreshed["webrtc"]["enabled"] is False
-    assert "aiortc" in refreshed["webrtc"]["error"].lower()
+    stream_info = refreshed["stream"]
+    assert stream_info["enabled"] is True
+    assert stream_info["endpoint"] == "/stream/mjpeg"
+    assert "multipart/x-mixed-replace" in stream_info["content_type"]
+
+
+def test_mjpeg_stream_endpoint(client: TestClient) -> None:
+    with client.stream("GET", "/stream/mjpeg") as response:
+        assert response.status_code == 200
+        content_type = response.headers.get("content-type", "")
+        assert "multipart/x-mixed-replace" in content_type
+        iterator = response.iter_bytes()
+        first_chunk = next(iterator)
+        assert b"--frame" in first_chunk

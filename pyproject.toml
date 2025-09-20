@@ -5,17 +5,16 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "rev-cam"
 version = "0.1.5"
-description = "Low-latency Raspberry Pi reversing camera WebRTC server"
+description = "Low-latency Raspberry Pi reversing camera MJPEG server"
 readme = "README.md"
 authors = [{name = "RevCam Team"}]
 requires-python = ">=3.11"
 dependencies = [
-    "aiortc>=1.5.0",
     "fastapi>=0.109",
     "uvicorn[standard]>=0.27",
     "numpy>=1.24",
-    "pydantic>=2.5",
-    "python-multipart>=0.0.6"
+    "av>=10.0",
+    "pydantic>=2.5"
 ]
 
 [project.optional-dependencies]
