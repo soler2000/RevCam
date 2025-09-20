@@ -1,0 +1,177 @@
+from pathlib import Path
+
+import pytest
+
+pytest.importorskip("httpx")
+
+from fastapi.testclient import TestClient
+
+from rev_cam.app import create_app
+from rev_cam.wifi import WiFiManager, WiFiNetwork, WiFiStatus
+
+
+class FakeWiFiBackend:
+    def __init__(self) -> None:
+        self.connect_attempts: list[tuple[str, str | None]] = []
+        self.status = WiFiStatus(
+            connected=True,
+            ssid="Home",
+            signal=75,
+            ip_address="192.168.1.10",
+            mode="station",
+            hotspot_active=False,
+            profile="Home",
+            detail="Connected",
+        )
+        self.networks = [
+            WiFiNetwork(
+                ssid="Home",
+                signal=75,
+                security="WPA2",
+                frequency=2412.0,
+                channel=1,
+                known=True,
+                active=True,
+            ),
+            WiFiNetwork(
+                ssid="Guest",
+                signal=55,
+                security="WPA2",
+                frequency=2417.0,
+                channel=2,
+                known=False,
+                active=False,
+            ),
+        ]
+
+    def get_status(self) -> WiFiStatus:
+        return self.status
+
+    def scan(self) -> list[WiFiNetwork]:
+        return list(self.networks)
+
+    def connect(self, ssid: str, password: str | None) -> WiFiStatus:
+        self.connect_attempts.append((ssid, password))
+        if ssid == "Guest":
+            # Simulate an authentication issue that leaves us disconnected.
+            self.status = WiFiStatus(
+                connected=False,
+                ssid=None,
+                signal=None,
+                ip_address=None,
+                mode="station",
+                hotspot_active=False,
+                profile=None,
+                detail="Authentication failed",
+            )
+        else:
+            self.status = WiFiStatus(
+                connected=True,
+                ssid=ssid,
+                signal=60,
+                ip_address="192.168.1.20",
+                mode="station",
+                hotspot_active=False,
+                profile=ssid,
+                detail=f"Connected to {ssid}",
+            )
+        return self.status
+
+    def activate_profile(self, profile: str) -> WiFiStatus:
+        # Record the rollback attempt.
+        self.connect_attempts.append((profile, None))
+        self.status = WiFiStatus(
+            connected=True,
+            ssid="Home",
+            signal=80,
+            ip_address="192.168.1.10",
+            mode="station",
+            hotspot_active=False,
+            profile="Home",
+            detail="Restored previous connection",
+        )
+        return self.status
+
+    def start_hotspot(self, ssid: str, password: str | None) -> WiFiStatus:
+        self.status = WiFiStatus(
+            connected=True,
+            ssid=ssid or "RevCam Hotspot",
+            signal=None,
+            ip_address="192.168.4.1",
+            mode="access-point",
+            hotspot_active=True,
+            profile="rev-hotspot",
+            detail="Hotspot enabled",
+        )
+        return self.status
+
+    def stop_hotspot(self, profile: str | None) -> WiFiStatus:
+        self.status = WiFiStatus(
+            connected=False,
+            ssid=None,
+            signal=None,
+            ip_address=None,
+            mode="station",
+            hotspot_active=False,
+            profile=None,
+            detail="Hotspot disabled",
+        )
+        return self.status
+
+
+@pytest.fixture
+def wifi_backend() -> FakeWiFiBackend:
+    return FakeWiFiBackend()
+
+
+@pytest.fixture
+def client(tmp_path: Path, wifi_backend: FakeWiFiBackend) -> TestClient:
+    manager = WiFiManager(backend=wifi_backend, rollback_timeout=0.05, poll_interval=0.005)
+    app = create_app(tmp_path / "config.json", wifi_manager=manager)
+    with TestClient(app) as test_client:
+        test_client.backend = wifi_backend
+        yield test_client
+
+
+def test_wifi_status_endpoint(client: TestClient) -> None:
+    response = client.get("/api/wifi/status")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["connected"] is True
+    assert payload["ssid"] == "Home"
+    assert payload["hotspot_active"] is False
+
+
+def test_wifi_scan_endpoint(client: TestClient) -> None:
+    response = client.get("/api/wifi/networks")
+    assert response.status_code == 200
+    payload = response.json()
+    assert "networks" in payload
+    assert any(network.get("active") for network in payload["networks"])
+
+
+def test_wifi_connect_development_mode_rolls_back(client: TestClient) -> None:
+    response = client.post(
+        "/api/wifi/connect",
+        json={"ssid": "Guest", "development_mode": True, "rollback_seconds": 0.05},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert "restored" in (payload.get("detail") or "").lower()
+    backend = getattr(client, "backend", None)
+    assert backend is not None
+    assert backend.connect_attempts[0][0] == "Guest"
+    assert backend.connect_attempts[1][0] == "Home"
+
+
+def test_wifi_hotspot_toggle(client: TestClient) -> None:
+    enable = client.post(
+        "/api/wifi/hotspot",
+        json={"enabled": True, "ssid": "RevCam-AP", "password": "secret123"},
+    )
+    assert enable.status_code == 200
+    assert enable.json()["hotspot_active"] is True
+
+    disable = client.post("/api/wifi/hotspot", json={"enabled": False})
+    assert disable.status_code == 200
+    assert disable.json()["hotspot_active"] is False
