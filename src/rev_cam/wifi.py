@@ -111,6 +111,9 @@ class WiFiBackend:
     def stop_hotspot(self, profile: str | None) -> WiFiStatus:  # pragma: no cover - interface only
         raise NotImplementedError
 
+    def forget(self, profile_or_ssid: str) -> None:  # pragma: no cover - interface only
+        raise NotImplementedError
+
 
 class NMCLIBackend(WiFiBackend):
     """Interact with NetworkManager via nmcli commands."""
@@ -387,6 +390,21 @@ class NMCLIBackend(WiFiBackend):
             self._last_hotspot_profile = None
         return status
 
+    def forget(self, profile_or_ssid: str) -> None:
+        try:
+            self._run(["nmcli", "connection", "delete", profile_or_ssid])
+        except WiFiError as exc:
+            message = str(exc).strip()
+            lowered = message.lower()
+            if "not authorized" in lowered or "not authorised" in lowered:
+                raise WiFiError(
+                    "Unable to forget Wi-Fi network: not authorized to control networking. "
+                    "Ensure RevCam has permission to manage NetworkManager."
+                ) from exc
+            raise
+        if profile_or_ssid == self._last_hotspot_profile:
+            self._last_hotspot_profile = None
+
 
 class WiFiManager:
     """High-level orchestration with rollback for development mode."""
@@ -431,6 +449,16 @@ class WiFiManager:
 
     def scan_networks(self) -> Sequence[WiFiNetwork]:
         return self._backend.scan()
+
+    def forget_network(self, profile_or_ssid: str) -> WiFiStatus:
+        if not isinstance(profile_or_ssid, str) or not profile_or_ssid.strip():
+            raise WiFiError("Network identifier must be a non-empty string")
+        identifier = profile_or_ssid.strip()
+        self._backend.forget(identifier)
+        if identifier == self._hotspot_profile:
+            self._hotspot_profile = None
+        status = self._fetch_status()
+        return status
 
     def connect(
         self,

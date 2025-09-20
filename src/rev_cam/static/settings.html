@@ -1783,9 +1783,8 @@
           const info = document.createElement("div");
           info.style.minWidth = "12rem";
           const name = document.createElement("strong");
-          const ssid = typeof network.ssid === "string" && network.ssid.trim()
-            ? network.ssid.trim()
-            : "(hidden network)";
+          const identifier = typeof network.ssid === "string" ? network.ssid.trim() : "";
+          const ssid = identifier ? identifier : "(hidden network)";
           name.textContent = ssid;
           info.appendChild(name);
           const details = document.createElement("span");
@@ -1844,6 +1843,21 @@
             });
           }
           actions.appendChild(connectButton);
+          if (network.known) {
+            const forgetButton = document.createElement("button");
+            forgetButton.type = "button";
+            forgetButton.className = "secondary-button";
+            forgetButton.textContent = "Forget";
+            if (!identifier) {
+              forgetButton.disabled = true;
+              forgetButton.title = "Unable to forget hidden networks.";
+            } else {
+              forgetButton.addEventListener("click", () => {
+                forgetSavedNetwork(identifier);
+              });
+            }
+            actions.appendChild(forgetButton);
+          }
           item.appendChild(actions);
           wifiNetworkList.appendChild(item);
         }
@@ -1966,6 +1980,49 @@
         } catch (err) {
           console.error(err);
           setWifiFeedback("Connection attempt failed.", true);
+        }
+      }
+
+      async function forgetSavedNetwork(identifier) {
+        const target = typeof identifier === "string" ? identifier.trim() : "";
+        if (!target) {
+          setWifiFeedback("Unable to forget unnamed network.", true);
+          return;
+        }
+        setWifiFeedback(`Forgetting ${target}…`);
+        try {
+          const response = await fetch("/api/wifi/forget", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ identifier: target }),
+          });
+          if (!response.ok) {
+            let errorDetail = "Unable to forget saved network.";
+            try {
+              const error = await response.json();
+              if (error && error.detail) {
+                errorDetail = error.detail;
+              }
+            } catch (parseErr) {
+              console.error(parseErr);
+            }
+            setWifiFeedback(errorDetail, true);
+            return;
+          }
+          const status = await response.json();
+          hideWifiConnectForm();
+          await refreshWifiStatus();
+          await scanWifiNetworks();
+          let detailMessage = "";
+          if (status && typeof status.detail === "string" && status.detail.trim()) {
+            detailMessage = status.detail.trim();
+          } else {
+            detailMessage = `Removed saved network ${target}.`;
+          }
+          setWifiFeedback(detailMessage);
+        } catch (err) {
+          console.error(err);
+          setWifiFeedback("Unable to forget saved network.", true);
         }
       }
 
