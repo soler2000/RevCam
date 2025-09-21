@@ -50,6 +50,17 @@ packages=(
     python3-pip
     python3-picamera2
     python3-prctl
+    libffi-dev
+    libssl-dev
+    libopus-dev
+    libvpx-dev
+    libavcodec-dev
+    libavdevice-dev
+    libavfilter-dev
+    libavformat-dev
+    libavutil-dev
+    libswscale-dev
+    libsrtp2-dev
     libatlas-base-dev
     libjpeg-dev
     zlib1g-dev
@@ -81,5 +92,13 @@ NOTICE
 else
     echo "python3-simplejpeg installed successfully."
 fi
+
+cat <<'INFO'
+
+The additional FFmpeg development headers (libav*), codecs, and SRTP support
+installed above allow pip to compile PyAV and aiortc when pre-built wheels are
+unavailable. If either dependency fails to build later, rerun this script to
+ensure the packages are up to date before retrying the Python installation.
+INFO
 
 echo "Prerequisite installation complete."

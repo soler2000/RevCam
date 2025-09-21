@@ -194,6 +194,42 @@ import importlib
 import sys
 
 try:
+    importlib.import_module("av")
+except ModuleNotFoundError:
+    sys.exit(1)
+else:
+    sys.exit(0)
+PY
+then
+    echo "Installing missing runtime dependency: av"
+    set -x
+    "$VENV_DIR/bin/python" -m pip install "${PIP_FLAGS[@]}" "av>=10.0"
+    set +x
+fi
+
+if ! "$VENV_DIR/bin/python" - <<'PY'
+import importlib
+import sys
+
+try:
+    importlib.import_module("aiortc")
+except ModuleNotFoundError:
+    sys.exit(1)
+else:
+    sys.exit(0)
+PY
+then
+    echo "Installing missing runtime dependency: aiortc"
+    set -x
+    "$VENV_DIR/bin/python" -m pip install "${PIP_FLAGS[@]}" "aiortc>=1.7"
+    set +x
+fi
+
+if ! "$VENV_DIR/bin/python" - <<'PY'
+import importlib
+import sys
+
+try:
     importlib.import_module("board")
     importlib.import_module("neopixel")
 except ModuleNotFoundError:

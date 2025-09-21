@@ -19,12 +19,17 @@ sudo apt update
 sudo apt install -y \
   git python3 python3-venv python3-pip \
   python3-picamera2 python3-prctl python3-simplejpeg \
+  libffi-dev libssl-dev libsrtp2-dev \
+  libavcodec-dev libavdevice-dev libavfilter-dev \
+  libavformat-dev libavutil-dev libswscale-dev \
+  libopus-dev libvpx-dev \
   libatlas-base-dev \
   libjpeg-dev zlib1g-dev pkg-config
 ```
-These packages provide the official Picamera2 stack alongside the JPEG encoder
-used by the streaming pipeline. The same set is available through
-`./scripts/install_prereqs.sh` if you prefer a reusable helper.
+These packages provide the official Picamera2 stack alongside the FFmpeg
+headers and codecs needed to build the WebRTC streaming dependencies. The same
+set is available through `./scripts/install_prereqs.sh` if you prefer a
+reusable helper.
 
 > **Note:** SimpleJPEG is only packaged for Raspberry Pi OS as
 > `python3-simplejpeg`. Running `sudo apt install simplejpeg` will result in an

@@ -47,15 +47,20 @@ The Raspberry Pi wheels for Picamera2 and its native dependencies are shipped
 through Raspberry Pi OS. Using them is much faster and more reliable than
 building everything from PyPI. Follow these steps on the Pi:
 
-1. Install the packaged Picamera2 stack and its helpers:
+1. Install the packaged Picamera2 stack, WebRTC build dependencies, and their helpers:
 
    ```bash
    sudo apt update
-   sudo apt install python3-picamera2 python3-prctl python3-simplejpeg
+   sudo apt install \
+       python3-picamera2 python3-prctl python3-simplejpeg \
+       libffi-dev libssl-dev libsrtp2-dev \
+       libavcodec-dev libavdevice-dev libavfilter-dev \
+       libavformat-dev libavutil-dev libswscale-dev \
+       libopus-dev libvpx-dev
   ```
 
-   Prefer a single command? Run the bundled helper, which also installs
-   the native JPEG encoder used by the streaming pipeline:
+   Prefer a single command? Run the bundled helper, which also installs the
+   FFmpeg headers and codecs required for compiling the WebRTC stack:
 
    > **Tip:** The SimpleJPEG package is published as `python3-simplejpeg` on
    > Raspberry Pi OS. Running `sudo apt install simplejpeg` will fail with an
@@ -98,8 +103,10 @@ building everything from PyPI. Follow these steps on the Pi:
    pip install --prefer-binary --extra-index-url https://www.piwheels.org/simple -e .
    ```
 
-The `--prefer-binary` flag asks `pip` to fetch pre-built wheels when
-available, and the PiWheels index provides ARM builds for most dependencies.
+   The `--prefer-binary` flag asks `pip` to fetch pre-built wheels when
+   available, and the PiWheels index provides ARM builds for most dependencies.
+   When wheels for PyAV or aiortc are unavailable, the development headers
+   installed in step 1 allow `pip` to build them from source.
 
 ### LED ring requirements
 
