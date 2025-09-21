@@ -267,7 +267,7 @@ class BatteryMonitor:
                 charging = None
             else:
                 current_ma = float(current_value)
-                charging = current_ma < 0
+                charging = current_ma > 0
         except Exception:
             current_ma = None
             charging = None

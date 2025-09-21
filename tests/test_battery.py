@@ -25,7 +25,7 @@ class _StubSensor:
 
 
 def test_battery_monitor_reports_reading() -> None:
-    sensor = _StubSensor(bus_voltage=4.2, current=-150.0)
+    sensor = _StubSensor(bus_voltage=4.2, current=150.0)
     monitor = BatteryMonitor(capacity_mah=1000, sensor_factory=lambda: sensor)
 
     reading = monitor.read()
@@ -36,7 +36,7 @@ def test_battery_monitor_reports_reading() -> None:
     assert reading.voltage == pytest.approx(4.2)
     assert reading.percentage == pytest.approx(100.0)
     assert reading.charging is True
-    assert reading.current_ma == pytest.approx(-150.0)
+    assert reading.current_ma == pytest.approx(150.0)
     assert reading.error is None
 
 
@@ -186,7 +186,7 @@ def test_battery_supervisor_triggers_shutdown_when_low() -> None:
             available=True,
             percentage=4.0,
             voltage=3.35,
-            current_ma=150.0,
+            current_ma=-150.0,
             charging=False,
             capacity_mah=1000,
             error=None,
@@ -226,7 +226,7 @@ def test_battery_supervisor_ignores_charging_state() -> None:
                     available=True,
                     percentage=2.0,
                     voltage=3.3,
-                    current_ma=-200.0,
+                    current_ma=200.0,
                     charging=True,
                     capacity_mah=800,
                     error=None,
