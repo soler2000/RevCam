@@ -111,38 +111,63 @@ class ReversingAidSegment:
         return {"start": self.start.to_dict(), "end": self.end.to_dict()}
 
 
+REVERSING_SEGMENT_RATIOS: tuple[tuple[float, float], ...] = (
+    (0.0, 0.25),
+    (0.375, 0.625),
+    (0.75, 1.0),
+)
+
+
+def _clamp_unit(value: float) -> float:
+    return min(1.0, max(0.0, float(value)))
+
+
+def generate_reversing_segments(
+    near: ReversingAidPoint, far: ReversingAidPoint
+) -> tuple[ReversingAidSegment, ...]:
+    """Return evenly spaced segments along the main reversing aid line."""
+
+    dx = far.x - near.x
+    dy = far.y - near.y
+    segments: list[ReversingAidSegment] = []
+    for start_ratio, end_ratio in REVERSING_SEGMENT_RATIOS:
+        start = ReversingAidPoint(
+            _clamp_unit(near.x + dx * start_ratio),
+            _clamp_unit(near.y + dy * start_ratio),
+        )
+        end = ReversingAidPoint(
+            _clamp_unit(near.x + dx * end_ratio),
+            _clamp_unit(near.y + dy * end_ratio),
+        )
+        segments.append(ReversingAidSegment(start=start, end=end))
+    return tuple(segments)
+
+
+def _normalise_reversing_segments(
+    segments: Sequence[ReversingAidSegment],
+) -> tuple[ReversingAidSegment, ...]:
+    if len(segments) != len(REVERSING_SEGMENT_RATIOS):
+        return tuple(segments)
+    near = segments[0].start
+    far = segments[-1].end
+    return generate_reversing_segments(
+        ReversingAidPoint(near.x, near.y),
+        ReversingAidPoint(far.x, far.y),
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class ReversingAidsConfig:
     """Configuration describing the reversing aid overlay."""
 
     enabled: bool = True
-    left: tuple[ReversingAidSegment, ...] = (
-        ReversingAidSegment(
-            start=ReversingAidPoint(0.52, 0.18),
-            end=ReversingAidPoint(0.32, 0.34),
-        ),
-        ReversingAidSegment(
-            start=ReversingAidPoint(0.42, 0.46),
-            end=ReversingAidPoint(0.22, 0.62),
-        ),
-        ReversingAidSegment(
-            start=ReversingAidPoint(0.34, 0.70),
-            end=ReversingAidPoint(0.14, 0.86),
-        ),
+    left: tuple[ReversingAidSegment, ...] = generate_reversing_segments(
+        ReversingAidPoint(0.14, 0.86),
+        ReversingAidPoint(0.52, 0.18),
     )
-    right: tuple[ReversingAidSegment, ...] = (
-        ReversingAidSegment(
-            start=ReversingAidPoint(0.48, 0.18),
-            end=ReversingAidPoint(0.68, 0.34),
-        ),
-        ReversingAidSegment(
-            start=ReversingAidPoint(0.58, 0.46),
-            end=ReversingAidPoint(0.78, 0.62),
-        ),
-        ReversingAidSegment(
-            start=ReversingAidPoint(0.66, 0.70),
-            end=ReversingAidPoint(0.86, 0.86),
-        ),
+    right: tuple[ReversingAidSegment, ...] = generate_reversing_segments(
+        ReversingAidPoint(0.86, 0.86),
+        ReversingAidPoint(0.48, 0.18),
     )
 
     def to_dict(self) -> dict[str, object]:
@@ -335,7 +360,7 @@ def _parse_reversing_segments(
         raise ValueError(
             f"Reversing aids require exactly {len(default)} segments per side"
         )
-    return tuple(segments)
+    return _normalise_reversing_segments(segments)
 
 
 def _parse_reversing_aids(
@@ -708,5 +733,6 @@ __all__ = [
     "ReversingAidsConfig",
     "ReversingAidSegment",
     "ReversingAidPoint",
+    "generate_reversing_segments",
     "DEFAULT_REVERSING_AIDS",
 ]

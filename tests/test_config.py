@@ -1,6 +1,5 @@
 from pathlib import Path
-
-from pathlib import Path
+import math
 
 import pytest
 
@@ -9,8 +8,10 @@ from rev_cam.config import (
     ConfigManager,
     DistanceZones,
     Orientation,
+    ReversingAidPoint,
     ReversingAidsConfig,
     StreamSettings,
+    generate_reversing_segments,
     DEFAULT_BATTERY_CAPACITY_MAH,
     DEFAULT_CAMERA_CHOICE,
     DEFAULT_REVERSING_AIDS,
@@ -166,23 +167,41 @@ def test_default_reversing_aids(tmp_path: Path) -> None:
 def test_reversing_aids_persistence(tmp_path: Path) -> None:
     config_file = tmp_path / "config.json"
     manager = ConfigManager(config_file)
+    left_line = (
+        ReversingAidPoint(0.18, 0.9),
+        ReversingAidPoint(0.58, 0.22),
+    )
+    right_line = (
+        ReversingAidPoint(0.82, 0.9),
+        ReversingAidPoint(0.42, 0.22),
+    )
     payload = {
         "enabled": False,
-        "left": [
-            {"start": {"x": 0.55, "y": 0.12}, "end": {"x": 0.36, "y": 0.3}},
-            {"start": {"x": 0.46, "y": 0.42}, "end": {"x": 0.27, "y": 0.6}},
-            {"start": {"x": 0.38, "y": 0.66}, "end": {"x": 0.19, "y": 0.84}},
-        ],
-        "right": [
-            {"start": {"x": 0.45, "y": 0.12}, "end": {"x": 0.64, "y": 0.3}},
-            {"start": {"x": 0.54, "y": 0.42}, "end": {"x": 0.73, "y": 0.6}},
-            {"start": {"x": 0.62, "y": 0.66}, "end": {"x": 0.81, "y": 0.84}},
-        ],
+        "left": [segment.to_dict() for segment in generate_reversing_segments(*left_line)],
+        "right": [segment.to_dict() for segment in generate_reversing_segments(*right_line)],
     }
     updated = manager.set_reversing_aids(payload)
     assert isinstance(updated, ReversingAidsConfig)
     reloaded = ConfigManager(config_file)
     assert reloaded.get_reversing_aids() == updated
+
+
+def test_generate_reversing_segments_align() -> None:
+    near = ReversingAidPoint(0.24, 0.88)
+    far = ReversingAidPoint(0.6, 0.28)
+    segments = generate_reversing_segments(near, far)
+
+    assert len(segments) == 3
+    assert segments[0].start == near
+    assert segments[-1].end == far
+
+    expected_dx = far.x - near.x
+    expected_dy = far.y - near.y
+    for segment in segments:
+        for point in (segment.start, segment.end):
+            dx = point.x - near.x
+            dy = point.y - near.y
+            assert math.isclose(dx * expected_dy, dy * expected_dx, rel_tol=1e-9, abs_tol=1e-9)
 
 
 def test_reversing_aids_validation(tmp_path: Path) -> None:
