@@ -25,7 +25,7 @@ class _StubSensor:
 
 
 def test_battery_monitor_reports_reading() -> None:
-    sensor = _StubSensor(bus_voltage=4.2, current=-150.0)
+    sensor = _StubSensor(bus_voltage=4.2, current=150.0)
     monitor = BatteryMonitor(capacity_mah=1000, sensor_factory=lambda: sensor)
 
     reading = monitor.read()
@@ -36,7 +36,7 @@ def test_battery_monitor_reports_reading() -> None:
     assert reading.voltage == pytest.approx(4.2)
     assert reading.percentage == pytest.approx(100.0)
     assert reading.charging is True
-    assert reading.current_ma == pytest.approx(-150.0)
+    assert reading.current_ma == pytest.approx(150.0)
     assert reading.error is None
 
 
@@ -51,6 +51,57 @@ def test_battery_monitor_interpolates_voltage() -> None:
     assert reading.current_ma is None
     assert reading.charging is None
     assert reading.percentage == pytest.approx(77.5)
+
+
+def test_battery_monitor_treats_3v3_as_empty() -> None:
+    sensor = _StubSensor(bus_voltage=3.3)
+    monitor = BatteryMonitor(sensor_factory=lambda: sensor, smoothing_alpha=None)
+
+    reading = monitor.read()
+
+    assert reading.available is True
+    assert reading.percentage == pytest.approx(0.0)
+    assert reading.voltage == pytest.approx(3.3, abs=1e-3)
+
+
+def test_battery_monitor_smooths_successive_readings() -> None:
+    sensor = _StubSensor(bus_voltage=4.2, current=250.0)
+    monitor = BatteryMonitor(sensor_factory=lambda: sensor, smoothing_alpha=0.25)
+
+    first = monitor.read()
+    assert first.available is True
+    assert first.percentage == pytest.approx(100.0)
+    assert first.voltage == pytest.approx(4.2, abs=1e-3)
+    assert first.current_ma == pytest.approx(250.0)
+    assert first.charging is True
+
+    sensor.bus_voltage = 3.6
+    sensor.current = -150.0
+
+    second = monitor.read()
+    assert second.available is True
+    assert second.charging is False
+    assert second.percentage == pytest.approx(99.0, abs=0.2)
+    assert second.percentage < first.percentage
+    assert second.percentage > 60.0
+    assert second.voltage == pytest.approx(4.191, abs=0.002)
+    assert second.current_ma == pytest.approx(-150.0)
+
+    third = monitor.read()
+    assert third.available is True
+    assert third.charging is False
+    assert third.percentage < second.percentage
+    assert third.percentage > 50.0
+    assert third.percentage == pytest.approx(97.3, abs=0.3)
+    assert third.voltage == pytest.approx(4.174, abs=0.003)
+    assert third.current_ma == pytest.approx(-150.0)
+
+    final = third
+    for _ in range(120):
+        final = monitor.read()
+
+    assert final.percentage == pytest.approx(38.0, abs=0.5)
+    assert final.voltage == pytest.approx(3.6, abs=0.01)
 
 
 def test_battery_monitor_surfaces_sensor_error() -> None:
@@ -186,7 +237,7 @@ def test_battery_supervisor_triggers_shutdown_when_low() -> None:
             available=True,
             percentage=4.0,
             voltage=3.35,
-            current_ma=150.0,
+            current_ma=-150.0,
             charging=False,
             capacity_mah=1000,
             error=None,
@@ -226,7 +277,7 @@ def test_battery_supervisor_ignores_charging_state() -> None:
                     available=True,
                     percentage=2.0,
                     voltage=3.3,
-                    current_ma=-200.0,
+                    current_ma=200.0,
                     charging=True,
                     capacity_mah=800,
                     error=None,

@@ -882,11 +882,6 @@
         font-size: 1rem;
         font-weight: 600;
       }
-      .battery-actions {
-        display: flex;
-        gap: var(--space-sm);
-        margin-top: var(--stack-gap);
-      }
       .battery-note {
         font-size: 0.9rem;
         color: var(--text-muted);
@@ -1710,7 +1705,7 @@
         >
           <section class="card">
             <h2>Battery status</h2>
-            <p id="battery-summary" class="muted">Battery readings are unavailable until refreshed.</p>
+            <p id="battery-summary" class="muted">Battery readings update automatically when available.</p>
             <div class="battery-card">
               <div id="battery-indicator" aria-live="polite" aria-label="Battery unavailable">
                 <span class="battery-icon unavailable" id="battery-icon" aria-hidden="true">
@@ -1739,9 +1734,6 @@
                   <dd id="battery-capacity">—</dd>
                 </div>
               </dl>
-            </div>
-            <div class="battery-actions">
-              <button type="button" id="battery-refresh" class="secondary-button">Refresh battery status</button>
             </div>
             <p class="battery-note">
               Battery data is shown when an INA219 sensor is connected.
@@ -1804,6 +1796,7 @@
       const availableTabs = tabButtons
         .map((button) => button.dataset.tab)
         .filter((value) => typeof value === "string" && value.length > 0);
+      let activeSettingsTab = null;
       const DISTANCE_ZONE_LABELS = {
         danger: "Danger",
         warning: "Warning",
@@ -1943,7 +1936,6 @@
       let diagnosticsLoading = false;
       let diagnosticsStatusTimer = null;
       const batterySummary = document.getElementById("battery-summary");
-      const batteryRefreshButton = document.getElementById("battery-refresh");
       const batteryIndicator = document.getElementById("battery-indicator");
       const batteryIcon = document.getElementById("battery-icon");
       const batteryLevel = document.getElementById("battery-level");
@@ -1966,6 +1958,9 @@
         ? batteryLimitsForm.querySelector('button[type="submit"]')
         : null;
       let batteryLoading = false;
+      let batteryHasLoaded = false;
+      let batteryPollingTimer = null;
+      const BATTERY_STATUS_POLL_INTERVAL_MS = 500;
       let batteryLimitsLoaded = false;
       let batteryLimitsLoading = false;
       let batteryLimitsStatusTimer = null;
@@ -3244,9 +3239,6 @@
         if (showLoading && batterySummary) {
           batterySummary.textContent = "Refreshing battery status…";
         }
-        if (batteryRefreshButton) {
-          batteryRefreshButton.disabled = true;
-        }
         try {
           const response = await fetch("/api/battery", { cache: "no-store" });
           if (!response.ok) {
@@ -3254,15 +3246,33 @@
           }
           const payload = await response.json();
           applyBatteryReading(payload);
+          batteryHasLoaded = true;
         } catch (error) {
           console.error("Battery status error", error);
           applyBatteryReading({ available: false, error: "Unable to load battery status." });
+          batteryHasLoaded = true;
         } finally {
           batteryLoading = false;
-          if (batteryRefreshButton) {
-            batteryRefreshButton.disabled = false;
-          }
         }
+      }
+
+      function stopBatteryStatusPolling() {
+        if (batteryPollingTimer) {
+          window.clearInterval(batteryPollingTimer);
+          batteryPollingTimer = null;
+        }
+      }
+
+      function startBatteryStatusPolling() {
+        if (!batteryIndicator) {
+          return;
+        }
+        stopBatteryStatusPolling();
+        refreshBatteryStatus(!batteryHasLoaded)
+          .catch((err) => console.error(err));
+        batteryPollingTimer = window.setInterval(() => {
+          refreshBatteryStatus().catch((err) => console.error(err));
+        }, BATTERY_STATUS_POLL_INTERVAL_MS);
       }
 
       function updateBatteryLimitsInputs(limits, options = {}) {
@@ -3391,10 +3401,13 @@
             console.error(err);
           }
         }
+        activeSettingsTab = desired;
         if (desired === "battery") {
-          refreshBatteryStatus().catch((err) => console.error(err));
+          startBatteryStatusPolling();
           loadBatteryLimits({ showLoading: !batteryLimitsLoaded })
             .catch((err) => console.error(err));
+        } else {
+          stopBatteryStatusPolling();
         }
       }
 
@@ -3808,12 +3821,6 @@
         });
       }
 
-      if (batteryRefreshButton) {
-        batteryRefreshButton.addEventListener("click", () => {
-          refreshBatteryStatus(true).catch((err) => console.error(err));
-        });
-      }
-
       if (batteryLimitsForm) {
         batteryLimitsForm.addEventListener("submit", async (event) => {
           event.preventDefault();
@@ -3966,6 +3973,14 @@
         const target = getTabFromHash(window.location.hash);
         if (target) {
           setActiveTab(target, { updateHash: false });
+        }
+      });
+
+      document.addEventListener("visibilitychange", () => {
+        if (document.hidden) {
+          stopBatteryStatusPolling();
+        } else if (activeSettingsTab === "battery") {
+          startBatteryStatusPolling();
         }
       });
 
