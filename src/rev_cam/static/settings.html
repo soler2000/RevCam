@@ -2234,6 +2234,22 @@
               typeof state.active_pattern === "string" ? state.active_pattern : "",
             error: state.error === true,
             available: state.available !== false,
+            message:
+              typeof state.message === "string" && state.message.trim()
+                ? state.message.trim()
+                : "",
+            illumination:
+              state && typeof state.illumination === "object" && state.illumination
+                ? {
+                    color:
+                      typeof state.illumination.color === "string"
+                        ? state.illumination.color
+                        : null,
+                    intensity: Number.isFinite(state.illumination.intensity)
+                      ? Number(state.illumination.intensity)
+                      : null,
+                  }
+                : null,
           };
         } else {
           currentLedState = null;

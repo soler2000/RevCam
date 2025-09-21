@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import os
+import string
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Response
@@ -107,6 +109,8 @@ class ReversingAidsPayload(BaseModel):
 class LedSettingsPayload(BaseModel):
     pattern: str | None = None
     error: bool | None = None
+    illumination_color: str | None = None
+    illumination_intensity: float | int | None = None
 
 
 def create_app(
@@ -200,6 +204,12 @@ def create_app(
 
     async def _serialise_led_status() -> dict[str, object]:
         status = await led_ring.get_status()
+        colour = status.illumination_color
+        colour_hex = "#" + "".join(f"{component:02X}" for component in colour)
+        intensity_percent = max(
+            0,
+            min(100, int(round(status.illumination_intensity * 100))),
+        )
         return {
             "patterns": list(status.patterns),
             "pattern": status.pattern,
@@ -207,7 +217,35 @@ def create_app(
             "error": status.error,
             "available": status.available,
             "message": status.message,
+            "illumination": {
+                "color": colour_hex,
+                "intensity": intensity_percent,
+            },
         }
+
+    def _parse_hex_colour(value: str) -> tuple[int, int, int]:
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("Illumination colour must be a hex string in RRGGBB format")
+        candidate = value.strip()
+        if candidate.startswith("#"):
+            candidate = candidate[1:]
+        if len(candidate) != 6 or any(ch not in string.hexdigits for ch in candidate):
+            raise ValueError("Illumination colour must be a hex string in RRGGBB format")
+        red = int(candidate[0:2], 16)
+        green = int(candidate[2:4], 16)
+        blue = int(candidate[4:6], 16)
+        return red, green, blue
+
+    def _parse_illumination_intensity(value: float | int) -> float:
+        try:
+            percent = float(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Illumination intensity must be a number between 0 and 100") from exc
+        if not math.isfinite(percent):
+            raise ValueError("Illumination intensity must be finite")
+        if not 0.0 <= percent <= 100.0:
+            raise ValueError("Illumination intensity must be between 0 and 100")
+        return percent / 100.0
 
     def _record_camera_error(source: str, message: str | None) -> None:
         if message:
@@ -383,10 +421,27 @@ def create_app(
         if payload.error is not None:
             await led_ring.set_error(bool(payload.error))
             updated = True
+        colour_value: tuple[int, int, int] | None = None
+        intensity_value: float | None = None
+        if payload.illumination_color is not None:
+            try:
+                colour_value = _parse_hex_colour(payload.illumination_color)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if payload.illumination_intensity is not None:
+            try:
+                intensity_value = _parse_illumination_intensity(payload.illumination_intensity)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if colour_value is not None or intensity_value is not None:
+            await led_ring.set_illumination(color=colour_value, intensity=intensity_value)
+            updated = True
         if not updated:
             raise HTTPException(
                 status_code=400,
-                detail="Specify a pattern or error flag to update the LED ring",
+                detail=(
+                    "Specify a pattern, error flag, or illumination setting to update the LED ring"
+                ),
             )
         return await _serialise_led_status()
 

@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+import math
 from typing import Callable, Iterable, Iterator, Protocol, Sequence
 
 
@@ -32,6 +33,8 @@ class LedRingStatus:
     error: bool
     available: bool
     message: str | None = None
+    illumination_color: Color = field(default_factory=lambda: (255, 255, 255))
+    illumination_intensity: float = 1.0
 
 
 @dataclass(slots=True, frozen=True)
@@ -177,6 +180,8 @@ class LedRing:
         self._active_pattern = "off"
         self._pattern_task: asyncio.Task[None] | None = None
         self._driver_message: str | None = None
+        self._illumination_color: Color = (255, 255, 255)
+        self._illumination_intensity: float = 1.0
 
         if driver is not None:
             self._driver: _RingDriver | None = driver
@@ -206,6 +211,7 @@ class LedRing:
             "boot": self._pattern_boot,
             "ready": self._pattern_ready,
             "error": self._pattern_error,
+            "illumination": self._pattern_illumination,
         }
 
     async def set_pattern(self, name: str) -> None:
@@ -235,6 +241,52 @@ class LedRing:
             self._error_active = active
             await self._apply_state_locked()
 
+    async def set_illumination(
+        self,
+        *,
+        color: Color | None = None,
+        intensity: float | None = None,
+    ) -> None:
+        """Update the illumination colour or intensity."""
+
+        async with self._lock:
+            if self._closed:
+                return
+
+            changed = False
+
+            if color is not None:
+                if not isinstance(color, Sequence) or len(color) != 3:
+                    raise ValueError("Illumination colour must include red, green, and blue values")
+                parsed: list[int] = []
+                for component in color:
+                    if not isinstance(component, (int, float)):
+                        raise ValueError("Illumination colour components must be numbers")
+                    value = int(round(component))
+                    if not 0 <= value <= 255:
+                        raise ValueError("Illumination colour components must be between 0 and 255")
+                    parsed.append(value)
+                rgb = (parsed[0], parsed[1], parsed[2])
+                if rgb != self._illumination_color:
+                    self._illumination_color = rgb
+                    changed = True
+
+            if intensity is not None:
+                try:
+                    intensity_value = float(intensity)
+                except (TypeError, ValueError) as exc:  # pragma: no cover - defensive guard
+                    raise ValueError("Illumination intensity must be a number") from exc
+                if not math.isfinite(intensity_value):
+                    raise ValueError("Illumination intensity must be finite")
+                if not 0.0 <= intensity_value <= 1.0:
+                    raise ValueError("Illumination intensity must be between 0 and 1")
+                if abs(intensity_value - self._illumination_intensity) > 1e-6:
+                    self._illumination_intensity = intensity_value
+                    changed = True
+
+            if changed and self._base_pattern == "illumination" and not self._error_active:
+                await self._apply_state_locked()
+
     async def get_status(self) -> LedRingStatus:
         """Return the currently configured state of the LED ring."""
 
@@ -245,6 +297,8 @@ class LedRing:
             error_active = self._error_active
             available = self._driver is not None and not self._closed
             message = self._driver_message if not available else None
+            illumination_color = self._illumination_color
+            illumination_intensity = self._illumination_intensity
         return LedRingStatus(
             patterns=patterns,
             pattern=pattern,
@@ -252,6 +306,8 @@ class LedRing:
             error=error_active,
             available=available,
             message=message,
+            illumination_color=illumination_color,
+            illumination_intensity=illumination_intensity,
         )
 
     async def aclose(self) -> None:
@@ -388,6 +444,20 @@ class LedRing:
         while True:
             yield PatternStep(colors=(intense,) * self._pixel_count, duration=0.3)
             yield PatternStep(colors=(dim,) * self._pixel_count, duration=0.12)
+
+    def _pattern_illumination(self) -> Iterator[PatternStep]:
+        while True:
+            color = self._scaled_illumination_color()
+            yield PatternStep(colors=(color,) * self._pixel_count, duration=0.12)
+
+    def _scaled_illumination_color(self) -> Color:
+        base = self._illumination_color
+        intensity = self._illumination_intensity
+        return (
+            max(0, min(255, int(round(base[0] * intensity)))),
+            max(0, min(255, int(round(base[1] * intensity)))),
+            max(0, min(255, int(round(base[2] * intensity)))),
+        )
 
 
 __all__ = ["LedRing", "LedRingStatus", "NEOPIXEL_PERMISSION_MESSAGE"]

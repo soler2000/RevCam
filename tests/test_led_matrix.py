@@ -55,6 +55,9 @@ def test_led_ring_patterns_cycle() -> None:
         await asyncio.sleep(0.02)
         assert driver.frames[-1] == ready_frame
 
+        status = await ring.get_status()
+        assert "illumination" in status.patterns
+
         await ring.aclose()
         assert driver.closed
 
@@ -80,7 +83,35 @@ def test_led_ring_reports_driver_permission_failure() -> None:
         status = await ring.get_status()
         assert status.available is False
         assert status.message == NEOPIXEL_PERMISSION_MESSAGE
+        assert status.illumination_color == (255, 255, 255)
+        assert status.illumination_intensity == pytest.approx(1.0)
         assert driver.closed is True
+
+        await ring.aclose()
+
+    asyncio.run(runner())
+
+
+def test_led_ring_illumination_controls_colour_and_intensity() -> None:
+    async def runner() -> None:
+        driver = _RecordingDriver(pixel_count=6)
+        ring = LedRing(pixel_count=6, driver=driver)
+
+        await ring.set_pattern("illumination")
+        await ring.set_illumination(color=(120, 60, 0), intensity=0.5)
+        await asyncio.sleep(0.2)
+        assert driver.frames, "Illumination pattern should emit frames"
+        frame = driver.frames[-1]
+        assert all(pixel == (60, 30, 0) for pixel in frame)
+
+        status = await ring.get_status()
+        assert status.pattern == "illumination"
+        assert status.illumination_color == (120, 60, 0)
+        assert status.illumination_intensity == pytest.approx(0.5)
+
+        await ring.set_illumination(intensity=0.0)
+        await asyncio.sleep(0.2)
+        assert driver.frames[-1] == ((0, 0, 0),) * driver.pixel_count
 
         await ring.aclose()
 
