@@ -26,6 +26,10 @@ These packages provide the official Picamera2 stack alongside the JPEG encoder
 used by the streaming pipeline. The same set is available through
 `./scripts/install_prereqs.sh` if you prefer a reusable helper.
 
+> **Note:** SimpleJPEG is only packaged for Raspberry Pi OS as
+> `python3-simplejpeg`. Running `sudo apt install simplejpeg` will result in an
+> "unable to locate package" error.
+
 2. Clone (or update) the RevCam repository
 -----------------------------------------
 ```bash

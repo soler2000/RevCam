@@ -52,10 +52,14 @@ building everything from PyPI. Follow these steps on the Pi:
    ```bash
    sudo apt update
    sudo apt install python3-picamera2 python3-prctl python3-simplejpeg
-   ```
+  ```
 
    Prefer a single command? Run the bundled helper, which also installs
    the native JPEG encoder used by the streaming pipeline:
+
+   > **Tip:** The SimpleJPEG package is published as `python3-simplejpeg` on
+   > Raspberry Pi OS. Running `sudo apt install simplejpeg` will fail with an
+   > "unable to locate package" error.
 
    ```bash
    ./scripts/install_prereqs.sh

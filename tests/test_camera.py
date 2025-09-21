@@ -306,6 +306,7 @@ def test_import_failure_numpy_hint(monkeypatch: pytest.MonkeyPatch) -> None:
         "sudo apt install --reinstall python3-numpy python3-picamera2 python3-simplejpeg"
         in message
     )
+    assert "prefix on SimpleJPEG" in message
 
 
 def test_picamera_initialisation_error_includes_cause(monkeypatch: pytest.MonkeyPatch) -> None:
