@@ -63,19 +63,19 @@ class Resolution:
 
 @dataclass(frozen=True, slots=True)
 class StreamSettings:
-    """Configuration values for the MJPEG stream."""
+    """Configuration values for the WebRTC stream."""
 
     fps: int = 20
-    jpeg_quality: int = 85
+    bitrate: int = 1_500_000
 
     def __post_init__(self) -> None:
         if self.fps < 1 or self.fps > 60:
             raise ValueError("Stream fps must be between 1 and 60")
-        if self.jpeg_quality < 1 or self.jpeg_quality > 100:
-            raise ValueError("Stream JPEG quality must be between 1 and 100")
+        if self.bitrate < 50_000 or self.bitrate > 10_000_000:
+            raise ValueError("Stream bitrate must be between 50,000 and 10,000,000 bps")
 
     def to_dict(self) -> Dict[str, int]:
-        return {"fps": int(self.fps), "jpeg_quality": int(self.jpeg_quality)}
+        return {"fps": int(self.fps), "bitrate": int(self.bitrate)}
 
 
 @dataclass(frozen=True, slots=True)
@@ -264,10 +264,15 @@ def _parse_stream_settings(value: Any, *, default: StreamSettings) -> StreamSett
         return default
     if isinstance(value, StreamSettings):
         fps_raw: Any = value.fps
-        quality_raw: Any = value.jpeg_quality
+        bitrate_raw: Any = value.bitrate
     elif isinstance(value, Mapping):
         fps_raw = value.get("fps", default.fps)
-        quality_raw = value.get("jpeg_quality", value.get("quality", default.jpeg_quality))
+        if "bitrate" in value:
+            bitrate_raw = value.get("bitrate", default.bitrate)
+        elif "jpeg_quality" in value:
+            bitrate_raw = default.bitrate
+        else:
+            bitrate_raw = default.bitrate
     else:
         raise ValueError("Stream settings must be provided as a mapping")
 
@@ -279,13 +284,13 @@ def _parse_stream_settings(value: Any, *, default: StreamSettings) -> StreamSett
         raise ValueError("Stream fps must be between 1 and 60")
 
     try:
-        quality = int(float(quality_raw))
+        bitrate = int(float(bitrate_raw))
     except (TypeError, ValueError) as exc:
-        raise ValueError("Stream JPEG quality must be an integer") from exc
-    if quality < 1 or quality > 100:
-        raise ValueError("Stream JPEG quality must be between 1 and 100")
+        raise ValueError("Stream bitrate must be an integer") from exc
+    if bitrate < 50_000 or bitrate > 10_000_000:
+        raise ValueError("Stream bitrate must be between 50,000 and 10,000,000 bps")
 
-    return StreamSettings(fps=fps, jpeg_quality=quality)
+    return StreamSettings(fps=fps, bitrate=bitrate)
 
 
 def _parse_reversing_point(value: Any) -> ReversingAidPoint:

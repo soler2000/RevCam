@@ -111,7 +111,7 @@
         justify-content: center;
         padding: clamp(var(--space-lg), 4vw, var(--space-2xl));
       }
-      img#stream {
+      video#stream {
         display: block;
         width: min(100%, max(320px, calc(100vh - 6rem)));
         max-width: min(1100px, max(360px, calc(100vh - 3rem)));
@@ -454,7 +454,7 @@
         }
       }
       @media (max-width: 960px) {
-        img#stream {
+        video#stream {
           border-radius: calc(var(--radius-lg) - 0.25rem);
           box-shadow: 0 28px 70px rgba(0, 0, 0, 0.55);
         }
@@ -589,7 +589,7 @@
       </div>
     </header>
     <main>
-      <img id="stream" alt="Camera feed" />
+      <video id="stream" autoplay playsinline muted></video>
     </main>
     <div
       class="illumination-status-box"
@@ -664,6 +664,8 @@
       let reconnectTimer = null;
       let batteryTimer = null;
       let shouldStream = false;
+      let peerConnection = null;
+      let inboundStream = null;
       let illuminationState = null;
       let illuminationPreviousPattern = null;
       let illuminationBusy = false;
@@ -1041,7 +1043,7 @@
         }
       }
 
-      function scheduleReconnect(delay = 1000) {
+      function scheduleReconnect(delay = 2000) {
         if (!shouldStream) {
           return;
         }
@@ -1049,24 +1051,120 @@
         reconnectTimer = setTimeout(() => startStream("Reconnecting…"), delay);
       }
 
-      function startStream(message = "Connecting to camera…") {
+      function resetStreamElement() {
+        if (peerConnection) {
+          try {
+            peerConnection.close();
+          } catch (err) {
+            console.error("Failed to close peer connection", err);
+          }
+        }
+        peerConnection = null;
+        inboundStream = null;
+        if (streamElement) {
+          try {
+            streamElement.pause();
+          } catch (err) {
+            console.error("Pause stream error", err);
+          }
+          streamElement.srcObject = null;
+          streamElement.removeAttribute("src");
+        }
+      }
+
+      async function startStream(message = "Connecting to camera…") {
         shouldStream = true;
         clearReconnectTimer();
-        toggleButton.textContent = "Pause stream";
-        toggleButton.setAttribute("aria-pressed", "true");
+        if (toggleButton) {
+          toggleButton.textContent = "Pause stream";
+          toggleButton.setAttribute("aria-pressed", "true");
+        }
         setStatus(message, "busy");
-        const cacheBuster = Date.now();
-        streamElement.src = `/stream/mjpeg?cb=${cacheBuster}`;
+        resetStreamElement();
+
+        if (!streamElement) {
+          return;
+        }
+
+        try {
+          const pc = new RTCPeerConnection({ iceServers: [] });
+          peerConnection = pc;
+          inboundStream = new MediaStream();
+
+          pc.ontrack = (event) => {
+            const [stream] = event.streams;
+            const mediaStream = stream || inboundStream;
+            if (!stream && event.track) {
+              inboundStream.addTrack(event.track);
+            }
+            if (streamElement.srcObject !== mediaStream) {
+              streamElement.srcObject = mediaStream;
+            }
+            streamElement
+              .play()
+              .then(() => setStatus("Streaming", "live"))
+              .catch((err) => console.error("Video play error", err));
+          };
+
+          pc.onconnectionstatechange = () => {
+            if (!shouldStream || peerConnection !== pc) {
+              return;
+            }
+            const state = pc.connectionState;
+            if (state === "failed" || state === "disconnected") {
+              setStatus("Connection lost – retrying…", "error");
+              scheduleReconnect(3000);
+            } else if (state === "connected") {
+              setStatus("Streaming", "live");
+            }
+          };
+
+          pc.addTransceiver("video", { direction: "recvonly" });
+
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          const response = await fetch("/api/stream/webrtc/offer", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ sdp: offer.sdp, type: offer.type }),
+          });
+          if (!response.ok) {
+            let detail = `Negotiation failed (${response.status})`;
+            try {
+              const problem = await response.json();
+              if (problem && typeof problem.detail === "string" && problem.detail.trim()) {
+                detail = problem.detail.trim();
+              }
+            } catch (err) {
+              console.error(err);
+            }
+            throw new Error(detail);
+          }
+          const answer = await response.json();
+          await pc.setRemoteDescription(answer);
+        } catch (error) {
+          console.error("WebRTC negotiation failed", error);
+          const messageText =
+            error instanceof Error && error.message
+              ? error.message
+              : "Stream unavailable";
+          setStatus(messageText, "error");
+          resetStreamElement();
+          if (shouldStream) {
+            scheduleReconnect(4000);
+          }
+        }
       }
 
       function stopStream(message = "Streaming paused") {
         shouldStream = false;
         clearReconnectTimer();
-        streamElement.src = "";
-        streamElement.removeAttribute("src");
+        resetStreamElement();
         setStatus(message, "paused");
-        toggleButton.textContent = "Start stream";
-        toggleButton.setAttribute("aria-pressed", "false");
+        if (toggleButton) {
+          toggleButton.textContent = "Start stream";
+          toggleButton.setAttribute("aria-pressed", "false");
+        }
       }
 
       async function saveSnapshot() {
@@ -1196,19 +1294,6 @@
         });
       }
 
-      streamElement.addEventListener("load", () => {
-        if (!shouldStream) {
-          return;
-        }
-        setStatus("Streaming", "live");
-      });
-
-      streamElement.addEventListener("error", (event) => {
-        console.error("Stream error", event);
-        setStatus("Connection lost – retrying…", "error");
-        scheduleReconnect();
-      });
-
       reconnectButton.addEventListener("click", () => {
         if (!shouldStream) {
           startStream();
@@ -1236,6 +1321,7 @@
         if (batteryTimer) {
           clearInterval(batteryTimer);
         }
+        resetStreamElement();
       });
 
       document.addEventListener("visibilitychange", () => {

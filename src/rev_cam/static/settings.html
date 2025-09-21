@@ -1176,11 +1176,11 @@
               <a
                 id="open-stream"
                 class="button-link disabled"
-                href="/stream/mjpeg"
+                href="/"
                 target="_blank"
                 rel="noopener"
                 aria-disabled="true"
-                >Open MJPEG stream</a
+                >Open live view</a
               >
               <button type="button" id="copy-stream-url" class="secondary-button" disabled>
                 Copy stream URL
@@ -1203,18 +1203,18 @@
                   />
                 </label>
                 <label>
-                  JPEG quality
+                  Target bitrate (kbps)
                   <div class="stream-quality-control">
                     <input
                       type="range"
-                      name="jpeg_quality"
-                      id="stream-quality"
-                      min="1"
-                      max="100"
-                      step="1"
-                      value="85"
+                      name="bitrate"
+                      id="stream-bitrate"
+                      min="500"
+                      max="10000"
+                      step="50"
+                      value="1500"
                     />
-                    <span class="stream-quality-display" id="stream-quality-display">85</span>
+                    <span class="stream-quality-display" id="stream-bitrate-display">1500 kbps</span>
                   </div>
                 </label>
               </div>
@@ -2073,10 +2073,10 @@
       const streamFpsInput = streamSettingsForm
         ? streamSettingsForm.querySelector('input[name="fps"]')
         : null;
-      const streamQualityInput = streamSettingsForm
-        ? streamSettingsForm.querySelector('input[name="jpeg_quality"]')
+      const streamBitrateInput = streamSettingsForm
+        ? streamSettingsForm.querySelector('input[name="bitrate"]')
         : null;
-      const streamQualityDisplay = document.getElementById("stream-quality-display");
+      const streamBitrateDisplay = document.getElementById("stream-bitrate-display");
       const streamSettingsStatus = document.getElementById("stream-settings-status");
       let streamSettingsStatusTimer = null;
       const wifiSummary = document.getElementById("wifi-summary");
@@ -2326,20 +2326,20 @@
         }
       }
 
-      function setStreamQualityDisplay(value) {
-        if (!streamQualityDisplay) {
+      function setStreamBitrateDisplay(value) {
+        if (!streamBitrateDisplay) {
           return;
         }
         if (typeof value === "number" && Number.isFinite(value)) {
-          streamQualityDisplay.textContent = String(Math.round(value));
+          streamBitrateDisplay.textContent = `${Math.round(value)} kbps`;
         } else if (
-          streamQualityInput &&
-          typeof streamQualityInput.value === "string" &&
-          streamQualityInput.value
+          streamBitrateInput &&
+          typeof streamBitrateInput.value === "string" &&
+          streamBitrateInput.value
         ) {
-          streamQualityDisplay.textContent = streamQualityInput.value;
+          streamBitrateDisplay.textContent = `${streamBitrateInput.value} kbps`;
         } else {
-          streamQualityDisplay.textContent = "—";
+          streamBitrateDisplay.textContent = "—";
         }
       }
 
@@ -2349,9 +2349,9 @@
         }
         const forceUpdate = options.force === true;
         const fpsValue = settings && typeof settings.fps === "number" ? settings.fps : null;
-        const qualityValue =
-          settings && typeof settings.jpeg_quality === "number"
-            ? settings.jpeg_quality
+        const bitrateValue =
+          settings && typeof settings.bitrate === "number"
+            ? settings.bitrate
             : null;
         if (streamFpsInput) {
           if (!forceUpdate && streamFpsInput.dataset.userEdited === "true") {
@@ -2364,22 +2364,23 @@
             delete streamFpsInput.dataset.userEdited;
           }
         }
-        if (streamQualityInput) {
-          if (!forceUpdate && streamQualityInput.dataset.userEdited === "true") {
-            setStreamQualityDisplay(null);
-          } else if (qualityValue !== null && Number.isFinite(qualityValue)) {
-            const rounded = Math.min(100, Math.max(1, Math.round(qualityValue)));
-            streamQualityInput.value = String(rounded);
-            delete streamQualityInput.dataset.userEdited;
-            setStreamQualityDisplay(rounded);
+        if (streamBitrateInput) {
+          if (!forceUpdate && streamBitrateInput.dataset.userEdited === "true") {
+            setStreamBitrateDisplay(null);
+          } else if (bitrateValue !== null && Number.isFinite(bitrateValue)) {
+            const kbps = Math.round(bitrateValue / 1000);
+            const rounded = Math.min(10000, Math.max(500, kbps));
+            streamBitrateInput.value = String(rounded);
+            delete streamBitrateInput.dataset.userEdited;
+            setStreamBitrateDisplay(rounded);
           } else {
-            delete streamQualityInput.dataset.userEdited;
-            setStreamQualityDisplay(null);
+            delete streamBitrateInput.dataset.userEdited;
+            setStreamBitrateDisplay(null);
           }
         }
       }
 
-      setStreamQualityDisplay(null);
+      setStreamBitrateDisplay(null);
 
       function formatPercentageValue(value) {
         if (typeof value !== "number" || !Number.isFinite(value)) {
@@ -2391,6 +2392,19 @@
           text = text.slice(0, -2);
         }
         return text;
+      }
+
+      function formatBitrate(bps) {
+        if (typeof bps !== "number" || !Number.isFinite(bps)) {
+          return null;
+        }
+        const kbps = bps / 1000;
+        if (kbps >= 1000) {
+          const mbps = Math.round((kbps / 1000) * 10) / 10;
+          const formatted = Number.isInteger(mbps) ? mbps.toFixed(0) : mbps.toFixed(1);
+          return `${formatted} Mbps`;
+        }
+        return `${Math.round(kbps)} kbps`;
       }
 
       function normalisedToPercent(value) {
@@ -4739,15 +4753,16 @@
               configuredSettings && typeof configuredSettings.fps === "number"
                 ? Math.round(configuredSettings.fps)
                 : null;
-            const configuredQuality =
-              configuredSettings && typeof configuredSettings.jpeg_quality === "number"
-                ? Math.round(configuredSettings.jpeg_quality)
+            const configuredBitrate =
+              configuredSettings && typeof configuredSettings.bitrate === "number"
+                ? configuredSettings.bitrate
                 : null;
             if (configuredFps !== null && Number.isFinite(configuredFps)) {
               configuredParts.push(`${configuredFps} fps`);
             }
-            if (configuredQuality !== null && Number.isFinite(configuredQuality)) {
-              configuredParts.push(`quality ${configuredQuality}`);
+            const configuredBitrateText = formatBitrate(configuredBitrate);
+            if (configuredBitrateText) {
+              configuredParts.push(`bitrate ${configuredBitrateText}`);
             }
             const configSummary =
               configuredParts.length > 0
@@ -4763,7 +4778,7 @@
           if (openStreamLink) {
             openStreamLink.classList.add("disabled");
             openStreamLink.setAttribute("aria-disabled", "true");
-            openStreamLink.href = "/stream/mjpeg";
+            openStreamLink.href = "/";
           }
           if (copyStreamButton) {
             copyStreamButton.disabled = true;
@@ -4774,26 +4789,24 @@
           return;
         }
 
-        const endpoint = typeof stream.endpoint === "string" && stream.endpoint
-          ? stream.endpoint
-          : "/stream/mjpeg";
+        const endpoint = "/";
         const absoluteUrl = new URL(endpoint, window.location.origin).toString();
-        const streamType = stream.content_type ? String(stream.content_type) : "MJPEG";
+        const streamType = "WebRTC";
         const activeFps =
           activeSettings && typeof activeSettings.fps === "number"
             ? activeSettings.fps
             : null;
-        const activeQuality =
-          activeSettings && typeof activeSettings.jpeg_quality === "number"
-            ? activeSettings.jpeg_quality
+        const activeBitrate =
+          activeSettings && typeof activeSettings.bitrate === "number"
+            ? activeSettings.bitrate
             : null;
         const configuredFps =
           configuredSettings && typeof configuredSettings.fps === "number"
             ? configuredSettings.fps
             : null;
-        const configuredQuality =
-          configuredSettings && typeof configuredSettings.jpeg_quality === "number"
-            ? configuredSettings.jpeg_quality
+        const configuredBitrate =
+          configuredSettings && typeof configuredSettings.bitrate === "number"
+            ? configuredSettings.bitrate
             : null;
         const fpsDisplay =
           activeFps !== null && Number.isFinite(activeFps)
@@ -4801,11 +4814,11 @@
             : configuredFps !== null && Number.isFinite(configuredFps)
             ? Math.round(configuredFps)
             : null;
-        const qualityDisplay =
-          activeQuality !== null && Number.isFinite(activeQuality)
-            ? Math.round(activeQuality)
-            : configuredQuality !== null && Number.isFinite(configuredQuality)
-            ? Math.round(configuredQuality)
+        const bitrateDisplay =
+          activeBitrate !== null && Number.isFinite(activeBitrate)
+            ? formatBitrate(activeBitrate)
+            : configuredBitrate !== null && Number.isFinite(configuredBitrate)
+            ? formatBitrate(configuredBitrate)
             : null;
         if (streamSummary) {
           if (stream.error) {
@@ -4815,8 +4828,8 @@
             if (fpsDisplay !== null) {
               detailParts.push(`${fpsDisplay} fps`);
             }
-            if (qualityDisplay !== null) {
-              detailParts.push(`quality ${qualityDisplay}`);
+            if (bitrateDisplay) {
+              detailParts.push(`bitrate ${bitrateDisplay}`);
             }
             const detailText = detailParts.length ? ` – ${detailParts.join(" · ")}` : "";
             streamSummary.textContent = `Live stream ready (${streamType})${detailText}`;
@@ -5005,14 +5018,15 @@
         });
       }
 
-      if (streamQualityInput) {
-        const handleQualityChange = () => {
-          streamQualityInput.dataset.userEdited = "true";
-          setStreamQualityDisplay(Number.parseInt(streamQualityInput.value, 10));
+      if (streamBitrateInput) {
+        const handleBitrateChange = () => {
+          streamBitrateInput.dataset.userEdited = "true";
+          const parsed = Number.parseInt(streamBitrateInput.value, 10);
+          setStreamBitrateDisplay(parsed);
           clearStreamSettingsStatus();
         };
-        streamQualityInput.addEventListener("input", handleQualityChange);
-        streamQualityInput.addEventListener("change", handleQualityChange);
+        streamBitrateInput.addEventListener("input", handleBitrateChange);
+        streamBitrateInput.addEventListener("change", handleBitrateChange);
       }
 
       if (streamSettingsForm) {
@@ -5033,15 +5047,15 @@
             }
             payload.fps = parsedFps;
           }
-          if (streamQualityInput) {
-            const parsedQuality = Number.parseInt(streamQualityInput.value, 10);
-            if (!Number.isFinite(parsedQuality) || parsedQuality < 1 || parsedQuality > 100) {
+          if (streamBitrateInput) {
+            const parsedBitrate = Number.parseInt(streamBitrateInput.value, 10);
+            if (!Number.isFinite(parsedBitrate) || parsedBitrate < 500 || parsedBitrate > 10000) {
               if (streamSettingsStatus) {
-                streamSettingsStatus.textContent = "Quality must be between 1 and 100.";
+                streamSettingsStatus.textContent = "Bitrate must be between 500 and 10000 kbps.";
               }
               return;
             }
-            payload.jpeg_quality = parsedQuality;
+            payload.bitrate = parsedBitrate * 1000;
           }
 
           try {
@@ -5071,12 +5085,10 @@
                 data && typeof data.fps === "number" && Number.isFinite(data.fps)
                   ? data.fps
                   : payload.fps,
-              jpeg_quality:
-                data &&
-                typeof data.jpeg_quality === "number" &&
-                Number.isFinite(data.jpeg_quality)
-                  ? data.jpeg_quality
-                  : payload.jpeg_quality,
+              bitrate:
+                data && typeof data.bitrate === "number" && Number.isFinite(data.bitrate)
+                  ? data.bitrate
+                  : payload.bitrate,
             };
             updateStreamInputs(updatedSettings, { force: true });
             if (streamSettingsStatus) {

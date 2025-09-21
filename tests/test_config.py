@@ -135,16 +135,16 @@ def test_default_stream_settings(tmp_path: Path) -> None:
     settings = manager.get_stream_settings()
     assert isinstance(settings, StreamSettings)
     assert settings.fps == 20
-    assert settings.jpeg_quality == 85
+    assert settings.bitrate == 1_500_000
 
 
 def test_stream_settings_persistence(tmp_path: Path) -> None:
     config_file = tmp_path / "config.json"
     manager = ConfigManager(config_file)
-    updated = manager.set_stream_settings({"fps": 18, "jpeg_quality": 70})
+    updated = manager.set_stream_settings({"fps": 18, "bitrate": 2_000_000})
     assert isinstance(updated, StreamSettings)
     assert updated.fps == 18
-    assert updated.jpeg_quality == 70
+    assert updated.bitrate == 2_000_000
     reloaded = ConfigManager(config_file)
     assert reloaded.get_stream_settings() == updated
 
@@ -154,7 +154,7 @@ def test_stream_settings_validation(tmp_path: Path) -> None:
     with pytest.raises(ValueError):
         manager.set_stream_settings({"fps": 0})
     with pytest.raises(ValueError):
-        manager.set_stream_settings({"jpeg_quality": 120})
+        manager.set_stream_settings({"bitrate": 10_000})
 
 
 def test_default_reversing_aids(tmp_path: Path) -> None:

@@ -10,8 +10,8 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import HTMLResponse, StreamingResponse
-from pydantic import BaseModel
+from fastapi.responses import HTMLResponse
+from pydantic import BaseModel, field_validator
 
 from .battery import BatteryMonitor, BatterySupervisor, create_battery_overlay
 from .camera import CAMERA_SOURCES, BaseCamera, CameraError, create_camera, identify_camera
@@ -21,11 +21,12 @@ from .distance import DistanceCalibration, DistanceMonitor, create_distance_over
 from .led_matrix import LedRing
 from .reversing_aids import create_reversing_aids_overlay
 from .pipeline import FramePipeline
-from .streaming import MJPEGStreamer, encode_frame_to_jpeg
+from .streaming import SessionDescription, WebRTCStreamer, encode_frame_to_jpeg
 from .version import APP_VERSION
 from .wifi import WiFiError, WiFiManager
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+SNAPSHOT_JPEG_QUALITY = 85
 
 
 def _load_static(name: str) -> str:
@@ -87,7 +88,29 @@ class BatteryCapacityPayload(BaseModel):
 
 class StreamSettingsPayload(BaseModel):
     fps: int | None = None
-    jpeg_quality: int | None = None
+    bitrate: int | None = None
+
+
+class WebRTCOfferPayload(BaseModel):
+    sdp: str
+    type: str
+
+    @field_validator("sdp")
+    @classmethod
+    def _validate_sdp(cls, value: str) -> str:
+        if not value or not value.strip():
+            raise ValueError("SDP must be a non-empty string")
+        return value
+
+    @field_validator("type")
+    @classmethod
+    def _validate_type(cls, value: str) -> str:
+        if value.lower() != "offer":
+            raise ValueError("Session description type must be 'offer'")
+        return "offer"
+
+    def to_session_description(self) -> SessionDescription:
+        return SessionDescription(sdp=self.sdp, type="offer")
 
 
 class ReversingAidPointPayload(BaseModel):
@@ -186,7 +209,7 @@ def create_app(
     )
     pipeline.add_overlay(create_reversing_aids_overlay(config_manager.get_reversing_aids))
     camera: BaseCamera | None = None
-    streamer: MJPEGStreamer | None = None
+    streamer: WebRTCStreamer | None = None
     stream_error: str | None = None
     active_camera_choice: str = "unknown"
     active_resolution: Resolution = config_manager.get_resolution()
@@ -283,10 +306,7 @@ def create_app(
             logger.exception("Snapshot pipeline processing failed")
             raise HTTPException(status_code=500, detail="Failed to process snapshot") from exc
 
-        if streamer is not None:
-            quality = streamer.jpeg_quality
-        else:
-            quality = config_manager.get_stream_settings().jpeg_quality
+        quality = SNAPSHOT_JPEG_QUALITY
 
         try:
             jpeg_bytes = await run_in_threadpool(
@@ -366,14 +386,14 @@ def create_app(
         active_resolution = resolution
         stream_settings = config_manager.get_stream_settings()
         try:
-            streamer = MJPEGStreamer(
+            streamer = WebRTCStreamer(
                 camera=camera,
                 pipeline=pipeline,
                 fps=stream_settings.fps,
-                jpeg_quality=stream_settings.jpeg_quality,
+                bitrate=stream_settings.bitrate,
             )
         except RuntimeError as exc:
-            logger.error("Failed to initialise MJPEG streamer: %s", exc)
+            logger.error("Failed to initialise WebRTC streamer: %s", exc)
             stream_error = str(exc)
             streamer = None
         else:
@@ -486,7 +506,7 @@ def create_app(
         current_resolution = config_manager.get_resolution()
         stream_settings = config_manager.get_stream_settings()
         active_stream_settings = (
-            {"fps": streamer.fps, "jpeg_quality": streamer.jpeg_quality}
+            {"fps": streamer.fps, "bitrate": streamer.bitrate}
             if streamer is not None
             else None
         )
@@ -499,8 +519,8 @@ def create_app(
         ]
         stream_info = {
             "enabled": streamer is not None,
-            "endpoint": "/stream/mjpeg" if streamer else None,
-            "content_type": streamer.media_type if streamer else None,
+            "endpoint": "/api/stream/webrtc/offer" if streamer else None,
+            "content_type": "application/sdp" if streamer else None,
             "error": stream_error,
             "settings": stream_settings.to_dict(),
             "active": active_stream_settings,
@@ -534,7 +554,7 @@ def create_app(
             try:
                 streamer.apply_settings(
                     fps=settings.fps,
-                    jpeg_quality=settings.jpeg_quality,
+                    bitrate=settings.bitrate,
                 )
             except Exception as exc:  # pragma: no cover - defensive logging
                 logger.exception("Failed to apply streaming settings")
@@ -544,7 +564,7 @@ def create_app(
         if streamer is not None:
             response["active"] = {
                 "fps": streamer.fps,
-                "jpeg_quality": streamer.jpeg_quality,
+                "bitrate": streamer.bitrate,
             }
         else:
             response["active"] = None
@@ -754,14 +774,14 @@ def create_app(
         ):
             stream_settings = config_manager.get_stream_settings()
             active_stream_settings = (
-                {"fps": streamer.fps, "jpeg_quality": streamer.jpeg_quality}
+                {"fps": streamer.fps, "bitrate": streamer.bitrate}
                 if streamer is not None
                 else None
             )
             stream_info = {
                 "enabled": streamer is not None,
-                "endpoint": "/stream/mjpeg" if streamer else None,
-                "content_type": streamer.media_type if streamer else None,
+                "endpoint": "/api/stream/webrtc/offer" if streamer else None,
+                "content_type": "application/sdp" if streamer else None,
                 "error": stream_error,
                 "settings": stream_settings.to_dict(),
                 "active": active_stream_settings,
@@ -813,14 +833,14 @@ def create_app(
                 if streamer is None and camera is not None:
                     try:
                         stream_settings = config_manager.get_stream_settings()
-                        streamer = MJPEGStreamer(
+                        streamer = WebRTCStreamer(
                             camera=camera,
                             pipeline=pipeline,
                             fps=stream_settings.fps,
-                            jpeg_quality=stream_settings.jpeg_quality,
+                            bitrate=stream_settings.bitrate,
                         )
                     except RuntimeError as streamer_exc:
-                        logger.error("Failed to initialise MJPEG streamer: %s", streamer_exc)
+                        logger.error("Failed to initialise WebRTC streamer: %s", streamer_exc)
                         stream_error = str(streamer_exc)
                         streamer = None
                     else:
@@ -838,14 +858,14 @@ def create_app(
         if streamer is None:
             try:
                 stream_settings = config_manager.get_stream_settings()
-                streamer = MJPEGStreamer(
+                streamer = WebRTCStreamer(
                     camera=camera,
                     pipeline=pipeline,
                     fps=stream_settings.fps,
-                    jpeg_quality=stream_settings.jpeg_quality,
+                    bitrate=stream_settings.bitrate,
                 )
             except RuntimeError as exc:
-                logger.error("Failed to initialise MJPEG streamer: %s", exc)
+                logger.error("Failed to initialise WebRTC streamer: %s", exc)
                 stream_error = str(exc)
                 streamer = None
             else:
@@ -856,14 +876,14 @@ def create_app(
         await _set_ready_pattern()
         stream_settings = config_manager.get_stream_settings()
         active_stream_settings = (
-            {"fps": streamer.fps, "jpeg_quality": streamer.jpeg_quality}
+            {"fps": streamer.fps, "bitrate": streamer.bitrate}
             if streamer is not None
             else None
         )
         stream_info = {
             "enabled": streamer is not None,
-            "endpoint": "/stream/mjpeg" if streamer else None,
-            "content_type": streamer.media_type if streamer else None,
+            "endpoint": "/api/stream/webrtc/offer" if streamer else None,
+            "content_type": "application/sdp" if streamer else None,
             "error": stream_error,
             "settings": stream_settings.to_dict(),
             "active": active_stream_settings,
@@ -887,17 +907,21 @@ def create_app(
     async def legacy_snapshot() -> Response:
         return await _snapshot_response()
 
-    @app.get("/stream/mjpeg")
-    async def stream_mjpeg():
+    @app.post("/api/stream/webrtc/offer")
+    async def negotiate_webrtc(payload: WebRTCOfferPayload) -> dict[str, str]:
         if streamer is None:
             raise HTTPException(
                 status_code=503,
                 detail=stream_error or "Streaming service unavailable",
             )
-        response = StreamingResponse(streamer.stream(), media_type=streamer.media_type)
-        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-        response.headers["Pragma"] = "no-cache"
-        return response
+        try:
+            answer = await streamer.create_session(payload.to_session_description())
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.exception("Failed to negotiate WebRTC session")
+            raise HTTPException(status_code=500, detail="Failed to negotiate WebRTC session") from exc
+        return answer.to_dict()
 
     return app
 

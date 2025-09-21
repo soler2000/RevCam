@@ -1,13 +1,13 @@
 # RevCam
 
 RevCam is a low-latency reversing camera stack targeted at the Raspberry Pi Zero 2 W (Bookworm).
-It streams a live camera feed to iOS devices using an MJPEG pipeline and exposes a settings panel
+It streams a live camera feed to iOS devices using a WebRTC pipeline and exposes a settings panel
 for configuring image orientation and capture resolution. The processing pipeline is modular so
 that future driver-assistance overlays can be injected on the server without major changes.
 
 ## Features
 
-- Fast MJPEG video delivery with a dedicated low-latency broadcaster tuned for
+- Low-latency WebRTC video delivery with a dedicated broadcaster tuned for
   mobile Safari (iPhone/iPad), plus pause/resume controls and automatic
   reconnect behaviour.
 - Camera orientation controls (rotation and horizontal/vertical flips) and preset resolution
@@ -31,7 +31,7 @@ src/
     camera.py             # Camera source abstractions
     config.py             # Orientation persistence and validation
     pipeline.py           # Frame processing pipeline (orientation + overlays)
-    streaming.py          # MJPEG streaming helpers
+    streaming.py          # WebRTC streaming helpers
   rev_cam/static/
     index.html            # Viewer client
     settings.html         # Settings UI
@@ -129,7 +129,7 @@ expecting the ring to light up.
 ### Saving snapshots
 
 The live view footer includes a **Save snapshot** button that fetches a still
-image without interrupting the MJPEG stream. RevCam exposes the same capture
+image without interrupting the WebRTC stream. RevCam exposes the same capture
 functionality via two HTTP endpoints:
 
 - `GET /api/camera/snapshot` returns a JPEG with headers suitable for API
@@ -398,7 +398,7 @@ Run the server (and automatically elevate for NeoPixel access) with
 
 Then open `http://<pi-address>:8000` on the iOS device to view the stream. Access the
 settings panel at `/settings` to adjust the camera orientation. Changes are persisted
-and applied immediately to the outgoing MJPEG stream.
+and applied immediately to the outgoing WebRTC stream.
 
 ## Testing
 

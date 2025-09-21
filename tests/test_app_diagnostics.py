@@ -44,35 +44,29 @@ def _apply_app_stubs(monkeypatch: pytest.MonkeyPatch) -> None:
             camera,
             pipeline,
             fps: int = 20,
-            jpeg_quality: int = 85,
-            boundary: str = "frame",
+            bitrate: int = 1_500_000,
         ) -> None:
             self.camera = camera
             self.pipeline = pipeline
             self.fps = fps
-            self.jpeg_quality = jpeg_quality
-            self.boundary = boundary
-
-        @property
-        def media_type(self) -> str:
-            return f"multipart/x-mixed-replace; boundary={self.boundary}"
-
-        async def stream(self):  # pragma: no cover - not exercised
-            yield b""
+            self.bitrate = bitrate
 
         async def aclose(self) -> None:  # pragma: no cover - not exercised
             return None
+
+        async def create_session(self, offer):  # pragma: no cover - not exercised
+            return {"sdp": "v=0\n", "type": "answer"}
 
         def apply_settings(
             self,
             *,
             fps: int | None = None,
-            jpeg_quality: int | None = None,
+            bitrate: int | None = None,
         ) -> None:
             if fps is not None:
                 self.fps = fps
-            if jpeg_quality is not None:
-                self.jpeg_quality = jpeg_quality
+            if bitrate is not None:
+                self.bitrate = bitrate
 
     class _StubWiFiManager:
         def close(self) -> None:  # pragma: no cover - used indirectly
@@ -88,7 +82,7 @@ def _apply_app_stubs(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(app_module, "DistanceMonitor", lambda *args, **kwargs: _StubDistanceMonitor())
     monkeypatch.setattr(app_module, "create_camera", _create_camera)
     monkeypatch.setattr(app_module, "identify_camera", lambda camera: "stub")
-    monkeypatch.setattr(app_module, "MJPEGStreamer", _StubStreamer)
+    monkeypatch.setattr(app_module, "WebRTCStreamer", _StubStreamer)
     monkeypatch.setattr(app_module, "WiFiManager", lambda *args, **kwargs: _StubWiFiManager())
 
 

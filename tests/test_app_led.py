@@ -15,7 +15,7 @@ from tests.test_app_camera import _RecorderStreamer, _apply_common_stubs
 def led_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     _apply_common_stubs(monkeypatch)
     _RecorderStreamer.instances.clear()
-    monkeypatch.setattr("rev_cam.app.MJPEGStreamer", _RecorderStreamer)
+    monkeypatch.setattr("rev_cam.app.WebRTCStreamer", _RecorderStreamer)
     config_path = tmp_path / "config.json"
     app = create_app(config_path)
     with TestClient(app) as client:
