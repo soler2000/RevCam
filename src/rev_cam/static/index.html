@@ -7,10 +7,10 @@
     <style>
       :root {
         color-scheme: dark;
-        --font-family: "Inter", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont,
-          sans-serif;
-        --line-height: 1.55;
-        --transition-base: 0.25s ease;
+        --font-family: "Inter", "Manrope", "Segoe UI", system-ui, -apple-system,
+          BlinkMacSystemFont, sans-serif;
+        --line-height: 1.65;
+        --transition: 200ms ease;
         --surface-0: rgba(14, 16, 22, 0.8);
         --surface-1: rgba(26, 28, 36, 0.75);
         --surface-muted: rgba(255, 255, 255, 0.08);
@@ -119,7 +119,7 @@
         border-radius: var(--radius-lg);
         border: 1px solid var(--border-subtle);
         box-shadow: var(--shadow-lg);
-        transition: box-shadow var(--transition-base);
+        transition: box-shadow var(--transition);
       }
       button {
         background: linear-gradient(135deg, var(--accent), var(--accent-hover));
@@ -130,18 +130,22 @@
         font-size: 1rem;
         font-weight: 600;
         cursor: pointer;
-        transition: background var(--transition-base), box-shadow var(--transition-base),
-          transform var(--transition-base);
+        transition: background var(--transition), box-shadow var(--transition),
+          transform var(--transition);
       }
-      button:not(:disabled):hover,
-      button:not(:disabled):focus-visible {
+      button:not(:disabled):hover {
         background: linear-gradient(135deg, var(--accent-hover), var(--accent-active));
         box-shadow: 0 12px 26px var(--accent-shadow);
         transform: translateY(-1px);
       }
+      button:not(:disabled):focus-visible {
+        background: linear-gradient(135deg, var(--accent-hover), var(--accent-active));
+        box-shadow: 0 12px 26px var(--accent-shadow),
+          0 0 0 1px var(--accent-active), 0 0 0 4px var(--accent-soft);
+        transform: translateY(-1px);
+      }
       button:focus-visible {
-        outline: 2px solid var(--text-primary);
-        outline-offset: 3px;
+        outline: none;
       }
       button:disabled {
         opacity: 0.5;
@@ -160,7 +164,7 @@
         font-weight: 600;
         padding: var(--space-xs) var(--space-sm);
         border-radius: var(--radius-pill);
-        transition: color var(--transition-base), background var(--transition-base);
+        transition: color var(--transition), background var(--transition);
       }
       a.settings-link:hover,
       a.settings-link:focus-visible {
@@ -168,13 +172,14 @@
         background: var(--accent-soft);
       }
       a.settings-link:focus-visible {
-        outline: 2px solid var(--accent-ring);
-        outline-offset: 3px;
+        outline: none;
+        box-shadow: 0 0 0 1px var(--accent-active), 0 0 0 4px var(--accent-soft);
       }
       .status-pill {
         color: var(--text-muted);
         gap: var(--space-md);
         font-weight: 600;
+        transition: color var(--transition), box-shadow var(--transition);
       }
       .status-icon {
         width: 1.6rem;
@@ -183,7 +188,15 @@
       }
       .status-icon .icon {
         opacity: 0;
-        transition: opacity var(--transition-base);
+        transition: opacity var(--transition);
+      }
+      .status-pill.is-busy .icon-busy circle:first-of-type {
+        animation: status-busy-track 1.4s linear infinite;
+        transform-origin: center;
+      }
+      .status-pill.is-busy .icon-busy circle:last-of-type {
+        animation: status-busy-pulse 1.4s ease-in-out infinite;
+        transform-origin: center;
       }
       .status-pill.is-live .icon-live,
       .status-pill.is-paused .icon-paused,
@@ -217,6 +230,7 @@
         font-size: 0.95rem;
         font-weight: 600;
         white-space: nowrap;
+        transition: color var(--transition), opacity var(--transition);
       }
       #status-subtext {
         display: inline-flex;
@@ -227,9 +241,14 @@
         letter-spacing: 0.02em;
         color: var(--text-muted);
         white-space: nowrap;
+        transition: color var(--transition), opacity var(--transition);
       }
       #status-subtext:empty {
         display: none;
+      }
+      #status,
+      #status-subtext:not(:empty) {
+        animation: status-reveal var(--transition) ease;
       }
       #status-subtext::before {
         content: "⚡";
@@ -277,7 +296,7 @@
       .battery-bolt {
         fill: currentColor;
         opacity: 0;
-        transition: opacity var(--transition-base);
+        transition: opacity var(--transition);
       }
       .battery-pill.charging .battery-bolt {
         opacity: 1;
@@ -297,6 +316,37 @@
         font-size: 0.72rem;
         color: var(--text-muted);
         white-space: nowrap;
+      }
+      @keyframes status-busy-track {
+        0% {
+          stroke-dashoffset: 8;
+          transform: rotate(0deg);
+        }
+        100% {
+          stroke-dashoffset: -24;
+          transform: rotate(360deg);
+        }
+      }
+      @keyframes status-busy-pulse {
+        0%,
+        100% {
+          opacity: 0.4;
+          transform: scale(0.9);
+        }
+        50% {
+          opacity: 1;
+          transform: scale(1);
+        }
+      }
+      @keyframes status-reveal {
+        from {
+          opacity: 0;
+          transform: translateY(0.3rem);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
       }
       @media (max-width: 960px) {
         img#stream {
