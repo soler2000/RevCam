@@ -34,6 +34,7 @@ def test_led_status_endpoint_reports_state(led_client: TestClient) -> None:
     assert payload["active_pattern"] in patterns
     assert payload["error"] is False
     assert isinstance(payload["available"], bool)
+    assert "message" in payload
 
 
 def test_led_update_pattern_and_error(led_client: TestClient) -> None:
@@ -42,12 +43,14 @@ def test_led_update_pattern_and_error(led_client: TestClient) -> None:
     payload = response.json()
     assert payload["pattern"] == "off"
     assert payload["error"] is False
+    assert "message" in payload
 
     toggled = led_client.post("/api/led", json={"error": True})
     assert toggled.status_code == 200
     updated = toggled.json()
     assert updated["error"] is True
     assert updated["pattern"] in updated["patterns"]
+    assert "message" in updated
 
 
 def test_led_update_requires_changes(led_client: TestClient) -> None:

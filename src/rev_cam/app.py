@@ -206,6 +206,7 @@ def create_app(
             "active_pattern": status.active_pattern,
             "error": status.error,
             "available": status.available,
+            "message": status.message,
         }
 
     def _record_camera_error(source: str, message: str | None) -> None:

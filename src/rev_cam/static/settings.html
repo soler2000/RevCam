@@ -2125,6 +2125,7 @@
         const active = typeof state.active_pattern === "string" ? state.active_pattern : "";
         const errorActive = state.error === true;
         const available = state.available !== false;
+        const notice = typeof state.message === "string" ? state.message : "";
         const pieces = [];
         if (pattern) {
           pieces.push(`Base pattern: ${formatLedPatternName(pattern)}`);
@@ -2139,6 +2140,9 @@
         );
         if (!available) {
           pieces.push("LED driver unavailable");
+          if (notice) {
+            pieces.push(notice);
+          }
         }
         if (!patterns.length) {
           pieces.push("No LED patterns available");

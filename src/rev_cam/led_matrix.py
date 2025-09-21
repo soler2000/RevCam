@@ -26,6 +26,7 @@ class LedRingStatus:
     active_pattern: str
     error: bool
     available: bool
+    message: str | None = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -93,15 +94,34 @@ class _NeoPixelDriver:
         except Exception as exc:  # pragma: no cover - defensive guard
             raise RuntimeError(f"Failed to initialise NeoPixel ring: {exc}") from exc
 
-        # Ensure the hardware starts dark.
-        self.apply(((0, 0, 0),) * pixel_count)
+        try:
+            # Ensure the hardware starts dark.
+            self.apply(((0, 0, 0),) * pixel_count)
+        except RuntimeError:
+            raise
+        except Exception as exc:  # pragma: no cover - defensive guard
+            raise RuntimeError(f"Failed to initialise NeoPixel ring: {exc}") from exc
 
     def apply(self, colors: Sequence[Color]) -> None:  # pragma: no cover - hardware path
         try:
             for index in range(self.pixel_count):
                 self._pixels[index] = colors[index]
             self._pixels.show()
-        except Exception:  # pragma: no cover - defensive logging
+        except Exception as exc:  # pragma: no cover - defensive logging
+            message = str(exc)
+            lower_message = message.lower()
+            if (
+                isinstance(exc, (PermissionError, OSError))
+                or "sudo" in lower_message
+                or "permission" in lower_message
+            ):
+                self._logger.warning(
+                    "NeoPixel driver unavailable due to insufficient privileges: %s",
+                    message,
+                )
+                raise RuntimeError(
+                    "NeoPixel driver requires root privileges (sudo) to access /dev/mem."
+                ) from None
             self._logger.exception("Failed to update LED ring state")
             raise
 
@@ -139,6 +159,7 @@ class LedRing:
         self._error_active = False
         self._active_pattern = "off"
         self._pattern_task: asyncio.Task[None] | None = None
+        self._driver_message: str | None = None
 
         if driver is not None:
             self._driver: _RingDriver | None = driver
@@ -147,6 +168,7 @@ class LedRing:
                 self._pixel_count = driver_pixels
             else:  # pragma: no cover - defensive fallback
                 self._pixel_count = pixel_count
+            self._driver_message = None
         else:
             self._pixel_count = pixel_count
             try:
@@ -155,8 +177,11 @@ class LedRing:
                     brightness=max(0.0, min(1.0, brightness)),
                     logger=self._logger,
                 )
+                self._driver_message = None
             except RuntimeError as exc:
-                self._logger.info("LED ring disabled: %s", exc)
+                reason = str(exc)
+                self._driver_message = reason or "LED ring unavailable"
+                self._logger.info("LED ring disabled: %s", reason)
                 self._driver = None
 
         self._patterns: dict[str, Callable[[], Iterator[PatternStep]]] = {
@@ -202,12 +227,14 @@ class LedRing:
             active = self._active_pattern
             error_active = self._error_active
             available = self._driver is not None and not self._closed
+            message = self._driver_message if not available else None
         return LedRingStatus(
             patterns=patterns,
             pattern=pattern,
             active_pattern=active,
             error=error_active,
             available=available,
+            message=message,
         )
 
     async def aclose(self) -> None:
@@ -220,6 +247,7 @@ class LedRing:
             await self._cancel_pattern_locked()
             driver = self._driver
             self._driver = None
+            self._driver_message = None
         if driver is not None:
             try:
                 driver.apply(((0, 0, 0),) * getattr(driver, "pixel_count", self._pixel_count))
@@ -303,8 +331,10 @@ class LedRing:
                 colors = tuple(colors[: self._pixel_count])
         try:
             self._driver.apply(colors)
-        except Exception:  # pragma: no cover - defensive logging
-            self._logger.debug("LED ring driver apply failed; disabling ring", exc_info=True)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            reason = str(exc) or "LED ring driver failure"
+            self._driver_message = reason
+            self._logger.info("LED ring disabled: %s", reason)
             try:
                 self._driver.close()
             except Exception:  # pragma: no cover - defensive logging

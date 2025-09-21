@@ -18,6 +18,20 @@ class _RecordingDriver:
         self.closed = True
 
 
+class _PermissionDriver:
+    def __init__(self, pixel_count: int = 4) -> None:
+        self.pixel_count = pixel_count
+        self.closed = False
+
+    def apply(self, colors):
+        raise RuntimeError(
+            "NeoPixel driver requires root privileges (sudo) to access /dev/mem."
+        )
+
+    def close(self) -> None:
+        self.closed = True
+
+
 def test_led_ring_patterns_cycle() -> None:
     async def runner() -> None:
         driver = _RecordingDriver(pixel_count=4)
@@ -52,6 +66,25 @@ def test_led_ring_invalid_pattern() -> None:
         ring = LedRing(pixel_count=3, driver=_RecordingDriver(pixel_count=3))
         with pytest.raises(ValueError):
             await ring.set_pattern("unknown")
+        await ring.aclose()
+
+    asyncio.run(runner())
+
+
+def test_led_ring_reports_driver_permission_failure() -> None:
+    async def runner() -> None:
+        driver = _PermissionDriver(pixel_count=4)
+        ring = LedRing(pixel_count=4, driver=driver)
+
+        await ring.set_pattern("boot")
+        status = await ring.get_status()
+        assert status.available is False
+        assert (
+            status.message
+            == "NeoPixel driver requires root privileges (sudo) to access /dev/mem."
+        )
+        assert driver.closed is True
+
         await ring.aclose()
 
     asyncio.run(runner())

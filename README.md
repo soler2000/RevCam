@@ -116,6 +116,12 @@ pip install --upgrade adafruit-blinka adafruit-circuitpython-neopixel
 Without these modules the LED helper falls back to a no-op driver and the ring
 remains dark.
 
+Adafruit's WS2812 driver accesses the Pi's DMA engine via ``/dev/mem`` so it
+requires root privileges. When RevCam starts without ``sudo`` (or an
+equivalent capability such as the ``pigpiod`` backend) the helper logs "LED
+driver unavailable" and disables the animations. Run Uvicorn with ``sudo`` or
+configure an alternative backend before expecting the ring to light up.
+
 ### Saving snapshots
 
 The live view footer includes a **Save snapshot** button that fetches a still
