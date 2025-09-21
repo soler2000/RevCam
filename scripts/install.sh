@@ -36,6 +36,41 @@ RECREATE=false
 VENV_FLAGS=()
 PIP_FLAGS=()
 
+python_module_present() {
+    local module="$1"
+    MODULE="$module" "$VENV_DIR/bin/python" - <<'PY'
+import importlib.util
+import os
+import sys
+
+module = os.environ["MODULE"]
+spec = importlib.util.find_spec(module)
+sys.exit(0 if spec is not None else 1)
+PY
+}
+
+pip_install_package() {
+    local package="$1"
+    local optional="${2:-false}"
+
+    set +e
+    set -x
+    "$VENV_DIR/bin/python" -m pip install "${PIP_FLAGS[@]}" --upgrade "$package"
+    local status=$?
+    set +x
+    set -e
+
+    if [[ $status -ne 0 ]]; then
+        if [[ "$optional" == true ]]; then
+            return $status
+        fi
+        echo "Failed to install required dependency: $package (exit $status)" >&2
+        exit $status
+    fi
+
+    return 0
+}
+
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --python)
@@ -208,6 +243,33 @@ then
         adafruit-blinka \
         adafruit-circuitpython-neopixel
     set +x
+fi
+
+declare -A I2C_MODULES=(
+    ["adafruit_ina219"]="adafruit-circuitpython-ina219"
+    ["adafruit_vl53l1x"]="adafruit-circuitpython-vl53l1x"
+)
+
+for module in "${!I2C_MODULES[@]}"; do
+    if python_module_present "$module"; then
+        continue
+    fi
+
+    package="${I2C_MODULES[$module]}"
+    echo "Installing I2C sensor dependency: $package"
+    pip_install_package "$package"
+done
+
+if ! python_module_present "adafruit_extended_bus"; then
+    echo "Installing optional Extended I2C helper: adafruit-circuitpython-extended-bus"
+    if ! pip_install_package "adafruit-circuitpython-extended-bus" true; then
+        if ! python_module_present "adafruit_extended_bus"; then
+            cat >&2 <<'WARN'
+Warning: unable to install adafruit-circuitpython-extended-bus automatically.
+Extended I2C bus overrides (REVCAM_I2C_BUS) will remain unavailable until the package is installed manually.
+WARN
+        fi
+    fi
 fi
 
 trap - EXIT
