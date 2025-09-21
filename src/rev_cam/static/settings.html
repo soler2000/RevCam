@@ -267,22 +267,6 @@
       fieldset.reversing-side:disabled {
         opacity: 0.6;
       }
-      .reversing-nudge-group {
-        display: flex;
-        align-items: center;
-        gap: 0.75rem;
-        flex-wrap: wrap;
-        margin-bottom: 1rem;
-      }
-      .reversing-nudge-buttons {
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 0.25rem;
-      }
-      .reversing-nudge-buttons button {
-        padding: 0.35rem 0.65rem;
-        font-size: 0.9rem;
-      }
       .reversing-point-button {
         margin-left: auto;
         border: 1px solid rgba(10, 132, 255, 0.35);
@@ -1107,8 +1091,8 @@
               Show reversing aids on the live view
             </label>
             <p class="muted" style="margin: 0;">
-              Coordinates are expressed as percentages of the frame. Adjust the nudge controls to
-              shift each side without changing individual values.
+              Coordinates are expressed as percentages of the frame. Click the preview or edit the
+              values below to fine-tune each side.
             </p>
             <div class="reversing-preview">
               <h3>Alignment preview</h3>
@@ -1150,44 +1134,7 @@
           <div class="reversing-grid">
             <fieldset class="reversing-side" data-side="left">
                 <legend>Left guide</legend>
-                <p>Adjust the driver’s-side guide segments. Use nudge buttons for quick alignment.</p>
-                <div class="reversing-nudge-group">
-                  <span class="muted">Nudge:</span>
-                  <div class="reversing-nudge-buttons">
-                    <button
-                      type="button"
-                      data-reversing-nudge="up"
-                      data-side="left"
-                      aria-label="Nudge left guide up"
-                    >
-                      ↑
-                    </button>
-                    <button
-                      type="button"
-                      data-reversing-nudge="down"
-                      data-side="left"
-                      aria-label="Nudge left guide down"
-                    >
-                      ↓
-                    </button>
-                    <button
-                      type="button"
-                      data-reversing-nudge="left"
-                      data-side="left"
-                      aria-label="Nudge left guide left"
-                    >
-                      ←
-                    </button>
-                    <button
-                      type="button"
-                      data-reversing-nudge="right"
-                      data-side="left"
-                      aria-label="Nudge left guide right"
-                    >
-                      →
-                    </button>
-                  </div>
-                </div>
+                <p>Adjust the driver’s-side guide segments. Click the preview or edit the values.</p>
                 <div class="reversing-line-point" data-side="left" data-point="far">
                   <div class="reversing-line-header">
                     <span class="reversing-colour" style="background: #66bb6a;"></span>
@@ -1209,7 +1156,7 @@
                         type="number"
                         min="0"
                         max="100"
-                        step="0.5"
+                        step="0.1"
                         inputmode="decimal"
                         data-reversing-field="far-x"
                         data-side="left"
@@ -1222,7 +1169,7 @@
                         type="number"
                         min="0"
                         max="100"
-                        step="0.5"
+                        step="0.1"
                         inputmode="decimal"
                         data-reversing-field="far-y"
                         data-side="left"
@@ -1252,7 +1199,7 @@
                         type="number"
                         min="0"
                         max="100"
-                        step="0.5"
+                        step="0.1"
                         inputmode="decimal"
                         data-reversing-field="near-x"
                         data-side="left"
@@ -1265,7 +1212,7 @@
                         type="number"
                         min="0"
                         max="100"
-                        step="0.5"
+                        step="0.1"
                         inputmode="decimal"
                         data-reversing-field="near-y"
                         data-side="left"
@@ -1281,46 +1228,7 @@
               </fieldset>
               <fieldset class="reversing-side" data-side="right">
                 <legend>Right guide</legend>
-                <p>
-                  Adjust the passenger-side guide segments. Nudge controls apply to the whole side.
-                </p>
-                <div class="reversing-nudge-group">
-                  <span class="muted">Nudge:</span>
-                  <div class="reversing-nudge-buttons">
-                    <button
-                      type="button"
-                      data-reversing-nudge="up"
-                      data-side="right"
-                      aria-label="Nudge right guide up"
-                    >
-                      ↑
-                    </button>
-                    <button
-                      type="button"
-                      data-reversing-nudge="down"
-                      data-side="right"
-                      aria-label="Nudge right guide down"
-                    >
-                      ↓
-                    </button>
-                    <button
-                      type="button"
-                      data-reversing-nudge="left"
-                      data-side="right"
-                      aria-label="Nudge right guide left"
-                    >
-                      ←
-                    </button>
-                    <button
-                      type="button"
-                      data-reversing-nudge="right"
-                      data-side="right"
-                      aria-label="Nudge right guide right"
-                    >
-                      →
-                    </button>
-                  </div>
-                </div>
+                <p>Adjust the passenger-side guide segments from the preview or the inputs.</p>
                 <div class="reversing-line-point" data-side="right" data-point="far">
                   <div class="reversing-line-header">
                     <span class="reversing-colour" style="background: #66bb6a;"></span>
@@ -1342,7 +1250,7 @@
                         type="number"
                         min="0"
                         max="100"
-                        step="0.5"
+                        step="0.1"
                         inputmode="decimal"
                         data-reversing-field="far-x"
                         data-side="right"
@@ -1355,7 +1263,7 @@
                         type="number"
                         min="0"
                         max="100"
-                        step="0.5"
+                        step="0.1"
                         inputmode="decimal"
                         data-reversing-field="far-y"
                         data-side="right"
@@ -1385,7 +1293,7 @@
                         type="number"
                         min="0"
                         max="100"
-                        step="0.5"
+                        step="0.1"
                         inputmode="decimal"
                         data-reversing-field="near-x"
                         data-side="right"
@@ -1398,7 +1306,7 @@
                         type="number"
                         min="0"
                         max="100"
-                        step="0.5"
+                        step="0.1"
                         inputmode="decimal"
                         data-reversing-field="near-y"
                         data-side="right"
@@ -1681,11 +1589,6 @@
             reversingAidsForm.querySelectorAll('button[data-reversing-pick]'),
           ).filter((element) => element instanceof HTMLButtonElement)
         : [];
-      const reversingNudgeButtons = reversingAidsForm
-        ? Array.from(
-            reversingAidsForm.querySelectorAll('button[data-reversing-nudge]'),
-          ).filter((element) => element instanceof HTMLButtonElement)
-        : [];
       const reversingPreviewStage = document.getElementById("reversing-preview-stage");
       const reversingPreviewImage = document.getElementById("reversing-preview-image");
       const reversingPreviewCanvas = document.getElementById("reversing-preview-canvas");
@@ -1694,11 +1597,15 @@
       const reversingPreviewCaptureButton = document.getElementById("reversing-preview-capture");
       const reversingPreviewUploadInput = document.getElementById("reversing-preview-upload");
       const reversingPreviewClearButton = document.getElementById("reversing-preview-clear");
+      const reversingPreviewCaptureDefaultText =
+        reversingPreviewCaptureButton && typeof reversingPreviewCaptureButton.textContent === "string"
+          ? reversingPreviewCaptureButton.textContent
+          : "Capture snapshot";
       let reversingPreviewObjectUrl = null;
       let reversingPreviewStatusTimer = null;
       let reversingPreviewLoading = false;
       let reversingPreviewActivePoint = null;
-      const REVERSING_NUDGE_STEP = 1;
+      let reversingPreviewSource = null;
       const REVERSING_SEGMENT_RATIOS = [
         { start: 0.0, end: 0.25 },
         { start: 0.375, end: 0.625 },
@@ -1996,6 +1903,7 @@
           reversingPreviewImage.src = "";
           reversingPreviewImage.hidden = true;
         }
+        reversingPreviewSource = null;
         setReversingPreviewAspect();
         setReversingPreviewPlaceholderVisible(true);
         updateReversingPreviewControlsState();
@@ -2051,6 +1959,45 @@
           throw new Error("Unable to load reference image");
         }
         return true;
+      }
+
+      async function captureReversingPreviewSnapshot(options = {}) {
+        if (reversingPreviewLoading) {
+          return false;
+        }
+        const silent = options.silent === true;
+        reversingPreviewLoading = true;
+        if (!silent && reversingPreviewCaptureButton instanceof HTMLButtonElement) {
+          reversingPreviewCaptureButton.disabled = true;
+          reversingPreviewCaptureButton.textContent = "Capturing…";
+        }
+        setReversingPreviewStatus(silent ? "Refreshing snapshot…" : "Capturing snapshot…", {
+          persistent: true,
+        });
+        try {
+          const response = await fetch("/api/camera/snapshot", { cache: "no-store" });
+          if (!response.ok) {
+            throw new Error(`Snapshot request failed: ${response.status}`);
+          }
+          const blob = await response.blob();
+          await loadReversingPreviewFromBlob(blob);
+          reversingPreviewSource = "snapshot";
+          setReversingPreviewStatus(silent ? "Snapshot refreshed." : "Snapshot captured.");
+          return true;
+        } catch (err) {
+          console.error("Reversing preview capture error", err);
+          setReversingPreviewStatus(
+            silent ? "Unable to refresh snapshot." : "Unable to capture snapshot.",
+            { persistent: true },
+          );
+          return false;
+        } finally {
+          reversingPreviewLoading = false;
+          if (!silent && reversingPreviewCaptureButton instanceof HTMLButtonElement) {
+            reversingPreviewCaptureButton.disabled = false;
+            reversingPreviewCaptureButton.textContent = reversingPreviewCaptureDefaultText;
+          }
+        }
       }
 
       function parseReversingPreviewValue(input) {
@@ -2477,32 +2424,6 @@
           `${description} point updated. Click the preview to refine or choose another point.`,
           { persistent: true },
         );
-      }
-
-      function adjustReversingSide(side, deltaX, deltaY) {
-        if (!reversingInputs.length) {
-          return;
-        }
-        for (const input of reversingInputs) {
-          if (!(input instanceof HTMLInputElement) || input.dataset.side !== side) {
-            continue;
-          }
-          const axis = input.dataset.axis;
-          const current = parseFloat(input.value);
-          if (!Number.isFinite(current)) {
-            continue;
-          }
-          if (axis === "x" && deltaX !== 0) {
-            const updated = Math.min(100, Math.max(0, current + deltaX));
-            input.value = formatPercentageValue(updated);
-            input.dataset.userEdited = "true";
-          } else if (axis === "y" && deltaY !== 0) {
-            const updated = Math.min(100, Math.max(0, current + deltaY));
-            input.value = formatPercentageValue(updated);
-            input.dataset.userEdited = "true";
-          }
-        }
-        drawReversingPreviewOverlay();
       }
 
       function formatDistance(value) {
@@ -3466,36 +3387,6 @@
         });
       }
 
-      if (reversingNudgeButtons.length) {
-        for (const button of reversingNudgeButtons) {
-          button.addEventListener("click", () => {
-            const side = button.dataset.side;
-            const direction = button.dataset.reversingNudge;
-            if (!side || !direction) {
-              return;
-            }
-            let deltaX = 0;
-            let deltaY = 0;
-            if (direction === "left") {
-              deltaX = -REVERSING_NUDGE_STEP;
-            } else if (direction === "right") {
-              deltaX = REVERSING_NUDGE_STEP;
-            } else if (direction === "up") {
-              deltaY = -REVERSING_NUDGE_STEP;
-            } else if (direction === "down") {
-              deltaY = REVERSING_NUDGE_STEP;
-            }
-            if (deltaX === 0 && deltaY === 0) {
-              return;
-            }
-            adjustReversingSide(side, deltaX, deltaY);
-            if (reversingAidsStatus) {
-              reversingAidsStatus.textContent = "";
-            }
-          });
-        }
-      }
-
       updateReversingPreviewControlsState();
 
       if (reversingPreviewClearButton) {
@@ -3515,6 +3406,7 @@
           setReversingPreviewStatus(`Loading ${file.name}…`);
           try {
             await loadReversingPreviewFromBlob(file);
+            reversingPreviewSource = "upload";
             setReversingPreviewStatus(`Loaded ${file.name}`);
           } catch (err) {
             console.error("Reversing preview upload error", err);
@@ -3527,31 +3419,8 @@
       }
 
       if (reversingPreviewCaptureButton) {
-        const captureDefaultText = reversingPreviewCaptureButton.textContent || "Capture snapshot";
-        reversingPreviewCaptureButton.addEventListener("click", async () => {
-          if (reversingPreviewLoading) {
-            return;
-          }
-          reversingPreviewLoading = true;
-          reversingPreviewCaptureButton.disabled = true;
-          reversingPreviewCaptureButton.textContent = "Capturing…";
-          setReversingPreviewStatus("Capturing snapshot…", { persistent: true });
-          try {
-            const response = await fetch("/api/camera/snapshot", { cache: "no-store" });
-            if (!response.ok) {
-              throw new Error(`Snapshot request failed: ${response.status}`);
-            }
-            const blob = await response.blob();
-            await loadReversingPreviewFromBlob(blob);
-            setReversingPreviewStatus("Snapshot captured.");
-          } catch (err) {
-            console.error("Reversing preview capture error", err);
-            setReversingPreviewStatus("Unable to capture snapshot.", { persistent: true });
-          } finally {
-            reversingPreviewLoading = false;
-            reversingPreviewCaptureButton.disabled = false;
-            reversingPreviewCaptureButton.textContent = captureDefaultText;
-          }
+        reversingPreviewCaptureButton.addEventListener("click", () => {
+          captureReversingPreviewSnapshot().catch((err) => console.error(err));
         });
       }
 
@@ -3595,6 +3464,12 @@
             }
             const data = await response.json();
             applyReversingAids(data, { forceUpdate: true });
+            setReversingPreviewActivePoint(null);
+            if (reversingPreviewSource === "snapshot") {
+              captureReversingPreviewSnapshot({ silent: true }).catch((err) =>
+                console.error("Reversing preview refresh error", err),
+              );
+            }
             reversingAidsStatus.textContent = "Reversing aids saved.";
             setTimeout(() => {
               if (
