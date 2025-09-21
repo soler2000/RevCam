@@ -7,35 +7,85 @@
     <style>
       :root {
         color-scheme: dark;
+        --font-family: "Inter", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont,
+          sans-serif;
+        --line-height: 1.55;
+        --transition-base: 0.25s ease;
+        --surface-0: rgba(14, 16, 22, 0.8);
+        --surface-1: rgba(26, 28, 36, 0.75);
+        --surface-muted: rgba(255, 255, 255, 0.08);
+        --surface-soft: rgba(255, 255, 255, 0.04);
+        --border-subtle: rgba(255, 255, 255, 0.08);
+        --border-muted: rgba(255, 255, 255, 0.12);
+        --text-primary: #f5f7fb;
+        --text-muted: rgba(245, 247, 250, 0.72);
+        --text-on-accent: #ffffff;
+        --accent: #0a84ff;
+        --accent-hover: #2f95ff;
+        --accent-active: #55adff;
+        --accent-soft: rgba(10, 132, 255, 0.16);
+        --accent-ring: rgba(10, 132, 255, 0.45);
+        --accent-shadow: rgba(10, 132, 255, 0.35);
+        --success: #4ade80;
+        --success-soft: rgba(74, 222, 128, 0.16);
+        --caution: #facc15;
+        --caution-soft: rgba(250, 204, 21, 0.18);
+        --warning: #ff9f0a;
+        --warning-soft: rgba(255, 159, 10, 0.18);
+        --danger: #ff453a;
+        --danger-soft: rgba(255, 69, 58, 0.2);
+        --info: #38bdf8;
+        --info-soft: rgba(56, 189, 248, 0.18);
+        --radius-sm: 0.5rem;
+        --radius-md: 0.75rem;
+        --radius-lg: 1rem;
+        --radius-pill: 999px;
+        --space-xs: 0.25rem;
+        --space-sm: 0.5rem;
+        --space-md: 0.75rem;
+        --space-lg: 1.25rem;
+        --space-xl: 1.75rem;
+        --space-2xl: 2.5rem;
+        --control-padding-y: 0.6rem;
+        --control-padding-x: 1.25rem;
+        --card-padding: 1.5rem;
+        --shadow-sm: 0 12px 26px rgba(0, 0, 0, 0.35);
+        --shadow-md: 0 18px 40px rgba(0, 0, 0, 0.45);
+        --shadow-lg: 0 40px 90px rgba(0, 0, 0, 0.6);
+        --shadow-top-md: 0 -18px 40px rgba(0, 0, 0, 0.45);
+        --glow-success: 0 24px 48px rgba(48, 209, 88, 0.3);
+        --glow-danger: 0 20px 44px rgba(255, 69, 58, 0.32);
+        --page-gradient: radial-gradient(120% 140% at top, #1b1e26 0%, #10131a 60%, #050609 100%);
       }
       body {
         margin: 0;
-        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-        background: radial-gradient(circle at top, #1a1a1a 0%, #0a0a0a 55%, #030303 100%);
-        color: #f5f5f5;
+        font-family: var(--font-family);
+        line-height: var(--line-height);
+        background: var(--page-gradient);
+        color: var(--text-primary);
         display: flex;
         flex-direction: column;
         min-height: 100vh;
       }
       header,
       footer {
-        padding: 0.85rem 1.2rem;
-        background: rgba(12, 12, 12, 0.6);
+        padding: calc(var(--space-sm) + 0.35rem) var(--space-xl);
+        background: var(--surface-0);
         backdrop-filter: blur(18px) saturate(125%);
         -webkit-backdrop-filter: blur(18px) saturate(125%);
         display: flex;
         align-items: center;
         justify-content: space-between;
         flex-wrap: wrap;
-        gap: 1rem;
-        box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+        gap: var(--space-md);
+        box-shadow: var(--shadow-md);
       }
       header {
-        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        border-bottom: 1px solid var(--border-subtle);
       }
       footer {
-        border-top: 1px solid rgba(255, 255, 255, 0.05);
-        box-shadow: 0 -18px 40px rgba(0, 0, 0, 0.45);
+        border-top: 1px solid var(--border-subtle);
+        box-shadow: var(--shadow-top-md);
       }
       strong.brand {
         font-size: 1.25rem;
@@ -44,12 +94,12 @@
       .pill {
         display: inline-flex;
         align-items: center;
-        gap: 0.75rem;
-        padding: 0.5rem 1rem;
-        border-radius: 999px;
-        background: rgba(255, 255, 255, 0.08);
-        border: 1px solid rgba(255, 255, 255, 0.12);
-        box-shadow: 0 18px 38px rgba(0, 0, 0, 0.35);
+        gap: var(--space-md);
+        padding: var(--space-sm) var(--space-lg);
+        border-radius: var(--radius-pill);
+        background: var(--surface-1);
+        border: 1px solid var(--border-muted);
+        box-shadow: var(--shadow-sm);
         backdrop-filter: blur(22px);
         -webkit-backdrop-filter: blur(22px);
         min-width: 0;
@@ -59,37 +109,38 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        padding: clamp(1rem, 4vw, 3rem);
+        padding: clamp(var(--space-lg), 4vw, var(--space-2xl));
       }
       img#stream {
         display: block;
         width: min(100%, max(320px, calc(100vh - 6rem)));
         max-width: min(1100px, max(360px, calc(100vh - 3rem)));
-        background: linear-gradient(160deg, rgba(5, 5, 5, 0.85), rgba(25, 25, 25, 0.7));
-        border-radius: 18px;
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        box-shadow: 0 40px 90px rgba(0, 0, 0, 0.6);
-        transition: box-shadow 0.3s ease;
+        background: linear-gradient(160deg, var(--surface-0), var(--surface-1));
+        border-radius: var(--radius-lg);
+        border: 1px solid var(--border-subtle);
+        box-shadow: var(--shadow-lg);
+        transition: box-shadow var(--transition-base);
       }
       button {
-        background: linear-gradient(135deg, #0a84ff, #256bff);
-        color: #fff;
+        background: linear-gradient(135deg, var(--accent), var(--accent-hover));
+        color: var(--text-on-accent);
         border: none;
-        padding: 0.6rem 1.25rem;
-        border-radius: 999px;
+        padding: var(--control-padding-y) var(--control-padding-x);
+        border-radius: var(--radius-pill);
         font-size: 1rem;
         font-weight: 600;
         cursor: pointer;
-        transition: background 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+        transition: background var(--transition-base), box-shadow var(--transition-base),
+          transform var(--transition-base);
       }
       button:not(:disabled):hover,
       button:not(:disabled):focus-visible {
-        background: linear-gradient(135deg, #2196ff, #4da6ff);
-        box-shadow: 0 12px 26px rgba(10, 132, 255, 0.35);
+        background: linear-gradient(135deg, var(--accent-hover), var(--accent-active));
+        box-shadow: 0 12px 26px var(--accent-shadow);
         transform: translateY(-1px);
       }
       button:focus-visible {
-        outline: 2px solid rgba(255, 255, 255, 0.85);
+        outline: 2px solid var(--text-primary);
         outline-offset: 3px;
       }
       button:disabled {
@@ -100,29 +151,29 @@
       }
       .control-group {
         display: flex;
-        gap: 0.6rem;
+        gap: var(--space-sm);
         flex-wrap: wrap;
       }
       a.settings-link {
-        color: #8ab4ff;
+        color: var(--accent);
         text-decoration: none;
         font-weight: 600;
-        padding: 0.4rem 0.6rem;
-        border-radius: 999px;
-        transition: color 0.2s ease, background 0.2s ease;
+        padding: var(--space-xs) var(--space-sm);
+        border-radius: var(--radius-pill);
+        transition: color var(--transition-base), background var(--transition-base);
       }
       a.settings-link:hover,
       a.settings-link:focus-visible {
-        color: #c7d7ff;
-        background: rgba(138, 180, 255, 0.15);
+        color: var(--accent-active);
+        background: var(--accent-soft);
       }
       a.settings-link:focus-visible {
-        outline: 2px solid rgba(138, 180, 255, 0.5);
+        outline: 2px solid var(--accent-ring);
         outline-offset: 3px;
       }
       .status-pill {
-        color: #94a3b8;
-        gap: 0.75rem;
+        color: var(--text-muted);
+        gap: var(--space-md);
         font-weight: 600;
       }
       .status-icon {
@@ -132,7 +183,7 @@
       }
       .status-icon .icon {
         opacity: 0;
-        transition: opacity 0.25s ease;
+        transition: opacity var(--transition-base);
       }
       .status-pill.is-live .icon-live,
       .status-pill.is-paused .icon-paused,
@@ -141,19 +192,19 @@
         opacity: 1;
       }
       .status-pill.is-live {
-        color: #4ade80;
+        color: var(--success);
       }
       .status-pill.is-paused {
-        color: #facc15;
+        color: var(--caution);
       }
       .status-pill.is-error {
-        color: #ff453a;
+        color: var(--danger);
       }
       .status-pill.is-busy {
-        color: #38bdf8;
+        color: var(--info);
       }
       .status-pill.is-charging {
-        box-shadow: 0 20px 44px rgba(48, 209, 88, 0.28);
+        box-shadow: var(--glow-success);
       }
       .status-copy {
         display: flex;
@@ -170,11 +221,11 @@
       #status-subtext {
         display: inline-flex;
         align-items: center;
-        gap: 0.25rem;
+        gap: var(--space-xs);
         font-size: 0.75rem;
         font-weight: 500;
         letter-spacing: 0.02em;
-        opacity: 0.75;
+        color: var(--text-muted);
         white-space: nowrap;
       }
       #status-subtext:empty {
@@ -189,18 +240,18 @@
       }
       .battery-pill {
         font-weight: 600;
-        color: #f5f5f5;
+        color: var(--text-primary);
       }
       .battery-pill.low {
-        color: #ff453a;
-        box-shadow: 0 20px 44px rgba(255, 69, 58, 0.32);
+        color: var(--danger);
+        box-shadow: var(--glow-danger);
       }
       .battery-pill.charging {
-        color: #30d158;
-        box-shadow: 0 24px 48px rgba(48, 209, 88, 0.3);
+        color: var(--success);
+        box-shadow: var(--glow-success);
       }
       .battery-pill.unavailable {
-        color: rgba(245, 245, 245, 0.45);
+        color: var(--text-muted);
         box-shadow: none;
       }
       .battery-icon {
@@ -226,7 +277,7 @@
       .battery-bolt {
         fill: currentColor;
         opacity: 0;
-        transition: opacity 0.3s ease;
+        transition: opacity var(--transition-base);
       }
       .battery-pill.charging .battery-bolt {
         opacity: 1;
@@ -244,12 +295,12 @@
       }
       #battery-details {
         font-size: 0.72rem;
-        opacity: 0.75;
+        color: var(--text-muted);
         white-space: nowrap;
       }
       @media (max-width: 960px) {
         img#stream {
-          border-radius: 16px;
+          border-radius: calc(var(--radius-lg) - 0.25rem);
           box-shadow: 0 28px 70px rgba(0, 0, 0, 0.55);
         }
       }
