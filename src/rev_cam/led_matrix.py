@@ -18,6 +18,17 @@ Color = tuple[int, int, int]
 
 
 @dataclass(slots=True, frozen=True)
+class LedRingStatus:
+    """Snapshot of the LED ring configuration exposed to the API layer."""
+
+    patterns: tuple[str, ...]
+    pattern: str
+    active_pattern: str
+    error: bool
+    available: bool
+
+
+@dataclass(slots=True, frozen=True)
 class PatternStep:
     """Single animation step for the LED ring.
 
@@ -182,6 +193,23 @@ class LedRing:
             self._error_active = active
             await self._apply_state_locked()
 
+    async def get_status(self) -> LedRingStatus:
+        """Return the currently configured state of the LED ring."""
+
+        async with self._lock:
+            patterns = tuple(self._patterns.keys())
+            pattern = self._base_pattern
+            active = self._active_pattern
+            error_active = self._error_active
+            available = self._driver is not None and not self._closed
+        return LedRingStatus(
+            patterns=patterns,
+            pattern=pattern,
+            active_pattern=active,
+            error=error_active,
+            available=available,
+        )
+
     async def aclose(self) -> None:
         """Cancel any animations and release the underlying driver."""
 
@@ -315,4 +343,4 @@ class LedRing:
             yield PatternStep(colors=(dim,) * self._pixel_count, duration=0.12)
 
 
-__all__ = ["LedRing"]
+__all__ = ["LedRing", "LedRingStatus"]

@@ -104,6 +104,11 @@ class ReversingAidsPayload(BaseModel):
     right: list[ReversingAidSegmentPayload] | None = None
 
 
+class LedSettingsPayload(BaseModel):
+    pattern: str | None = None
+    error: bool | None = None
+
+
 def create_app(
     config_path: Path | str = Path("data/config.json"),
     *,
@@ -192,6 +197,16 @@ def create_app(
 
     async def _set_ready_pattern() -> None:
         await led_ring.set_pattern("ready" if streamer is not None else "error")
+
+    async def _serialise_led_status() -> dict[str, object]:
+        status = await led_ring.get_status()
+        return {
+            "patterns": list(status.patterns),
+            "pattern": status.pattern,
+            "active_pattern": status.active_pattern,
+            "error": status.error,
+            "available": status.available,
+        }
 
     def _record_camera_error(source: str, message: str | None) -> None:
         if message:
@@ -347,6 +362,32 @@ def create_app(
     @app.get("/settings", response_class=HTMLResponse)
     async def settings() -> str:
         return _load_static("settings.html")
+
+    @app.get("/api/led")
+    async def get_led_status() -> dict[str, object]:
+        return await _serialise_led_status()
+
+    @app.post("/api/led")
+    async def update_led_status(payload: LedSettingsPayload) -> dict[str, object]:
+        updated = False
+        if payload.pattern is not None:
+            candidate = payload.pattern.strip().lower()
+            if not candidate:
+                raise HTTPException(status_code=400, detail="Pattern name must be provided")
+            try:
+                await led_ring.set_pattern(candidate)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            updated = True
+        if payload.error is not None:
+            await led_ring.set_error(bool(payload.error))
+            updated = True
+        if not updated:
+            raise HTTPException(
+                status_code=400,
+                detail="Specify a pattern or error flag to update the LED ring",
+            )
+        return await _serialise_led_status()
 
     @app.get("/api/orientation")
     async def get_orientation() -> dict[str, int | bool]:
