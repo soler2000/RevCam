@@ -1,6 +1,7 @@
 """FastAPI application wiring together the RevCam services."""
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from pathlib import Path
@@ -15,6 +16,7 @@ from .camera import CAMERA_SOURCES, BaseCamera, CameraError, create_camera, iden
 from .config import ConfigManager, Resolution, RESOLUTION_PRESETS, StreamSettings
 from .diagnostics import collect_diagnostics
 from .distance import DistanceCalibration, DistanceMonitor, create_distance_overlay
+from .led_matrix import LedRing
 from .reversing_aids import create_reversing_aids_overlay
 from .pipeline import FramePipeline
 from .streaming import MJPEGStreamer, encode_frame_to_jpeg
@@ -181,15 +183,33 @@ def create_app(
     active_resolution: Resolution = config_manager.get_resolution()
     camera_errors: dict[str, str] = {}
 
+    led_ring = LedRing(logger=logging.getLogger(f"{__name__}.led_ring"))
+
     app.state.wifi_manager = wifi_manager
     app.state.distance_monitor = distance_monitor
     app.state.battery_supervisor = battery_supervisor
+    app.state.led_ring = led_ring
+
+    async def _set_ready_pattern() -> None:
+        await led_ring.set_pattern("ready" if streamer is not None else "error")
 
     def _record_camera_error(source: str, message: str | None) -> None:
         if message:
             camera_errors[source] = message
         else:
             camera_errors.pop(source, None)
+
+        if not camera_errors:
+            has_error = False
+        else:
+            has_error = True
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            logger.debug("Unable to signal LED error state; no running loop")
+        else:
+            loop.create_task(led_ring.set_error(has_error))
 
     async def _capture_snapshot_bytes() -> bytes:
         if camera is None:
@@ -281,6 +301,7 @@ def create_app(
     @app.on_event("startup")
     async def startup() -> None:  # pragma: no cover - framework hook
         nonlocal camera, active_camera_choice, streamer, active_resolution, stream_error
+        await led_ring.set_pattern("boot")
         selection = config_manager.get_camera()
         resolution = config_manager.get_resolution()
         camera, active_camera_choice = _build_camera(
@@ -303,11 +324,13 @@ def create_app(
             streamer = None
         else:
             stream_error = None
+        await _set_ready_pattern()
         battery_supervisor.start()
 
     @app.on_event("shutdown")
     async def shutdown() -> None:  # pragma: no cover - framework hook
         nonlocal streamer
+        await led_ring.set_pattern("boot")
         if streamer is not None:
             await streamer.aclose()
         if camera:
@@ -315,6 +338,7 @@ def create_app(
         await battery_supervisor.aclose()
         if hasattr(wifi_manager, "close"):
             await run_in_threadpool(wifi_manager.close)
+        await led_ring.aclose()
 
     @app.get("/", response_class=HTMLResponse)
     async def index() -> str:
@@ -645,6 +669,7 @@ def create_app(
                 "settings": stream_settings.to_dict(),
                 "active": active_stream_settings,
             }
+            await _set_ready_pattern()
             return {
                 "selected": selection,
                 "active": active_camera_choice,
@@ -656,6 +681,7 @@ def create_app(
                 },
             }
 
+        await led_ring.set_pattern("boot")
         old_selection = current_selection
         old_resolution = current_resolution
         old_camera = camera
@@ -705,6 +731,7 @@ def create_app(
                 elif streamer is not None and camera is not None:
                     streamer.camera = camera
                     stream_error = None
+            await _set_ready_pattern()
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
         camera = new_camera
@@ -729,6 +756,7 @@ def create_app(
         else:
             streamer.camera = camera
             stream_error = None
+        await _set_ready_pattern()
         stream_settings = config_manager.get_stream_settings()
         active_stream_settings = (
             {"fps": streamer.fps, "jpeg_quality": streamer.jpeg_quality}
