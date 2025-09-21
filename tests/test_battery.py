@@ -81,20 +81,27 @@ def test_battery_monitor_smooths_successive_readings() -> None:
     second = monitor.read()
     assert second.available is True
     assert second.charging is False
-    assert second.percentage == pytest.approx(84.5, abs=0.2)
+    assert second.percentage == pytest.approx(99.0, abs=0.2)
     assert second.percentage < first.percentage
-    assert second.percentage > 35.0
-    assert second.voltage == pytest.approx(4.05, abs=0.01)
+    assert second.percentage > 60.0
+    assert second.voltage == pytest.approx(4.191, abs=0.002)
     assert second.current_ma == pytest.approx(-150.0)
 
     third = monitor.read()
     assert third.available is True
     assert third.charging is False
     assert third.percentage < second.percentage
-    assert third.percentage > 35.0
-    assert third.percentage == pytest.approx(71.4, abs=0.3)
-    assert third.voltage == pytest.approx(3.94, abs=0.02)
+    assert third.percentage > 50.0
+    assert third.percentage == pytest.approx(97.3, abs=0.3)
+    assert third.voltage == pytest.approx(4.174, abs=0.003)
     assert third.current_ma == pytest.approx(-150.0)
+
+    final = third
+    for _ in range(120):
+        final = monitor.read()
+
+    assert final.percentage == pytest.approx(38.0, abs=0.5)
+    assert final.voltage == pytest.approx(3.6, abs=0.01)
 
 
 def test_battery_monitor_surfaces_sensor_error() -> None:

@@ -90,6 +90,7 @@ class BatteryReading:
 class _SmoothingState:
     level: float | None = None
     trend: float = 0.0
+    ema: float | None = None
 
 
 class BatteryMonitor:
@@ -135,12 +136,14 @@ class BatteryMonitor:
         if smoothing_alpha is None:
             self._smoothing_alpha: float | None = None
             self._smoothing_beta: float | None = None
+            self._smoothing_gamma: float | None = None
         else:
             alpha = float(smoothing_alpha)
             if not math.isfinite(alpha) or not (0.0 < alpha <= 1.0):
                 raise ValueError("smoothing_alpha must be between 0 and 1")
             self._smoothing_alpha = alpha
             self._smoothing_beta = min(0.5, alpha * 0.5)
+            self._smoothing_gamma = min(0.5, self._smoothing_beta * 0.5)
         self._smoothing_states: dict[str, _SmoothingState] = {
             "percentage": _SmoothingState(),
             "voltage": _SmoothingState(),
@@ -244,6 +247,7 @@ class BatteryMonitor:
         for state in self._smoothing_states.values():
             state.level = None
             state.trend = 0.0
+            state.ema = None
 
     def _smooth_numeric(
         self,
@@ -256,6 +260,7 @@ class BatteryMonitor:
             state = self._smoothing_states[key]
             state.level = None
             state.trend = 0.0
+            state.ema = None
             return None
 
         alpha = self._smoothing_alpha
@@ -263,6 +268,7 @@ class BatteryMonitor:
             state = self._smoothing_states[key]
             state.level = value
             state.trend = 0.0
+            state.ema = value
             return value
 
         state = self._smoothing_states[key]
@@ -273,6 +279,7 @@ class BatteryMonitor:
         if previous_level is None or not math.isfinite(previous_level):
             state.level = value
             state.trend = 0.0
+            state.ema = value
             return value
 
         if not allow_cross_zero and (
@@ -280,6 +287,7 @@ class BatteryMonitor:
         ):
             state.level = value
             state.trend = 0.0
+            state.ema = value
             return value
 
         previous_trend = state.trend
@@ -288,7 +296,18 @@ class BatteryMonitor:
 
         state.level = level
         state.trend = trend
-        return level
+        gamma = self._smoothing_gamma
+        if gamma is None:
+            state.ema = level
+            return level
+
+        previous_ema = state.ema
+        if previous_ema is None or not math.isfinite(previous_ema):
+            ema = level
+        else:
+            ema = gamma * level + (1.0 - gamma) * previous_ema
+        state.ema = ema
+        return ema
 
     def read(self) -> BatteryReading:
         """Return the latest battery reading, handling hardware failures."""
