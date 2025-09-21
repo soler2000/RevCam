@@ -283,27 +283,37 @@
         padding: 0.35rem 0.65rem;
         font-size: 0.9rem;
       }
-      .reversing-angle-group {
-        display: flex;
-        align-items: center;
-        gap: 0.75rem;
-        flex-wrap: wrap;
-        margin-bottom: 1rem;
-      }
-      .reversing-angle-buttons {
-        display: inline-flex;
-        gap: 0.25rem;
-      }
-      .reversing-angle-buttons button {
-        padding: 0.35rem 0.65rem;
-        font-size: 0.9rem;
-      }
-      .reversing-angle-value {
+      .reversing-point-button {
+        margin-left: auto;
+        border: 1px solid rgba(10, 132, 255, 0.35);
+        border-radius: 999px;
+        background: rgba(10, 132, 255, 0.08);
+        color: #0a84ff;
+        font-size: 0.8rem;
         font-weight: 600;
-        font-variant-numeric: tabular-nums;
-        min-width: 3rem;
+        padding: 0.2rem 0.9rem;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        cursor: pointer;
+        transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
       }
-      .reversing-angle-hint {
+      .reversing-point-button:hover,
+      .reversing-point-button:focus {
+        background: rgba(10, 132, 255, 0.15);
+        color: #0a84ff;
+        border-color: rgba(10, 132, 255, 0.5);
+      }
+      .reversing-point-button[aria-pressed="true"] {
+        background: #0a84ff;
+        color: #fff;
+        border-color: #0a84ff;
+      }
+      .reversing-point-button:disabled {
+        opacity: 0.55;
+        cursor: not-allowed;
+      }
+      .reversing-point-hint {
         margin: -0.25rem 0 0.75rem;
         font-size: 0.85rem;
         opacity: 0.75;
@@ -322,6 +332,7 @@
         align-items: center;
         gap: 0.5rem;
         font-weight: 600;
+        flex-wrap: wrap;
       }
       .reversing-colour {
         width: 0.9rem;
@@ -414,6 +425,11 @@
       }
       .reversing-preview-stage canvas {
         pointer-events: none;
+      }
+      .reversing-preview-stage.is-picking,
+      .reversing-preview-stage.is-picking img,
+      .reversing-preview-stage.is-picking .reversing-preview-placeholder {
+        cursor: crosshair;
       }
       .reversing-preview-placeholder {
         position: absolute;
@@ -1084,8 +1100,7 @@
           <form id="reversing-aids-form" class="card">
             <h2>Reversing aids</h2>
             <p class="muted">
-              Configure the on-screen guides to match your vehicle width, camera position and
-              preferred viewing angle.
+              Configure the on-screen guides to match your vehicle width and camera position.
             </p>
             <label style="display: inline-flex; align-items: center; gap: 0.5rem;">
               <input type="checkbox" id="reversing-aids-enabled" />
@@ -1128,9 +1143,9 @@
                 </div>
             </div>
           </div>
-          <p class="muted reversing-angle-hint">
-            Angle controls rotate each side together so the guide segments stay parallel. Values
-            are reported in degrees from the horizontal.
+          <p class="muted reversing-point-hint">
+            Select a point below, then click the preview to position it. Active points stay
+            highlighted so you can fine-tune the guides visually.
           </p>
           <div class="reversing-grid">
             <fieldset class="reversing-side" data-side="left">
@@ -1173,40 +1188,19 @@
                     </button>
                   </div>
                 </div>
-                <div class="reversing-angle-group" data-side="left">
-                  <span class="muted">Angle:</span>
-                  <div class="reversing-angle-buttons">
-                    <button
-                      type="button"
-                      data-reversing-angle="narrow"
-                      data-side="left"
-                      aria-label="Make left guide more vertical"
-                      title="Make left guide more vertical"
-                    >
-                      –
-                    </button>
-                    <button
-                      type="button"
-                      data-reversing-angle="wide"
-                      data-side="left"
-                      aria-label="Make left guide more horizontal"
-                      title="Make left guide more horizontal"
-                    >
-                      +
-                    </button>
-                  </div>
-                  <output
-                    class="reversing-angle-value"
-                    data-reversing-angle-value="left"
-                    aria-live="polite"
-                  >
-                    —
-                  </output>
-                </div>
                 <div class="reversing-line-point" data-side="left" data-point="far">
                   <div class="reversing-line-header">
                     <span class="reversing-colour" style="background: #66bb6a;"></span>
                     <span>Far point</span>
+                    <button
+                      type="button"
+                      class="reversing-point-button"
+                      data-side="left"
+                      data-reversing-pick="far"
+                      aria-pressed="false"
+                    >
+                      Select on preview
+                    </button>
                   </div>
                   <div class="reversing-line-fields">
                     <label>
@@ -1241,6 +1235,15 @@
                   <div class="reversing-line-header">
                     <span class="reversing-colour" style="background: #ef5350;"></span>
                     <span>Near point</span>
+                    <button
+                      type="button"
+                      class="reversing-point-button"
+                      data-side="left"
+                      data-reversing-pick="near"
+                      aria-pressed="false"
+                    >
+                      Select on preview
+                    </button>
                   </div>
                   <div class="reversing-line-fields">
                     <label>
@@ -1318,40 +1321,19 @@
                     </button>
                   </div>
                 </div>
-                <div class="reversing-angle-group" data-side="right">
-                  <span class="muted">Angle:</span>
-                  <div class="reversing-angle-buttons">
-                    <button
-                      type="button"
-                      data-reversing-angle="narrow"
-                      data-side="right"
-                      aria-label="Make right guide more vertical"
-                      title="Make right guide more vertical"
-                    >
-                      –
-                    </button>
-                    <button
-                      type="button"
-                      data-reversing-angle="wide"
-                      data-side="right"
-                      aria-label="Make right guide more horizontal"
-                      title="Make right guide more horizontal"
-                    >
-                      +
-                    </button>
-                  </div>
-                  <output
-                    class="reversing-angle-value"
-                    data-reversing-angle-value="right"
-                    aria-live="polite"
-                  >
-                    —
-                  </output>
-                </div>
                 <div class="reversing-line-point" data-side="right" data-point="far">
                   <div class="reversing-line-header">
                     <span class="reversing-colour" style="background: #66bb6a;"></span>
                     <span>Far point</span>
+                    <button
+                      type="button"
+                      class="reversing-point-button"
+                      data-side="right"
+                      data-reversing-pick="far"
+                      aria-pressed="false"
+                    >
+                      Select on preview
+                    </button>
                   </div>
                   <div class="reversing-line-fields">
                     <label>
@@ -1386,6 +1368,15 @@
                   <div class="reversing-line-header">
                     <span class="reversing-colour" style="background: #ef5350;"></span>
                     <span>Near point</span>
+                    <button
+                      type="button"
+                      class="reversing-point-button"
+                      data-side="right"
+                      data-reversing-pick="near"
+                      aria-pressed="false"
+                    >
+                      Select on preview
+                    </button>
                   </div>
                   <div class="reversing-line-fields">
                     <label>
@@ -1685,24 +1676,9 @@
           });
         }
       }
-      const reversingAngleValueElements = reversingAidsForm
+      const reversingPointButtons = reversingAidsForm
         ? Array.from(
-            reversingAidsForm.querySelectorAll('[data-reversing-angle-value]'),
-          ).filter((element) => element instanceof HTMLElement)
-        : [];
-      const reversingAngleValueMap = new Map();
-      if (reversingAngleValueElements.length) {
-        for (const element of reversingAngleValueElements) {
-          const side = element.dataset.reversingAngleValue;
-          if (typeof side !== "string" || !side) {
-            continue;
-          }
-          reversingAngleValueMap.set(side, element);
-        }
-      }
-      const reversingAngleButtons = reversingAidsForm
-        ? Array.from(
-            reversingAidsForm.querySelectorAll('button[data-reversing-angle]'),
+            reversingAidsForm.querySelectorAll('button[data-reversing-pick]'),
           ).filter((element) => element instanceof HTMLButtonElement)
         : [];
       const reversingNudgeButtons = reversingAidsForm
@@ -1721,6 +1697,7 @@
       let reversingPreviewObjectUrl = null;
       let reversingPreviewStatusTimer = null;
       let reversingPreviewLoading = false;
+      let reversingPreviewActivePoint = null;
       const REVERSING_NUDGE_STEP = 1;
       const REVERSING_SEGMENT_RATIOS = [
         { start: 0.0, end: 0.25 },
@@ -1730,21 +1707,6 @@
       const REVERSING_SEGMENTS_PER_SIDE = REVERSING_SEGMENT_RATIOS.length;
       const REVERSING_SEGMENT_COLOURS = ["#66bb6a", "#ffc107", "#ef5350"];
       const REVERSING_PREVIEW_DEFAULT_RATIO = "16 / 9";
-      const REVERSING_ANGLE_STEP_DEGREES = 1.5;
-      const DEFAULT_REVERSING_LINES = {
-        left: {
-          near: { x: 0.14, y: 0.86 },
-          far: { x: 0.52, y: 0.18 },
-        },
-        right: {
-          near: { x: 0.86, y: 0.86 },
-          far: { x: 0.48, y: 0.18 },
-        },
-      };
-      const reversingSideVectors = {
-        left: null,
-        right: null,
-      };
       const diagnosticsButton = document.getElementById("diagnostics-refresh");
       const diagnosticsStatus = document.getElementById("diagnostics-status");
       const diagnosticsResults = document.getElementById("diagnostics-results");
@@ -1939,6 +1901,9 @@
       function setReversingInputsDisabled(disabled) {
         if (!reversingSideFieldsets.length) {
           return;
+        }
+        if (disabled) {
+          setReversingPreviewActivePoint(null);
         }
         for (const fieldset of reversingSideFieldsets) {
           fieldset.disabled = Boolean(disabled);
@@ -2182,6 +2147,23 @@
             context.fill();
           }
         }
+        if (reversingPreviewActivePoint) {
+          const line = readReversingLine(reversingPreviewActivePoint.side);
+          const activePoint =
+            reversingPreviewActivePoint.point === "near"
+              ? line?.near ?? null
+              : line?.far ?? null;
+          if (activePoint) {
+            const highlightX = activePoint.x * widthScale;
+            const highlightY = activePoint.y * heightScale;
+            const ringRadius = Math.max(thickness * 1.5, 6);
+            context.strokeStyle = "rgba(255, 255, 255, 0.85)";
+            context.lineWidth = Math.max(2, Math.round(thickness * 0.6));
+            context.beginPath();
+            context.arc(highlightX, highlightY, ringRadius, 0, Math.PI * 2);
+            context.stroke();
+          }
+        }
         context.restore();
       }
 
@@ -2223,7 +2205,6 @@
             updateReversingInputValue(input, value);
           }
         }
-        refreshReversingSideVectors();
       }
 
       function applyReversingAids(config, options = {}) {
@@ -2390,134 +2371,90 @@
         }));
       }
 
-      function clampVectorForSide(side, vector, nearOverride = null) {
-        const baseDx =
-          typeof vector?.dx === "number" && Number.isFinite(vector.dx) ? vector.dx : 0;
-        const baseDy =
-          typeof vector?.dy === "number" && Number.isFinite(vector.dy) ? vector.dy : 0;
-        let near = nearOverride;
-        if (!near) {
-          const line = readReversingLine(side);
-          if (line) {
-            near = line.near;
-          } else if (DEFAULT_REVERSING_LINES[side]) {
-            near = DEFAULT_REVERSING_LINES[side].near;
-          } else {
-            return { dx: 0, dy: 0 };
-          }
-        }
-        const minDx = near.x - 1;
-        const maxDx = near.x;
-        const minDy = near.y - 1;
-        const maxDy = near.y;
-        return {
-          dx: Math.min(maxDx, Math.max(minDx, baseDx)),
-          dy: Math.min(maxDy, Math.max(minDy, baseDy)),
-        };
+      function getReversingPointLabel(side, point) {
+        const sideLabel = side === "left" ? "left" : "right";
+        const pointLabel = point === "near" ? "near" : "far";
+        return `${sideLabel} ${pointLabel}`;
       }
 
-      function setReversingSideVector(side, vector, options = {}) {
+      function setReversingPreviewActivePoint(target) {
+        if (target && (typeof target.side !== "string" || typeof target.point !== "string")) {
+          target = null;
+        }
+        reversingPreviewActivePoint = target
+          ? { side: target.side, point: target.point }
+          : null;
+        if (reversingPreviewStage instanceof HTMLElement) {
+          reversingPreviewStage.classList.toggle(
+            "is-picking",
+            Boolean(reversingPreviewActivePoint),
+          );
+        }
+        if (reversingPointButtons.length) {
+          for (const button of reversingPointButtons) {
+            if (!(button instanceof HTMLButtonElement)) {
+              continue;
+            }
+            const side = button.dataset.side;
+            const point = button.dataset.reversingPick;
+            const isActive =
+              !!reversingPreviewActivePoint &&
+              reversingPreviewActivePoint.side === side &&
+              reversingPreviewActivePoint.point === point;
+            button.setAttribute("aria-pressed", isActive ? "true" : "false");
+          }
+        }
+        if (reversingPreviewActivePoint) {
+          const description = getReversingPointLabel(
+            reversingPreviewActivePoint.side,
+            reversingPreviewActivePoint.point,
+          );
+          setReversingPreviewStatus(`Click the preview to position the ${description} point.`, {
+            persistent: true,
+          });
+        } else {
+          setReversingPreviewStatus("");
+        }
+        drawReversingPreviewOverlay();
+      }
+
+      function setReversingPointFromPreview(side, point, x, y) {
+        if (!side || !point) {
+          return false;
+        }
         const inputs = getReversingLineInputs(side);
         if (!inputs) {
           return false;
         }
-        let nearX = parseReversingPreviewValue(inputs.nearX);
-        let nearY = parseReversingPreviewValue(inputs.nearY);
-        if (nearX === null || nearY === null) {
-          const fallback = DEFAULT_REVERSING_LINES[side];
-          if (!fallback) {
-            return false;
+        const clampedX = clamp01(x);
+        const clampedY = clamp01(y);
+        let changed = false;
+        const targetX = point === "near" ? inputs.nearX : inputs.farX;
+        const targetY = point === "near" ? inputs.nearY : inputs.farY;
+        if (targetX instanceof HTMLInputElement) {
+          updateReversingInputValue(targetX, clampedX, { markEdited: true });
+          handleReversingInputEdit(targetX);
+          changed = true;
+        }
+        if (targetY instanceof HTMLInputElement) {
+          updateReversingInputValue(targetY, clampedY, { markEdited: true });
+          handleReversingInputEdit(targetY);
+          changed = true;
+        }
+        if (changed) {
+          if (reversingAidsStatus) {
+            reversingAidsStatus.textContent = "";
           }
-          nearX = fallback.near.x;
-          nearY = fallback.near.y;
-          if (inputs.nearX instanceof HTMLInputElement) {
-            updateReversingInputValue(inputs.nearX, nearX, {
-              clearEdited: options.clearEdited !== false,
-              markEdited: options.markEdited === true,
-            });
-          }
-          if (inputs.nearY instanceof HTMLInputElement) {
-            updateReversingInputValue(inputs.nearY, nearY, {
-              clearEdited: options.clearEdited !== false,
-              markEdited: options.markEdited === true,
-            });
-          }
+          drawReversingPreviewOverlay();
         }
-        const clamped = clampVectorForSide(side, vector, { x: nearX, y: nearY });
-        const farX = clamp01(nearX - clamped.dx);
-        const farY = clamp01(nearY - clamped.dy);
-        if (inputs.farX instanceof HTMLInputElement) {
-          updateReversingInputValue(inputs.farX, farX, {
-            clearEdited: options.clearEdited !== false,
-            markEdited: options.markEdited === true,
-          });
-        }
-        if (inputs.farY instanceof HTMLInputElement) {
-          updateReversingInputValue(inputs.farY, farY, {
-            clearEdited: options.clearEdited !== false,
-            markEdited: options.markEdited === true,
-          });
-        }
-        reversingSideVectors[side] = {
-          dx: nearX - farX,
-          dy: nearY - farY,
-        };
-        updateReversingAngleValue(side);
-        return true;
-      }
-
-      function updateReversingSideVectorFromInputs(side) {
-        const line = readReversingLine(side);
-        if (!line) {
-          return false;
-        }
-        reversingSideVectors[side] = {
-          dx: line.near.x - line.far.x,
-          dy: line.near.y - line.far.y,
-        };
-        updateReversingAngleValue(side);
-        return true;
-      }
-
-      function ensureReversingSideVector(side) {
-        if (!reversingSideVectors[side]) {
-          if (!updateReversingSideVectorFromInputs(side)) {
-            const fallback = DEFAULT_REVERSING_LINES[side];
-            if (fallback) {
-              writeReversingLine(side, fallback, { force: true });
-              reversingSideVectors[side] = {
-                dx: fallback.near.x - fallback.far.x,
-                dy: fallback.near.y - fallback.far.y,
-              };
-            } else {
-              reversingSideVectors[side] = { dx: 0, dy: 0 };
-            }
-            updateReversingAngleValue(side);
-          }
-        }
-        return reversingSideVectors[side];
-      }
-
-      function refreshReversingSideVectors() {
-        for (const side of ["left", "right"]) {
-          if (!updateReversingSideVectorFromInputs(side)) {
-            const fallback = DEFAULT_REVERSING_LINES[side];
-            if (fallback) {
-              writeReversingLine(side, fallback, { force: true });
-              reversingSideVectors[side] = {
-                dx: fallback.near.x - fallback.far.x,
-                dy: fallback.near.y - fallback.far.y,
-              };
-            } else {
-              reversingSideVectors[side] = { dx: 0, dy: 0 };
-            }
-            updateReversingAngleValue(side);
-          }
-        }
+        return changed;
       }
 
       function handleReversingInputEdit(input) {
         if (!(input instanceof HTMLInputElement)) {
+          return;
+        }
+        if (!reversingPreviewActivePoint) {
           return;
         }
         const side = input.dataset.side;
@@ -2525,81 +2462,21 @@
         if (!side || !field) {
           return;
         }
-        if (field === "near-x" || field === "near-y" || field === "far-x" || field === "far-y") {
-          updateReversingSideVectorFromInputs(side);
-        }
-      }
-
-      function computeAngleFromVector(vector) {
-        if (
-          !vector ||
-          typeof vector.dx !== "number" ||
-          typeof vector.dy !== "number"
-        ) {
-          return null;
-        }
-        const dx = Math.abs(vector.dx);
-        const dy = Math.abs(vector.dy);
-        if (!(dx > 0) && !(dy > 0)) {
-          return null;
-        }
-        const radians = Math.atan2(dy, dx);
-        if (!Number.isFinite(radians)) {
-          return null;
-        }
-        const degrees = (radians * 180) / Math.PI;
-        return Math.max(0, Math.min(90, degrees));
-      }
-
-      function updateReversingAngleValue(side) {
-        const output = reversingAngleValueMap.get(side);
-        if (!output) {
+        if (side !== reversingPreviewActivePoint.side) {
           return;
         }
-        const angle = computeAngleFromVector(reversingSideVectors[side]);
-        if (angle === null) {
-          output.textContent = "—";
-        } else {
-          output.textContent = `${formatPercentageValue(angle)}°`;
+        const point = reversingPreviewActivePoint.point;
+        if (
+          (point === "near" && field !== "near-x" && field !== "near-y") ||
+          (point === "far" && field !== "far-x" && field !== "far-y")
+        ) {
+          return;
         }
-      }
-
-      function getAngleLimitsForSide(side) {
-        const epsilon = Math.PI / 180;
-        if (side === "left") {
-          return { min: Math.PI / 2 + epsilon, max: Math.PI - epsilon };
-        }
-        return { min: epsilon, max: Math.PI / 2 - epsilon };
-      }
-
-      function adjustReversingSideAngle(side, direction) {
-        if (typeof side !== "string" || !direction) {
-          return false;
-        }
-        const vector = ensureReversingSideVector(side);
-        if (!vector) {
-          return false;
-        }
-        const magnitude = Math.hypot(vector.dx, vector.dy);
-        if (!(magnitude > 0)) {
-          return false;
-        }
-        const delta = (REVERSING_ANGLE_STEP_DEGREES * Math.PI) / 180;
-        let angle = Math.atan2(vector.dy, vector.dx);
-        if (direction === "narrow") {
-          angle += side === "left" ? -delta : delta;
-        } else if (direction === "wide") {
-          angle += side === "left" ? delta : -delta;
-        } else {
-          return false;
-        }
-        const limits = getAngleLimitsForSide(side);
-        angle = Math.min(limits.max, Math.max(limits.min, angle));
-        const rotated = {
-          dx: Math.cos(angle) * magnitude,
-          dy: Math.sin(angle) * magnitude,
-        };
-        return setReversingSideVector(side, rotated, { markEdited: true });
+        const description = getReversingPointLabel(side, point);
+        setReversingPreviewStatus(
+          `${description} point updated. Click the preview to refine or choose another point.`,
+          { persistent: true },
+        );
       }
 
       function adjustReversingSide(side, deltaX, deltaY) {
@@ -2625,7 +2502,6 @@
             input.dataset.userEdited = "true";
           }
         }
-        updateReversingSideVectorFromInputs(side);
         drawReversingPreviewOverlay();
       }
 
@@ -3531,27 +3407,63 @@
       if (reversingAidsEnabledInput) {
         setReversingInputsDisabled(!reversingAidsEnabledInput.checked);
         reversingAidsEnabledInput.addEventListener("change", () => {
+          if (!reversingAidsEnabledInput.checked) {
+            setReversingPreviewActivePoint(null);
+          }
           setReversingInputsDisabled(!reversingAidsEnabledInput.checked);
           drawReversingPreviewOverlay();
         });
         drawReversingPreviewOverlay();
       }
 
-      if (reversingAngleButtons.length) {
-        for (const button of reversingAngleButtons) {
+      if (reversingPointButtons.length) {
+        for (const button of reversingPointButtons) {
           button.addEventListener("click", () => {
             const side = button.dataset.side;
-            const direction = button.dataset.reversingAngle;
-            if (!side || !direction) {
+            const point = button.dataset.reversingPick;
+            if (!side || !point) {
               return;
             }
-            adjustReversingSideAngle(side, direction);
-            if (reversingAidsStatus) {
-              reversingAidsStatus.textContent = "";
+            const isActive =
+              !!reversingPreviewActivePoint &&
+              reversingPreviewActivePoint.side === side &&
+              reversingPreviewActivePoint.point === point;
+            if (isActive) {
+              setReversingPreviewActivePoint(null);
+            } else {
+              setReversingPreviewActivePoint({ side, point });
             }
-            drawReversingPreviewOverlay();
           });
         }
+      }
+
+      if (reversingPreviewStage instanceof HTMLElement) {
+        reversingPreviewStage.addEventListener("click", (event) => {
+          if (reversingAidsEnabledInput && !reversingAidsEnabledInput.checked) {
+            return;
+          }
+          if (!reversingPreviewActivePoint) {
+            setReversingPreviewStatus("Select a point below to adjust it on the preview.", {
+              persistent: true,
+            });
+            return;
+          }
+          const rect = reversingPreviewStage.getBoundingClientRect();
+          if (!(rect.width > 0 && rect.height > 0)) {
+            return;
+          }
+          const x = clamp01((event.clientX - rect.left) / rect.width);
+          const y = clamp01((event.clientY - rect.top) / rect.height);
+          const { side, point } = reversingPreviewActivePoint;
+          if (!setReversingPointFromPreview(side, point, x, y)) {
+            return;
+          }
+          const description = getReversingPointLabel(side, point);
+          setReversingPreviewStatus(
+            `${description} point updated. Click the preview to refine or choose another point.`,
+            { persistent: true },
+          );
+        });
       }
 
       if (reversingNudgeButtons.length) {
