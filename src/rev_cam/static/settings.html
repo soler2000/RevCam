@@ -1119,49 +1119,6 @@
             <fieldset class="reversing-side" data-side="left">
                 <legend>Left guide</legend>
                 <p>Adjust the driver’s-side guide segments. Click the preview or edit the values.</p>
-                <div class="reversing-line-point" data-side="left" data-point="near">
-                  <div class="reversing-line-header">
-                    <span class="reversing-colour" style="background: #ef5350;"></span>
-                    <span>Near point</span>
-                    <button
-                      type="button"
-                      class="reversing-point-button"
-                      data-side="left"
-                      data-reversing-pick="near"
-                      aria-pressed="false"
-                    >
-                      Select on preview
-                    </button>
-                  </div>
-                  <div class="reversing-line-fields">
-                    <label>
-                      Horizontal (%)
-                      <input
-                        type="number"
-                        min="0"
-                        max="100"
-                        step="0.1"
-                        inputmode="decimal"
-                        data-reversing-field="near-x"
-                        data-side="left"
-                        data-axis="x"
-                      />
-                    </label>
-                    <label>
-                      Vertical (%)
-                      <input
-                        type="number"
-                        min="0"
-                        max="100"
-                        step="0.1"
-                        inputmode="decimal"
-                        data-reversing-field="near-y"
-                        data-side="left"
-                        data-axis="y"
-                      />
-                    </label>
-                  </div>
-                </div>
                 <div class="reversing-line-point" data-side="left" data-point="far">
                   <div class="reversing-line-header">
                     <span class="reversing-colour" style="background: #66bb6a;"></span>
@@ -1205,18 +1162,14 @@
                     </label>
                   </div>
                 </div>
-              </fieldset>
-              <fieldset class="reversing-side" data-side="right">
-                <legend>Right guide</legend>
-                <p>Adjust the passenger-side guide segments from the preview or the inputs.</p>
-                <div class="reversing-line-point" data-side="right" data-point="near">
+                <div class="reversing-line-point" data-side="left" data-point="near">
                   <div class="reversing-line-header">
                     <span class="reversing-colour" style="background: #ef5350;"></span>
                     <span>Near point</span>
                     <button
                       type="button"
                       class="reversing-point-button"
-                      data-side="right"
+                      data-side="left"
                       data-reversing-pick="near"
                       aria-pressed="false"
                     >
@@ -1233,7 +1186,7 @@
                         step="0.1"
                         inputmode="decimal"
                         data-reversing-field="near-x"
-                        data-side="right"
+                        data-side="left"
                         data-axis="x"
                       />
                     </label>
@@ -1246,12 +1199,16 @@
                         step="0.1"
                         inputmode="decimal"
                         data-reversing-field="near-y"
-                        data-side="right"
+                        data-side="left"
                         data-axis="y"
                       />
                     </label>
                   </div>
                 </div>
+              </fieldset>
+              <fieldset class="reversing-side" data-side="right">
+                <legend>Right guide</legend>
+                <p>Adjust the passenger-side guide segments from the preview or the inputs.</p>
                 <div class="reversing-line-point" data-side="right" data-point="far">
                   <div class="reversing-line-header">
                     <span class="reversing-colour" style="background: #66bb6a;"></span>
@@ -1289,6 +1246,49 @@
                         step="0.1"
                         inputmode="decimal"
                         data-reversing-field="far-y"
+                        data-side="right"
+                        data-axis="y"
+                      />
+                    </label>
+                  </div>
+                </div>
+                <div class="reversing-line-point" data-side="right" data-point="near">
+                  <div class="reversing-line-header">
+                    <span class="reversing-colour" style="background: #ef5350;"></span>
+                    <span>Near point</span>
+                    <button
+                      type="button"
+                      class="reversing-point-button"
+                      data-side="right"
+                      data-reversing-pick="near"
+                      aria-pressed="false"
+                    >
+                      Select on preview
+                    </button>
+                  </div>
+                  <div class="reversing-line-fields">
+                    <label>
+                      Horizontal (%)
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.1"
+                        inputmode="decimal"
+                        data-reversing-field="near-x"
+                        data-side="right"
+                        data-axis="x"
+                      />
+                    </label>
+                    <label>
+                      Vertical (%)
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.1"
+                        inputmode="decimal"
+                        data-reversing-field="near-y"
                         data-side="right"
                         data-axis="y"
                       />
