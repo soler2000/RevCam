@@ -23,6 +23,14 @@ NUMPY_ABI_HINT = (
     ".venv`."
 )
 
+PICAMERA_REINSTALL_HINT = (
+    "Reinstall the Raspberry Pi OS Picamera2 stack (`sudo apt install --reinstall "
+    "python3-picamera2 python3-simplejpeg`; SimpleJPEG is only packaged with the "
+    "`python3-` prefix). If APT cannot find SimpleJPEG, install it inside the "
+    "RevCam virtual environment with `pip install --prefer-binary simplejpeg` (add "
+    "the PiWheels index on Raspberry Pi)."
+)
+
 _NUMPY_ABI_TOKENS = (
     "abi",
     "dtype size changed",
@@ -291,11 +299,17 @@ class Picamera2Camera(BaseCamera):
             )
             hints: list[str] = []
             if detail:
-                if detect_numpy_abi_mismatch(detail) and NUMPY_ABI_HINT not in hints:
-                    hints.append(NUMPY_ABI_HINT)
+                if detect_numpy_abi_mismatch(detail):
+                    for hint in (NUMPY_ABI_HINT, PICAMERA_REINSTALL_HINT):
+                        if hint not in hints:
+                            hints.append(hint)
+                lower_detail = detail.lower()
+                if "simplejpeg" in lower_detail and PICAMERA_REINSTALL_HINT not in hints:
+                    hints.append(PICAMERA_REINSTALL_HINT)
                 message = f"{message} ({detail})"
             if hints:
-                message = f"{message} {' '.join(hints)}"
+                hint_block = "\n".join(f" - {hint}" for hint in hints)
+                message = f"{message}\nHints:\n{hint_block}"
             logger.exception("Failed to import Picamera2: %s", detail or exc)
             raise CameraError(message) from exc
 

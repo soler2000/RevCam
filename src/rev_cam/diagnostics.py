@@ -9,6 +9,7 @@ from typing import Sequence
 
 from .camera import (
     NUMPY_ABI_HINT,
+    PICAMERA_REINSTALL_HINT,
     detect_numpy_abi_mismatch,
     diagnose_camera_conflicts,
     summarise_exception,
@@ -25,15 +26,6 @@ NUMPY_INSTALL_HINT = (
     "Install NumPy inside the active environment (for example `pip install numpy` or rerun "
     "`./scripts/install.sh --pi`)."
 )
-
-PICAMERA_REINSTALL_HINT = (
-    "Reinstall the Raspberry Pi OS Picamera2 stack (`sudo apt install --reinstall "
-    "python3-picamera2 python3-simplejpeg`; SimpleJPEG is only packaged with the "
-    "`python3-` prefix). If APT cannot find SimpleJPEG, install it inside the "
-    "RevCam virtual environment with `pip install --prefer-binary simplejpeg` (add "
-    "the PiWheels index on Raspberry Pi)."
-)
-
 
 def build_parser() -> argparse.ArgumentParser:
     """Return the argument parser for the diagnostics CLI."""
@@ -77,6 +69,7 @@ def diagnose_picamera_stack() -> dict[str, object]:
         mark_error(f"numpy import failed: {detail}")
         if detect_numpy_abi_mismatch(detail):
             add_hint(NUMPY_ABI_HINT)
+            add_hint(PICAMERA_REINSTALL_HINT)
     else:
         numpy_version = getattr(numpy_module, "__version__", None)
 
@@ -91,6 +84,7 @@ def diagnose_picamera_stack() -> dict[str, object]:
         lower_detail = detail.lower()
         if detect_numpy_abi_mismatch(detail):
             add_hint(NUMPY_ABI_HINT)
+            add_hint(PICAMERA_REINSTALL_HINT)
         if "simplejpeg" in lower_detail:
             add_hint(PICAMERA_REINSTALL_HINT)
     else:

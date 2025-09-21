@@ -85,6 +85,7 @@ def test_diagnose_picamera_stack_numpy_mismatch(monkeypatch: pytest.MonkeyPatch)
     assert result["status"] == "error"
     assert any("picamera2 import failed" in detail for detail in result["details"])
     assert diagnostics.NUMPY_ABI_HINT in result["hints"]
+    assert diagnostics.PICAMERA_REINSTALL_HINT in result["hints"]
 
 
 def test_diagnose_picamera_stack_success(monkeypatch: pytest.MonkeyPatch) -> None:
