@@ -199,6 +199,20 @@
       }
       .illumination-pill button {
         flex: 0 0 auto;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 2.75rem;
+        height: 2.75rem;
+        padding: 0;
+        border-radius: 50%;
+      }
+      .illumination-toggle-icon {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.4rem;
+        line-height: 1;
       }
       .illumination-slider,
       .illumination-colour {
@@ -527,8 +541,14 @@
         </div>
       </div>
       <div class="illumination-pill" id="illumination-controls" aria-live="polite">
-        <button id="toggle-illumination" type="button" aria-pressed="false">
-          Enable illumination
+        <button
+          id="toggle-illumination"
+          type="button"
+          aria-pressed="false"
+          aria-label="Enable illumination"
+          title="Enable illumination"
+        >
+          <span class="illumination-toggle-icon" aria-hidden="true">💡</span>
         </button>
         <label class="illumination-slider" for="illumination-intensity">
           <span>Intensity</span>
@@ -801,8 +821,10 @@
         }
 
         if (illuminationToggle instanceof HTMLButtonElement) {
+          const toggleLabel = active ? "Disable illumination" : "Enable illumination";
           illuminationToggle.disabled = !available;
-          illuminationToggle.textContent = active ? "Disable illumination" : "Enable illumination";
+          illuminationToggle.setAttribute("aria-label", toggleLabel);
+          illuminationToggle.title = toggleLabel;
           illuminationToggle.setAttribute("aria-pressed", active ? "true" : "false");
         }
 
