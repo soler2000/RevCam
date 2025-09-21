@@ -117,6 +117,7 @@ class BatteryMonitor:
         capacity_mah: int = 1000,
         sensor_factory: SensorFactory | None = None,
         *,
+        smoothing_alpha: float | None = 0.35,
         i2c_bus: int | None = None,
         i2c_address: int = DEFAULT_I2C_ADDRESS,
     ) -> None:
@@ -126,6 +127,16 @@ class BatteryMonitor:
         self._last_error: str | None = None
         self._i2c_bus = i2c_bus
         self._i2c_address = i2c_address
+        if smoothing_alpha is None:
+            self._smoothing_alpha: float | None = None
+        else:
+            alpha = float(smoothing_alpha)
+            if not math.isfinite(alpha) or not (0.0 < alpha <= 1.0):
+                raise ValueError("smoothing_alpha must be between 0 and 1")
+            self._smoothing_alpha = alpha
+        self._smoothed_percentage: float | None = None
+        self._smoothed_voltage: float | None = None
+        self._smoothed_current_ma: float | None = None
 
     @property
     def last_error(self) -> str | None:
@@ -220,11 +231,45 @@ class BatteryMonitor:
 
         return max(0.0, min(100.0, curve[-1][1]))
 
+    def _reset_smoothing(self) -> None:
+        self._smoothed_percentage = None
+        self._smoothed_voltage = None
+        self._smoothed_current_ma = None
+
+    def _smooth_numeric(
+        self,
+        attr: str,
+        value: float | None,
+        *,
+        allow_cross_zero: bool = True,
+    ) -> float | None:
+        if value is None or not math.isfinite(value):
+            setattr(self, attr, None)
+            return None
+
+        alpha = self._smoothing_alpha
+        if alpha is None:
+            setattr(self, attr, value)
+            return value
+
+        previous = getattr(self, attr)
+        if previous is None or not math.isfinite(previous):
+            result = value
+        elif not allow_cross_zero and (
+            previous == 0.0 or value == 0.0 or (previous > 0.0) != (value > 0.0)
+        ):
+            result = value
+        else:
+            result = previous + alpha * (value - previous)
+        setattr(self, attr, result)
+        return result
+
     def read(self) -> BatteryReading:
         """Return the latest battery reading, handling hardware failures."""
 
         sensor = self._obtain_sensor()
         if sensor is None:
+            self._reset_smoothing()
             return BatteryReading(
                 available=False,
                 percentage=None,
@@ -240,6 +285,7 @@ class BatteryMonitor:
         except Exception as exc:
             self._sensor = None
             self._last_error = f"Failed to read battery voltage: {exc}"
+            self._reset_smoothing()
             return BatteryReading(
                 available=False,
                 percentage=None,
@@ -256,7 +302,7 @@ class BatteryMonitor:
             shunt_voltage = 0.0
 
         voltage = bus_voltage + shunt_voltage
-        percentage = round(self._estimate_percentage(voltage), 1)
+        raw_percentage = self._estimate_percentage(voltage)
 
         current_ma: float | None
         charging: bool | None
@@ -272,11 +318,24 @@ class BatteryMonitor:
             current_ma = None
             charging = None
 
+        smoothed_voltage = self._smooth_numeric("_smoothed_voltage", float(voltage))
+        smoothed_percentage = self._smooth_numeric("_smoothed_percentage", float(raw_percentage))
+        if smoothed_percentage is not None:
+            smoothed_percentage = max(0.0, min(100.0, smoothed_percentage))
+        smoothed_current = self._smooth_numeric(
+            "_smoothed_current_ma",
+            None if current_ma is None else float(current_ma),
+            allow_cross_zero=False,
+        )
+
         reading = BatteryReading(
             available=True,
-            percentage=percentage,
-            voltage=round(voltage, 3),
-            current_ma=round(current_ma, 2) if current_ma is not None else None,
+            percentage=
+            round(smoothed_percentage, 1)
+            if smoothed_percentage is not None
+            else None,
+            voltage=round(smoothed_voltage, 3) if smoothed_voltage is not None else None,
+            current_ma=round(smoothed_current, 2) if smoothed_current is not None else None,
             charging=charging,
             capacity_mah=self.capacity_mah,
             error=None,

@@ -53,6 +53,39 @@ def test_battery_monitor_interpolates_voltage() -> None:
     assert reading.percentage == pytest.approx(77.5)
 
 
+def test_battery_monitor_smooths_successive_readings() -> None:
+    sensor = _StubSensor(bus_voltage=4.2, current=250.0)
+    monitor = BatteryMonitor(sensor_factory=lambda: sensor, smoothing_alpha=0.25)
+
+    first = monitor.read()
+    assert first.available is True
+    assert first.percentage == pytest.approx(100.0)
+    assert first.voltage == pytest.approx(4.2, abs=1e-3)
+    assert first.current_ma == pytest.approx(250.0)
+    assert first.charging is True
+
+    sensor.bus_voltage = 3.6
+    sensor.current = -150.0
+
+    second = monitor.read()
+    assert second.available is True
+    assert second.charging is False
+    assert second.percentage == pytest.approx(83.8, abs=0.2)
+    assert second.percentage < first.percentage
+    assert second.percentage > 35.0
+    assert second.voltage == pytest.approx(4.05, abs=0.01)
+    assert second.current_ma == pytest.approx(-150.0)
+
+    third = monitor.read()
+    assert third.available is True
+    assert third.charging is False
+    assert third.percentage < second.percentage
+    assert third.percentage > 35.0
+    assert third.percentage == pytest.approx(71.6, abs=0.3)
+    assert third.voltage == pytest.approx(3.94, abs=0.02)
+    assert third.current_ma == pytest.approx(-150.0)
+
+
 def test_battery_monitor_surfaces_sensor_error() -> None:
     def _fail_factory() -> _StubSensor:
         raise RuntimeError("ina219 not detected")
