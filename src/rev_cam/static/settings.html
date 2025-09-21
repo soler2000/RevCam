@@ -11,10 +11,13 @@
           sans-serif;
         --line-height: 1.55;
         --transition-base: 0.25s ease;
-        --surface-0: rgba(14, 16, 22, 0.8);
-        --surface-1: rgba(26, 28, 36, 0.75);
+        --surface-0: rgba(14, 16, 22, 0.82);
+        --surface-1: rgba(26, 28, 36, 0.78);
         --surface-muted: rgba(255, 255, 255, 0.08);
         --surface-soft: rgba(255, 255, 255, 0.04);
+        --surface-panel: rgba(30, 33, 44, 0.82);
+        --surface-primary: rgba(38, 42, 55, 0.85);
+        --surface-secondary: rgba(24, 27, 38, 0.88);
         --border-subtle: rgba(255, 255, 255, 0.08);
         --border-muted: rgba(255, 255, 255, 0.12);
         --text-primary: #f5f7fb;
@@ -40,7 +43,11 @@
         --radius-sm: 0.5rem;
         --radius-md: 0.75rem;
         --radius-lg: 1rem;
+        --radius-xl: 1.5rem;
         --radius-pill: 999px;
+        --shell-padding-y: clamp(2rem, 7vh, 3.5rem);
+        --shell-padding-x: clamp(1.25rem, 5vw, 3.5rem);
+        --rhythm: 1.5rem;
         --space-xs: 0.25rem;
         --space-sm: 0.5rem;
         --space-md: 0.75rem;
@@ -49,10 +56,16 @@
         --space-2xl: 2.5rem;
         --control-padding-y: 0.6rem;
         --control-padding-x: 1.25rem;
-        --card-padding: 1.5rem;
-        --shadow-sm: 0 12px 26px rgba(0, 0, 0, 0.35);
-        --shadow-md: 0 18px 40px rgba(0, 0, 0, 0.45);
+        --card-padding: calc(var(--rhythm) + 0.25rem);
+        --stack-gap: calc(var(--rhythm) / 2);
+        --stack-gap-lg: var(--rhythm);
+        --shadow-sm: 0 18px 44px rgba(0, 0, 0, 0.45);
+        --shadow-md: 0 26px 60px rgba(0, 0, 0, 0.5);
         --page-gradient: radial-gradient(120% 140% at top, #1b1e26 0%, #10131a 60%, #050609 100%);
+        --panel-max-width: 1100px;
+      }
+      * {
+        box-sizing: border-box;
       }
       body {
         margin: 0;
@@ -60,22 +73,26 @@
         line-height: var(--line-height);
         background: var(--page-gradient);
         color: var(--text-primary);
-        padding: var(--space-xl) var(--space-lg) var(--space-2xl);
+        min-height: 100vh;
+        display: flex;
+        justify-content: center;
+        align-items: flex-start;
+        padding: var(--shell-padding-y) var(--shell-padding-x);
       }
       h1 {
         margin: 0;
         font-size: 2rem;
       }
       h2 {
-        margin: 0 0 var(--space-md);
+        margin: 0 0 calc(var(--rhythm) / 2);
         font-size: 1.35rem;
       }
       h3 {
-        margin: var(--space-lg) 0 var(--space-sm);
+        margin: var(--rhythm) 0 calc(var(--rhythm) / 2);
         font-size: 1.1rem;
       }
       p {
-        margin: 0 0 var(--space-md);
+        margin: 0 0 calc(var(--rhythm) / 2);
       }
       a {
         color: var(--accent);
@@ -87,7 +104,7 @@
       }
       label {
         display: block;
-        margin-bottom: var(--space-md);
+        margin-bottom: calc(var(--rhythm) / 2);
       }
       select,
       input[type="text"],
@@ -171,17 +188,46 @@
       .muted {
         color: var(--text-muted);
       }
-      .page-content {
-        max-width: 960px;
+      .page-shell {
+        width: min(100%, var(--panel-max-width));
         margin: 0 auto;
+      }
+      .page-panel {
+        background: var(--surface-panel);
+        border-radius: var(--radius-xl);
+        border: 1px solid var(--border-subtle);
+        box-shadow: var(--shadow-md);
+        backdrop-filter: blur(26px);
+        width: 100%;
+      }
+      .page-content {
         display: flex;
         flex-direction: column;
-        gap: var(--space-xl);
+        gap: var(--rhythm);
+        padding: calc(var(--rhythm) * 1.5) clamp(var(--rhythm), 6vw, calc(var(--rhythm) * 1.75));
+      }
+      .page-panel::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        border-radius: inherit;
+        pointer-events: none;
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0));
+        mix-blend-mode: screen;
+        opacity: 0.35;
+      }
+      .page-panel {
+        position: relative;
+        overflow: hidden;
+      }
+      .page-content {
+        position: relative;
+        z-index: 1;
       }
       .page-header {
         display: flex;
         flex-direction: column;
-        gap: var(--space-sm);
+        gap: calc(var(--rhythm) / 2);
       }
       .back-link {
         width: fit-content;
@@ -195,52 +241,77 @@
       .tab-container {
         display: flex;
         flex-direction: column;
-        gap: var(--space-xl);
+        gap: var(--rhythm);
+      }
+      .tab-header {
+        position: sticky;
+        top: var(--shell-padding-y);
+        z-index: 10;
+        padding: calc(var(--rhythm) / 2) 0;
+        background: linear-gradient(180deg, rgba(30, 33, 44, 0.98), rgba(30, 33, 44, 0.82) 65%,
+            rgba(30, 33, 44, 0));
+        backdrop-filter: blur(18px);
       }
       .tab-list {
         display: inline-flex;
         flex-wrap: wrap;
-        gap: var(--space-sm);
-        padding: var(--space-xs);
+        gap: 0.4rem;
+        padding: 0.4rem;
         border-radius: var(--radius-pill);
-        background: var(--surface-muted);
+        border: 1px solid var(--border-subtle);
+        background: var(--surface-secondary);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 18px 30px rgba(0, 0, 0, 0.35);
       }
       .tab-button {
         border: none;
         background: transparent;
         color: var(--text-muted);
-        border-radius: var(--radius-pill);
-        padding: var(--space-sm) var(--space-lg);
+        border-radius: calc(var(--radius-pill) - 0.4rem);
+        padding: 0.5rem 1.25rem;
         font-size: 0.95rem;
         font-weight: 600;
-        transition: background var(--transition-base), color var(--transition-base);
+        transition: background var(--transition-base), color var(--transition-base),
+          box-shadow var(--transition-base);
       }
-      .tab-button[aria-selected="true"] {
-        background: var(--accent);
-        color: var(--text-on-accent);
-        box-shadow: 0 0 0 1px var(--accent-ring);
-      }
-      .tab-button:hover,
-      .tab-button:focus-visible {
+      .tab-button:hover {
+        background: rgba(255, 255, 255, 0.06);
         color: var(--text-primary);
       }
       .tab-button:focus-visible {
         outline: 2px solid var(--accent-ring);
         outline-offset: 2px;
       }
+      .tab-button[aria-selected="true"] {
+        color: var(--text-primary);
+        background: var(--surface-primary);
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08),
+          0 16px 30px rgba(0, 0, 0, 0.4);
+      }
+      .tab-button[aria-selected="true"]:hover {
+        background: linear-gradient(135deg, var(--surface-primary), rgba(46, 51, 66, 0.92));
+      }
       .tab-panel {
         display: none;
         flex-direction: column;
-        gap: var(--space-xl);
+        gap: var(--rhythm);
       }
       .tab-panel:not([hidden]) {
         display: flex;
       }
+      .tab-panel > .card {
+        background: var(--surface-primary);
+        box-shadow: var(--shadow-sm);
+      }
+      .tab-panel > .card:nth-child(even) {
+        background: var(--surface-secondary);
+        box-shadow: 0 24px 50px rgba(0, 0, 0, 0.45);
+      }
       .card {
         padding: var(--card-padding);
         border-radius: var(--radius-lg);
-        background: var(--surface-1);
-        border: 1px solid var(--border-subtle);
+        border: 1px solid rgba(255, 255, 255, 0.05);
+        backdrop-filter: blur(12px);
+        background: var(--surface-primary);
         box-shadow: var(--shadow-sm);
       }
       #stream-section h2 {
@@ -254,11 +325,11 @@
         display: flex;
         flex-wrap: wrap;
         gap: var(--space-sm);
-        margin-top: var(--space-md);
+        margin-top: var(--stack-gap);
       }
       #stream-url {
         display: block;
-        margin-top: var(--space-md);
+        margin-top: var(--stack-gap);
         padding: var(--space-sm) var(--space-md);
         border-radius: var(--radius-sm);
         background: var(--surface-1);
@@ -267,14 +338,14 @@
         word-break: break-all;
       }
       .stream-settings {
-        margin-top: var(--space-lg);
+        margin-top: var(--stack-gap-lg);
         display: flex;
         flex-direction: column;
-        gap: var(--space-md);
+        gap: var(--stack-gap);
       }
       .stream-settings-grid {
         display: grid;
-        gap: var(--space-md);
+        gap: var(--stack-gap);
         grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
       }
       .stream-settings label {
@@ -290,7 +361,7 @@
       .stream-quality-control {
         display: flex;
         align-items: center;
-        gap: var(--space-md);
+        gap: var(--stack-gap);
       }
       .stream-quality-display {
         min-width: 2.5rem;
@@ -301,7 +372,7 @@
       #orientation-form {
         display: flex;
         flex-direction: column;
-        gap: var(--space-md);
+        gap: var(--stack-gap);
       }
       #orientation-form h2,
       #orientation-form h3 {
@@ -310,26 +381,26 @@
       .form-actions {
         display: flex;
         align-items: center;
-        gap: var(--space-md);
+        gap: var(--stack-gap);
         flex-wrap: wrap;
       }
       #reversing-aids-form {
         display: flex;
         flex-direction: column;
-        gap: var(--space-md);
+        gap: var(--stack-gap);
       }
       #reversing-aids-status {
         min-height: 1.2rem;
       }
       .reversing-grid {
         display: grid;
-        gap: var(--space-md);
+        gap: var(--stack-gap);
         grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
       }
       fieldset.reversing-side {
         border: 1px solid var(--border-muted);
         border-radius: var(--radius-md);
-        padding: var(--space-lg);
+        padding: calc(var(--stack-gap-lg) - 0.25rem);
         background: var(--surface-muted);
       }
       fieldset.reversing-side legend {
@@ -337,7 +408,7 @@
         font-weight: 600;
       }
       fieldset.reversing-side p {
-        margin: var(--space-xs) 0 var(--space-md);
+        margin: var(--space-xs) 0 var(--stack-gap);
         font-size: 0.9rem;
         color: var(--text-muted);
       }
@@ -375,15 +446,15 @@
         cursor: not-allowed;
       }
       .reversing-point-hint {
-        margin: calc(-1 * var(--space-xs)) 0 var(--space-md);
+        margin: calc(-1 * var(--space-xs)) 0 var(--stack-gap);
         font-size: 0.85rem;
         color: var(--text-muted);
       }
       .reversing-line-point {
         display: flex;
         flex-direction: column;
-        gap: var(--space-md);
-        margin-bottom: var(--space-xl);
+        gap: var(--stack-gap);
+        margin-bottom: var(--stack-gap-lg);
       }
       .reversing-line-point:last-of-type {
         margin-bottom: 0;
@@ -403,7 +474,7 @@
       }
       .reversing-line-fields {
         display: grid;
-        gap: var(--space-md);
+        gap: var(--stack-gap);
         grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
       }
       .reversing-line-fields label {
@@ -416,8 +487,8 @@
       .reversing-preview {
         display: flex;
         flex-direction: column;
-        gap: var(--space-md);
-        margin: var(--space-sm) 0 var(--space-xl);
+        gap: var(--stack-gap);
+        margin: var(--stack-gap) 0 var(--stack-gap-lg);
       }
       .reversing-preview h3 {
         margin: 0;
@@ -425,7 +496,7 @@
       .reversing-preview-controls {
         display: flex;
         flex-wrap: wrap;
-        gap: var(--space-md);
+        gap: var(--stack-gap);
         align-items: stretch;
       }
       .reversing-preview-controls button {
@@ -480,7 +551,7 @@
         align-items: center;
         justify-content: center;
         text-align: center;
-        padding: var(--space-lg);
+        padding: var(--stack-gap-lg);
         color: var(--text-muted);
         font-size: 0.95rem;
         letter-spacing: 0.01em;
@@ -494,15 +565,15 @@
         margin-top: 0;
       }
       #wifi-summary {
-        margin: 0 0 var(--space-md);
+        margin: 0 0 var(--stack-gap);
         color: var(--text-muted);
       }
       #wifi-controls {
         display: flex;
         flex-wrap: wrap;
         align-items: center;
-        gap: var(--space-md);
-        margin-bottom: var(--space-md);
+        gap: var(--stack-gap);
+        margin-bottom: var(--stack-gap);
       }
       #wifi-controls label {
         margin: 0;
@@ -525,17 +596,17 @@
         padding: 0;
         display: flex;
         flex-direction: column;
-        gap: var(--space-sm);
+        gap: var(--stack-gap);
       }
       .wifi-network {
         display: flex;
         flex-wrap: wrap;
         align-items: center;
         justify-content: space-between;
-        gap: var(--space-md);
-        padding: var(--space-md) var(--space-lg);
+        gap: var(--stack-gap);
+        padding: var(--stack-gap) var(--stack-gap-lg);
         border-radius: var(--radius-md);
-        background: var(--surface-1);
+        background: var(--surface-soft);
         border: 1px solid var(--border-subtle);
       }
       .wifi-network strong {
@@ -552,23 +623,23 @@
         gap: var(--space-sm);
       }
       #wifi-connect-form {
-        margin-top: var(--space-lg);
-        padding: var(--space-lg);
+        margin-top: var(--stack-gap-lg);
+        padding: var(--stack-gap-lg);
         border-radius: var(--radius-lg);
-        background: var(--surface-1);
+        background: var(--surface-soft);
         border: 1px solid var(--border-subtle);
         display: flex;
         flex-direction: column;
-        gap: var(--space-md);
+        gap: var(--stack-gap);
       }
       #wifi-connect-form[hidden] {
         display: none;
       }
       #wifi-hotspot-section {
-        margin-top: var(--space-xl);
+        margin-top: var(--stack-gap-lg);
         display: flex;
         flex-direction: column;
-        gap: var(--space-md);
+        gap: var(--stack-gap);
       }
       #wifi-hotspot-section .button-group {
         display: flex;
@@ -579,15 +650,15 @@
         display: flex;
         flex-wrap: wrap;
         align-items: center;
-        gap: var(--space-xl);
+        gap: var(--stack-gap-lg);
       }
       #battery-indicator {
         display: inline-flex;
         align-items: center;
-        gap: var(--space-md);
+        gap: var(--stack-gap);
         padding: var(--space-sm) var(--space-md);
         border-radius: var(--radius-md);
-        background: var(--surface-1);
+        background: var(--surface-soft);
         border: 1px solid var(--border-subtle);
         min-width: 200px;
       }
@@ -646,13 +717,13 @@
       }
       .battery-metrics {
         display: grid;
-        gap: var(--space-md);
+        gap: var(--stack-gap);
         flex: 1 1 260px;
         grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
       }
       .battery-metrics div {
-        background: var(--surface-muted);
-        padding: var(--space-md);
+        background: var(--surface-soft);
+        padding: var(--stack-gap);
         border-radius: var(--radius-md);
         display: flex;
         flex-direction: column;
@@ -672,19 +743,19 @@
       .battery-actions {
         display: flex;
         gap: var(--space-sm);
-        margin-top: var(--space-lg);
+        margin-top: var(--stack-gap);
       }
       .battery-note {
         font-size: 0.9rem;
         color: var(--text-muted);
-        margin-top: var(--space-md);
+        margin-top: var(--stack-gap);
       }
       .distance-readout {
         display: flex;
         flex-wrap: wrap;
         align-items: baseline;
-        gap: var(--space-md);
-        margin: var(--space-sm) 0 0;
+        gap: var(--stack-gap);
+        margin: calc(var(--stack-gap) / 2) 0 0;
       }
       .distance-value {
         font-size: 2.4rem;
@@ -723,20 +794,20 @@
         background: var(--surface-soft);
       }
       .distance-actions {
-        margin-top: var(--space-lg);
+        margin-top: var(--stack-gap);
         display: flex;
         flex-wrap: wrap;
         gap: var(--space-sm);
       }
       .distance-error {
-        margin: var(--space-md) 0 0;
+        margin: var(--stack-gap) 0 0;
         min-height: 1rem;
         color: var(--danger);
       }
       .distance-calibration-grid {
-        margin-top: var(--space-lg);
+        margin-top: var(--stack-gap);
         display: grid;
-        gap: var(--space-md);
+        gap: var(--stack-gap);
         grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
       }
       .distance-calibration-grid label {
@@ -747,7 +818,7 @@
       }
       .distance-calibration-note {
         font-size: 0.9rem;
-        margin-top: var(--space-md);
+        margin-top: var(--stack-gap);
         color: var(--text-muted);
       }
       #distance-calibration-status {
@@ -755,38 +826,38 @@
         color: var(--text-muted);
       }
       .diagnostics-actions {
-        margin: var(--space-md) 0 var(--space-lg);
+        margin: var(--stack-gap) 0 var(--stack-gap-lg);
         display: flex;
         flex-wrap: wrap;
         align-items: center;
-        gap: var(--space-md);
+        gap: var(--stack-gap);
       }
       .diagnostics-status {
         font-size: 0.9rem;
         color: var(--text-muted);
       }
       .diagnostics-error {
-        margin: var(--space-md) 0 0;
+        margin: var(--stack-gap) 0 0;
         font-size: 0.95rem;
         color: var(--danger);
       }
       .diagnostics-results h3 {
-        margin: var(--space-lg) 0 var(--space-sm);
+        margin: var(--stack-gap) 0 calc(var(--stack-gap) / 2);
         font-size: 1rem;
       }
       .diagnostics-results h4 {
-        margin: var(--space-md) 0 var(--space-sm);
+        margin: var(--stack-gap) 0 calc(var(--stack-gap) / 2);
         font-size: 0.95rem;
       }
       .diagnostics-list {
-        margin: var(--space-sm) 0 var(--space-md) 1.25rem;
+        margin: calc(var(--stack-gap) / 2) 0 var(--stack-gap) 1.25rem;
         padding: 0;
       }
       .diagnostics-list li {
         margin: var(--space-xs) 0;
       }
       .diagnostics-empty {
-        margin: var(--space-sm) 0 var(--space-md);
+        margin: calc(var(--stack-gap) / 2) 0 var(--stack-gap);
         font-size: 0.95rem;
         color: var(--text-muted);
       }
@@ -806,10 +877,13 @@
       }
       @media (max-width: 640px) {
         body {
-          padding: var(--space-lg) var(--space-md) var(--space-xl);
+          padding: calc(var(--shell-padding-y) * 0.75) clamp(var(--rhythm), 8vw, calc(var(--rhythm) * 1.1));
         }
         .card {
-          padding: calc(var(--card-padding) - var(--space-sm));
+          padding: calc(var(--card-padding) - 0.4rem);
+        }
+        .tab-header {
+          top: calc(var(--shell-padding-y) * 0.75);
         }
         #battery-indicator {
           width: 100%;
@@ -818,80 +892,84 @@
     </style>
   </head>
   <body>
-    <div class="page-content">
-      <header class="page-header">
-        <a class="back-link" href="/">← Back to live view</a>
-        <h1>Settings</h1>
-        <p id="app-version" class="muted">
-          Version <span id="version-value">Loading…</span>
-        </p>
-      </header>
+    <div class="page-shell">
+      <div class="page-panel">
+        <div class="page-content">
+          <header class="page-header">
+            <a class="back-link" href="/">← Back to live view</a>
+            <h1>Settings</h1>
+            <p id="app-version" class="muted">
+              Version <span id="version-value">Loading…</span>
+            </p>
+          </header>
 
-      <div class="tab-container">
-        <div class="tab-list" role="tablist" aria-label="Settings sections">
-          <button
-            type="button"
-            class="tab-button"
-            role="tab"
-            id="tab-camera"
-            aria-controls="panel-camera"
-            aria-selected="true"
-            data-tab="camera"
-            tabindex="0"
-          >
-            Camera
-          </button>
-          <button
-            type="button"
-            class="tab-button"
-            role="tab"
-            id="tab-distance"
-            aria-controls="panel-distance"
-            aria-selected="false"
-            data-tab="distance"
-            tabindex="-1"
-          >
-            Distance
-          </button>
-          <button
-            type="button"
-            class="tab-button"
-            role="tab"
-            id="tab-reversing"
-            aria-controls="panel-reversing"
-            aria-selected="false"
-            data-tab="reversing"
-            tabindex="-1"
-          >
-            Reversing aids
-          </button>
-          <button
-            type="button"
-            class="tab-button"
-            role="tab"
-            id="tab-network"
-            aria-controls="panel-network"
-            aria-selected="false"
-            data-tab="network"
-            tabindex="-1"
-          >
-            Network
-          </button>
-          <button
-            type="button"
-            class="tab-button"
-            role="tab"
-            id="tab-battery"
-            aria-controls="panel-battery"
-            aria-selected="false"
-            data-tab="battery"
-            tabindex="-1"
-          >
-            Battery
-          </button>
-        </div>
+          <div class="tab-container">
+            <div class="tab-header">
+              <div class="tab-list" role="tablist" aria-label="Settings sections">
+                <button
+                  type="button"
+                  class="tab-button"
+                  role="tab"
+                  id="tab-camera"
+                  aria-controls="panel-camera"
+                  aria-selected="true"
+                  data-tab="camera"
+                  tabindex="0"
+                >
+                  Camera
+                </button>
+                <button
+                  type="button"
+                  class="tab-button"
+                  role="tab"
+                  id="tab-distance"
+                  aria-controls="panel-distance"
+                  aria-selected="false"
+                  data-tab="distance"
+                  tabindex="-1"
+                >
+                  Distance
+                </button>
+                <button
+                  type="button"
+                  class="tab-button"
+                  role="tab"
+                  id="tab-reversing"
+                  aria-controls="panel-reversing"
+                  aria-selected="false"
+                  data-tab="reversing"
+                  tabindex="-1"
+                >
+                  Reversing aids
+                </button>
+                <button
+                  type="button"
+                  class="tab-button"
+                  role="tab"
+                  id="tab-network"
+                  aria-controls="panel-network"
+                  aria-selected="false"
+                  data-tab="network"
+                  tabindex="-1"
+                >
+                  Network
+                </button>
+                <button
+                  type="button"
+                  class="tab-button"
+                  role="tab"
+                  id="tab-battery"
+                  aria-controls="panel-battery"
+                  aria-selected="false"
+                  data-tab="battery"
+                  tabindex="-1"
+                >
+                  Battery
+                </button>
+              </div>
+            </div>
 
-        <section
+            <section
           id="panel-camera"
           class="tab-panel"
           role="tabpanel"
@@ -1030,7 +1108,7 @@
           </section>
         </section>
 
-        <section
+            <section
           id="panel-distance"
           class="tab-panel"
           role="tabpanel"
@@ -1138,7 +1216,7 @@
           </form>
         </section>
 
-        <section
+            <section
           id="panel-reversing"
           class="tab-panel"
           role="tabpanel"
@@ -1388,7 +1466,7 @@
           </form>
         </section>
 
-        <section
+            <section
           id="panel-network"
           class="tab-panel"
           role="tabpanel"
@@ -1452,7 +1530,7 @@
           </section>
         </section>
 
-        <section
+            <section
           id="panel-battery"
           class="tab-panel"
           role="tabpanel"
@@ -1546,6 +1624,8 @@
             </div>
           </form>
         </section>
+          </div>
+        </div>
       </div>
     </div>
     <script>
