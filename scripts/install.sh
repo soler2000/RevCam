@@ -189,6 +189,27 @@ then
     set +x
 fi
 
+if ! "$VENV_DIR/bin/python" - <<'PY'
+import importlib
+import sys
+
+try:
+    importlib.import_module("board")
+    importlib.import_module("neopixel")
+except ModuleNotFoundError:
+    sys.exit(1)
+else:
+    sys.exit(0)
+PY
+then
+    echo "Installing LED ring driver dependencies: adafruit-blinka adafruit-circuitpython-neopixel"
+    set -x
+    "$VENV_DIR/bin/python" -m pip install "${PIP_FLAGS[@]}" --upgrade \
+        adafruit-blinka \
+        adafruit-circuitpython-neopixel
+    set +x
+fi
+
 trap - EXIT
 popd >/dev/null
 

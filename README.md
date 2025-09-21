@@ -88,6 +88,21 @@ building everything from PyPI. Follow these steps on the Pi:
 The `--prefer-binary` flag asks `pip` to fetch pre-built wheels when
 available, and the PiWheels index provides ARM builds for most dependencies.
 
+### LED ring requirements
+
+RevCam's status indicator uses a 16-pixel WS2812/NeoPixel ring attached to GPIO18.
+Driving the LEDs relies on Adafruit's CircuitPython stack. The installation
+script automatically upgrades the necessary packages after the core project is
+installed, but when managing the environment manually be sure to install them
+yourself:
+
+```bash
+pip install --upgrade adafruit-blinka adafruit-circuitpython-neopixel
+```
+
+Without these modules the LED helper falls back to a no-op driver and the ring
+remains dark.
+
 ### Saving snapshots
 
 The live view footer includes a **Save snapshot** button that fetches a still
