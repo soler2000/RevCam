@@ -27,7 +27,7 @@ NUMPY_INSTALL_HINT = (
 )
 
 PICAMERA_REINSTALL_HINT = (
-    "Reinstall the Raspberry Pi OS Picamera2 stack (`sudo apt install --reinstall python3-picamera2 simplejpeg`)."
+    "Reinstall the Raspberry Pi OS Picamera2 stack (`sudo apt install --reinstall python3-picamera2 python3-simplejpeg`)."
 )
 
 

@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 NUMPY_ABI_HINT = (
     "Detected a NumPy ABI mismatch. Reinstall the Raspberry Pi OS packages so "
     "NumPy and Picamera2 share compatible binaries (for example `sudo apt install "
-    "--reinstall python3-numpy python3-picamera2 simplejpeg`). If NumPy was "
+    "--reinstall python3-numpy python3-picamera2 python3-simplejpeg`). If NumPy was "
     "upgraded inside a virtual environment, recreate it with `python3 -m venv "
     "--system-site-packages .venv`."
 )

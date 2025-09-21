@@ -99,5 +99,5 @@ Troubleshooting
 * **Busy camera errors** – re-run `python -m rev_cam.diagnostics` to identify
   lingering processes. Disable the legacy camera interface and reboot if
   `kworker/R-mmal-vchiq` threads are reported.
-* **`simplejpeg` missing** – re-run step 4. If installation fails, verify the
+* **`python3-simplejpeg` missing** – re-run step 4. If installation fails, verify the
   APT packages listed in step 1 are installed.
