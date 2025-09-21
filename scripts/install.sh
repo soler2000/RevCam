@@ -210,6 +210,33 @@ then
     set +x
 fi
 
+MISSING_I2C_PACKAGES="$("$VENV_DIR/bin/python" - <<'PY'
+import importlib.util
+
+modules = {
+    "adafruit_ina219": "adafruit-circuitpython-ina219",
+    "adafruit_vl53l1x": "adafruit-circuitpython-vl53l1x",
+    "adafruit_extended_bus": "adafruit-circuitpython-extended-bus",
+}
+
+missing = [
+    package
+    for module, package in modules.items()
+    if importlib.util.find_spec(module) is None
+]
+
+print(" ".join(missing), end="")
+PY
+)"
+
+if [[ -n "$MISSING_I2C_PACKAGES" ]]; then
+    echo "Installing I2C sensor dependencies: $MISSING_I2C_PACKAGES"
+    set -x
+    # shellcheck disable=SC2086  # packages are space separated by the Python helper
+    "$VENV_DIR/bin/python" -m pip install "${PIP_FLAGS[@]}" --upgrade $MISSING_I2C_PACKAGES
+    set +x
+fi
+
 trap - EXIT
 popd >/dev/null
 

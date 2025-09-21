@@ -144,11 +144,13 @@ preserved in the saved image.
 ### Battery monitoring requirements
 
 Battery telemetry is optional. To enable it connect an INA219 current/voltage
-sensor to the Pi's I²C bus and install the CircuitPython driver inside the
-RevCam virtual environment:
+sensor to the Pi's I²C bus and ensure the CircuitPython driver is installed
+inside the RevCam virtual environment. The ``scripts/install.sh`` helper
+installs the required packages automatically; when managing the environment
+manually run:
 
 ```bash
-pip install adafruit-blinka adafruit-circuitpython-ina219
+pip install adafruit-blinka adafruit-circuitpython-ina219 adafruit-circuitpython-extended-bus
 ```
 
 Once available the live view automatically polls the sensor and displays the
@@ -163,9 +165,10 @@ export REVCAM_I2C_BUS=29
 ./scripts/run_with_sudo.sh
 ```
 
-When overriding the bus number install the optional
-`adafruit-circuitpython-extended-bus` package so RevCam can open the desired
-adapter.
+When overriding the bus number ensure the optional
+`adafruit-circuitpython-extended-bus` package is installed so RevCam can open
+the desired adapter. The installation helper covers this automatically, but
+manual environments should add it alongside the INA219 driver.
 
 RevCam expects the INA219 to respond at address `0x43`. If the sensor has been
 configured differently adjust the jumper configuration accordingly.
@@ -173,10 +176,12 @@ configured differently adjust the jumper configuration accordingly.
 ### Distance monitoring requirements
 
 The VL53L1X time-of-flight sensor powers the distance overlay. Install the
-CircuitPython dependencies inside the same environment as RevCam:
+CircuitPython dependencies inside the same environment as RevCam. The
+``scripts/install.sh`` helper installs them automatically; when managing the
+environment manually run:
 
 ```bash
-pip install adafruit-blinka adafruit-circuitpython-vl53l1x
+pip install adafruit-blinka adafruit-circuitpython-vl53l1x adafruit-circuitpython-extended-bus
 ```
 
 With those packages missing the distance panel reports **driver unavailable**
@@ -184,9 +189,10 @@ when it cannot import the VL53L1X driver or supporting `board` module.
 
 Just like the INA219, the VL53L1X defaults to the Pi's primary I²C controller at
 address `0x29`. When connecting the sensor to a different bus export
-`REVCAM_I2C_BUS` before launching the server and install the optional
-`adafruit-circuitpython-extended-bus` helper so RevCam can open the alternate
-adapter.
+`REVCAM_I2C_BUS` before launching the server and ensure the optional
+`adafruit-circuitpython-extended-bus` helper is available so RevCam can open the
+alternate adapter. The installation helper already includes it, but manual
+setups should install it before overriding the bus number.
 
 ### Development machine installation
 
