@@ -150,7 +150,9 @@ installs the required packages automatically; when managing the environment
 manually run:
 
 ```bash
-pip install adafruit-blinka adafruit-circuitpython-ina219 adafruit-circuitpython-extended-bus
+pip install adafruit-blinka adafruit-circuitpython-ina219
+# Optional: required when overriding REVCAM_I2C_BUS
+pip install adafruit-circuitpython-extended-bus
 ```
 
 Once available the live view automatically polls the sensor and displays the
@@ -167,8 +169,11 @@ export REVCAM_I2C_BUS=29
 
 When overriding the bus number ensure the optional
 `adafruit-circuitpython-extended-bus` package is installed so RevCam can open
-the desired adapter. The installation helper covers this automatically, but
-manual environments should add it alongside the INA219 driver.
+the desired adapter. The installation helper installs it automatically when it
+is available on PyPI; if the package is missing for your interpreter, the
+script prints a warning so you can install it manually (for example from
+Adafruit's `Adafruit_CircuitPython_Extended_Bus` repository) before overriding
+`REVCAM_I2C_BUS`.
 
 RevCam expects the INA219 to respond at address `0x43`. If the sensor has been
 configured differently adjust the jumper configuration accordingly.
@@ -181,7 +186,9 @@ CircuitPython dependencies inside the same environment as RevCam. The
 environment manually run:
 
 ```bash
-pip install adafruit-blinka adafruit-circuitpython-vl53l1x adafruit-circuitpython-extended-bus
+pip install adafruit-blinka adafruit-circuitpython-vl53l1x
+# Optional: required when overriding REVCAM_I2C_BUS
+pip install adafruit-circuitpython-extended-bus
 ```
 
 With those packages missing the distance panel reports **driver unavailable**
@@ -191,8 +198,9 @@ Just like the INA219, the VL53L1X defaults to the Pi's primary I²C controller a
 address `0x29`. When connecting the sensor to a different bus export
 `REVCAM_I2C_BUS` before launching the server and ensure the optional
 `adafruit-circuitpython-extended-bus` helper is available so RevCam can open the
-alternate adapter. The installation helper already includes it, but manual
-setups should install it before overriding the bus number.
+alternate adapter. The installation helper installs it automatically when
+possible and otherwise reports a warning so you can install it manually prior to
+changing the bus number.
 
 ### Development machine installation
 
