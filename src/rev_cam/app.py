@@ -15,6 +15,7 @@ from .camera import CAMERA_SOURCES, BaseCamera, CameraError, create_camera, iden
 from .config import ConfigManager, Resolution, RESOLUTION_PRESETS, StreamSettings
 from .diagnostics import collect_diagnostics
 from .distance import DistanceCalibration, DistanceMonitor, create_distance_overlay
+from .reversing_aids import create_reversing_aids_overlay
 from .pipeline import FramePipeline
 from .streaming import MJPEGStreamer, encode_frame_to_jpeg
 from .version import APP_VERSION
@@ -83,6 +84,22 @@ class BatteryCapacityPayload(BaseModel):
 class StreamSettingsPayload(BaseModel):
     fps: int | None = None
     jpeg_quality: int | None = None
+
+
+class ReversingAidPointPayload(BaseModel):
+    x: float
+    y: float
+
+
+class ReversingAidSegmentPayload(BaseModel):
+    start: ReversingAidPointPayload
+    end: ReversingAidPointPayload
+
+
+class ReversingAidsPayload(BaseModel):
+    enabled: bool | None = None
+    left: list[ReversingAidSegmentPayload] | None = None
+    right: list[ReversingAidSegmentPayload] | None = None
 
 
 def create_app(
@@ -156,6 +173,7 @@ def create_app(
     pipeline.add_overlay(
         create_distance_overlay(distance_monitor, config_manager.get_distance_zones)
     )
+    pipeline.add_overlay(create_reversing_aids_overlay(config_manager.get_reversing_aids))
     camera: BaseCamera | None = None
     streamer: MJPEGStreamer | None = None
     stream_error: str | None = None
@@ -520,6 +538,19 @@ def create_app(
         response["zones"] = zones.to_dict()
         response["calibration"] = calibration.to_dict()
         return response
+
+    @app.get("/api/reversing-aids")
+    def get_reversing_aids() -> dict[str, object]:
+        config = config_manager.get_reversing_aids()
+        return config.to_dict()
+
+    @app.post("/api/reversing-aids")
+    def update_reversing_aids(payload: ReversingAidsPayload) -> dict[str, object]:
+        try:
+            config = config_manager.set_reversing_aids(payload.dict(exclude_none=True))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return config.to_dict()
 
     @app.get("/api/wifi/status")
     async def get_wifi_status() -> dict[str, object | None]:
