@@ -31,6 +31,23 @@ class _StubSimplejpeg:
         return b"jpeg"
 
 
+class _StubPillowImage:
+    def __init__(self, array: np.ndarray) -> None:
+        self.array = array
+        self.saved: list[dict[str, object]] = []
+
+    def save(self, buffer, *, format: str, quality: int, optimize: bool) -> None:  # pragma: no cover - exercised in tests
+        self.saved.append(
+            {
+                "buffer": buffer,
+                "format": format,
+                "quality": quality,
+                "optimize": optimize,
+            }
+        )
+        buffer.write(b"piljpeg")
+
+
 def _enable_webrtc_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
     class _EncodingParameters:
         def __init__(self) -> None:
@@ -153,6 +170,38 @@ def test_encode_frame_copies_non_contiguous_input(monkeypatch: pytest.MonkeyPatc
     encoded = stub.images[0]
     assert encoded.flags["C_CONTIGUOUS"]
     assert np.array_equal(encoded, rotated)
+
+
+def test_encode_frame_uses_pillow_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    frames: list[_StubPillowImage] = []
+
+    def _fromarray(array: np.ndarray) -> _StubPillowImage:
+        image = _StubPillowImage(array)
+        frames.append(image)
+        return image
+
+    monkeypatch.setattr(streaming, "simplejpeg", None, raising=False)
+    monkeypatch.setattr(streaming, "_SIMPLEJPEG_IMPORT_ERROR", RuntimeError("boom"), raising=False)
+    monkeypatch.setattr(
+        streaming,
+        "Image",
+        SimpleNamespace(fromarray=_fromarray),
+        raising=False,
+    )
+    monkeypatch.setattr(streaming, "_PIL_IMPORT_ERROR", None, raising=False)
+
+    frame = np.zeros((2, 2, 3), dtype=np.uint8)
+    result = streaming.encode_frame_to_jpeg(frame, quality=85)
+
+    assert result == b"piljpeg"
+    assert len(frames) == 1
+    saved = frames[0].saved
+    assert len(saved) == 1
+    save_info = saved[0]
+    assert save_info["format"] == "JPEG"
+    assert save_info["quality"] == 85
+    assert save_info["optimize"] is True
+    assert save_info["buffer"].getvalue() == b"piljpeg"
 
 
 def test_streamer_apply_settings_updates_runtime(monkeypatch: pytest.MonkeyPatch) -> None:

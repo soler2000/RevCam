@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import inspect
 import logging
 import time
@@ -18,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 try:  # pragma: no cover - dependency availability varies by platform
     import simplejpeg
-except ImportError as exc:  # pragma: no cover - dependency availability varies
+except Exception as exc:  # pragma: no cover - dependency availability varies
     simplejpeg = None
     _SIMPLEJPEG_IMPORT_ERROR = exc
     _SIMPLEJPEG_ENCODE_KWARGS: set[str] = set()
@@ -30,6 +31,15 @@ else:  # pragma: no cover - dependency availability varies
         )
     except (TypeError, ValueError):  # pragma: no cover - C-extension signature unsupported
         _SIMPLEJPEG_ENCODE_KWARGS = set()
+
+
+try:  # pragma: no cover - dependency availability varies by platform
+    from PIL import Image
+except Exception as exc:  # pragma: no cover - dependency availability varies
+    Image = None  # type: ignore[assignment]
+    _PIL_IMPORT_ERROR = exc
+else:  # pragma: no cover - dependency availability varies
+    _PIL_IMPORT_ERROR = None
 
 
 try:  # pragma: no cover - dependency availability varies by platform
@@ -136,22 +146,14 @@ def _normalise_frame(frame: np.ndarray | list) -> np.ndarray:
     return array
 
 
-def encode_frame_to_jpeg(
-    frame: np.ndarray | list,
-    *,
-    quality: int,
-) -> bytes:
-    """Encode an RGB frame into JPEG bytes using the configured quality."""
-
+def _encode_with_simplejpeg(array: np.ndarray, quality: int) -> bytes:
     if simplejpeg is None:  # pragma: no cover - dependency availability varies
         raise RuntimeError(
             "simplejpeg is required for JPEG encoding"
         ) from _SIMPLEJPEG_IMPORT_ERROR
 
-    array = _normalise_frame(frame)
-
     encode_kwargs: dict[str, object] = {
-        "quality": int(quality),
+        "quality": quality,
         "colorspace": "RGB",
     }
     if "fastdct" in _SIMPLEJPEG_ENCODE_KWARGS:
@@ -160,6 +162,40 @@ def encode_frame_to_jpeg(
         encode_kwargs["fastupsample"] = True
 
     return simplejpeg.encode_jpeg(array, **encode_kwargs)
+
+
+def _encode_with_pillow(array: np.ndarray, quality: int) -> bytes:
+    if Image is None:  # pragma: no cover - dependency availability varies
+        raise RuntimeError("Pillow is required for JPEG encoding") from _PIL_IMPORT_ERROR
+
+    buffer = io.BytesIO()
+    Image.fromarray(array).save(
+        buffer,
+        format="JPEG",
+        quality=quality,
+        optimize=True,
+    )
+    return buffer.getvalue()
+
+
+def encode_frame_to_jpeg(
+    frame: np.ndarray | list,
+    *,
+    quality: int,
+) -> bytes:
+    """Encode an RGB frame into JPEG bytes using the configured quality."""
+
+    array = _normalise_frame(frame)
+    quality_int = int(quality)
+
+    if simplejpeg is not None:
+        return _encode_with_simplejpeg(array, quality_int)
+
+    if Image is not None:
+        return _encode_with_pillow(array, quality_int)
+
+    error = _SIMPLEJPEG_IMPORT_ERROR or _PIL_IMPORT_ERROR
+    raise RuntimeError("JPEG encoding requires simplejpeg or Pillow") from error
 
 
 @dataclass
