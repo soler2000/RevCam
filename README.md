@@ -52,10 +52,16 @@ building everything from PyPI. Follow these steps on the Pi:
    ```bash
    sudo apt update
    sudo apt install python3-picamera2 python3-prctl python3-simplejpeg
-   ```
+  ```
 
    Prefer a single command? Run the bundled helper, which also installs
    the native JPEG encoder used by the streaming pipeline:
+
+   > **Tip:** The SimpleJPEG package is published as `python3-simplejpeg` on
+   > Raspberry Pi OS. Running `sudo apt install simplejpeg` will fail with an
+   > "unable to locate package" error. If the package is unavailable from your
+   > mirror, install SimpleJPEG from PyPI after activating the virtual
+   > environment (see the next step).
 
    ```bash
    ./scripts/install_prereqs.sh
@@ -68,6 +74,13 @@ building everything from PyPI. Follow these steps on the Pi:
    python3 -m venv --system-site-packages .venv
    source .venv/bin/activate
    python -m pip install --upgrade pip
+   ```
+
+   If APT could not find `python3-simplejpeg`, install the wheel inside the
+   active virtual environment before proceeding:
+
+   ```bash
+   pip install --prefer-binary --extra-index-url https://www.piwheels.org/simple simplejpeg
    ```
 
 3. Install RevCam from the source tree. On Pi hardware this step pulls
@@ -87,6 +100,31 @@ building everything from PyPI. Follow these steps on the Pi:
 
 The `--prefer-binary` flag asks `pip` to fetch pre-built wheels when
 available, and the PiWheels index provides ARM builds for most dependencies.
+
+### LED ring requirements
+
+RevCam's status indicator uses a 16-pixel WS2812/NeoPixel ring attached to GPIO18.
+Driving the LEDs relies on Adafruit's CircuitPython stack. The installation
+script automatically upgrades the necessary packages after the core project is
+installed, but when managing the environment manually be sure to install them
+yourself:
+
+```bash
+pip install --upgrade adafruit-blinka adafruit-circuitpython-neopixel
+```
+
+Without these modules the LED helper falls back to a no-op driver and the ring
+remains dark.
+
+Adafruit's WS2812 driver accesses the Pi's DMA engine via ``/dev/mem`` so it
+requires root privileges. When RevCam starts without ``sudo`` (or an
+equivalent capability such as the ``pigpiod`` backend) the helper logs "LED
+driver unavailable" and disables the animations. The
+``scripts/run_with_sudo.sh`` helper automatically re-executes under
+``sudo``, ensures the project's virtual environment is on ``PATH``, and
+launches Uvicorn with the default RevCam application. Use it whenever you need
+the lighting tab to drive the ring, or configure an alternative backend before
+expecting the ring to light up.
 
 ### Saving snapshots
 
@@ -122,7 +160,7 @@ use bus 29:
 
 ```bash
 export REVCAM_I2C_BUS=29
-uvicorn rev_cam.app:create_app --factory --host 0.0.0.0 --port 9000
+./scripts/run_with_sudo.sh
 ```
 
 When overriding the bus number install the optional
@@ -259,6 +297,11 @@ REVCAM_REF="main"  # replace with a branch or pull/<ID>/head for PR testing
 sudo apt update
 sudo apt install -y python3-picamera2 python3-prctl python3-simplejpeg
 
+# If python3-simplejpeg is unavailable, install it from PyPI after the
+# virtual environment is created:
+#   source .venv/bin/activate
+#   pip install --prefer-binary --extra-index-url https://www.piwheels.org/simple simplejpeg
+
 if [ ! -d RevCam ]; then
   git clone "$REVCAM_REPO" RevCam
 fi
@@ -270,7 +313,7 @@ git checkout FETCH_HEAD
 # Install runtime deps; use --dev on non-Pi development machines
 ./scripts/install.sh --pi
 
-uvicorn rev_cam.app:create_app --factory --host 0.0.0.0 --port 9000
+./scripts/run_with_sudo.sh
 ```
 
 The script automatically reuses the existing virtual environment on subsequent
@@ -302,7 +345,7 @@ git checkout "$REVCAM_BRANCH"
 
 ./scripts/install.sh --pi
 
-uvicorn rev_cam.app:create_app --factory --host 0.0.0.0 --port 9000
+./scripts/run_with_sudo.sh
 ```
 
 ### Fast branch updates without rebuilding dependencies
@@ -327,7 +370,7 @@ rebuilding wheels:
 cd ../RevCam-my-feature
 source ../RevCam/.venv/bin/activate
 pip install --no-deps -e .
-uvicorn rev_cam.app:create_app --factory --host 0.0.0.0 --port 9000
+./scripts/run_with_sudo.sh
 ```
 
 Use `pip install -e .[dev]` only when `pyproject.toml` changes; otherwise
@@ -347,10 +390,10 @@ Camera support is pluggable:
 - **Synthetic frames** – For development without camera hardware set
   `REVCAM_CAMERA=synthetic` (default when Picamera2 is unavailable).
 
-Run the server with
+Run the server (and automatically elevate for NeoPixel access) with
 
 ```bash
-uvicorn rev_cam.app:create_app --factory --host 0.0.0.0 --port 8000
+./scripts/run_with_sudo.sh --port 8000
 ```
 
 Then open `http://<pi-address>:8000` on the iOS device to view the stream. Access the

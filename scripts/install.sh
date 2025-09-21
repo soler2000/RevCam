@@ -189,6 +189,27 @@ then
     set +x
 fi
 
+if ! "$VENV_DIR/bin/python" - <<'PY'
+import importlib
+import sys
+
+try:
+    importlib.import_module("board")
+    importlib.import_module("neopixel")
+except ModuleNotFoundError:
+    sys.exit(1)
+else:
+    sys.exit(0)
+PY
+then
+    echo "Installing LED ring driver dependencies: adafruit-blinka adafruit-circuitpython-neopixel"
+    set -x
+    "$VENV_DIR/bin/python" -m pip install "${PIP_FLAGS[@]}" --upgrade \
+        adafruit-blinka \
+        adafruit-circuitpython-neopixel
+    set +x
+fi
+
 trap - EXIT
 popd >/dev/null
 
@@ -197,5 +218,8 @@ cat <<SUMMARY
 Installation complete.
 Activate the virtual environment with:
   source "$VENV_DIR/bin/activate"
+
+Launch the server (with sudo for NeoPixel access) via:
+  ./scripts/run_with_sudo.sh
 
 SUMMARY

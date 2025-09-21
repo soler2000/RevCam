@@ -55,6 +55,7 @@ class _ZeroconfAdvertiser(_BaseAdvertiser):
         self._zeroconf: Zeroconf | None = None
         self._info: ServiceInfo | None = None
         self._current_ip: str | None = None
+        self._disabled_reason: str | None = None
 
     # ------------------------------ helpers -----------------------------
     def _ensure_zeroconf(self) -> Zeroconf:
@@ -78,6 +79,8 @@ class _ZeroconfAdvertiser(_BaseAdvertiser):
 
     # ------------------------------ control ----------------------------
     def advertise(self, ip_address: str | None) -> None:
+        if self._disabled_reason is not None:
+            return
         if ip_address is None:
             self.clear()
             return
@@ -103,7 +106,41 @@ class _ZeroconfAdvertiser(_BaseAdvertiser):
         try:
             zeroconf.register_service(info, allow_name_change=False)
         except Exception as exc:  # pragma: no cover - zeroconf runtime issues
-            logger.warning("Failed to register mDNS service: %s", exc)
+            message = (str(exc) or exc.__class__.__name__).strip()
+            lowered = message.lower()
+            permission_related = (
+                isinstance(exc, PermissionError)
+                or "permission" in lowered
+                or "sudo" in lowered
+                or "/dev/mem" in lowered
+            )
+            if permission_related and self._disabled_reason is None:
+                if "/dev/mem" in lowered or "sudo" in lowered:
+                    logger.warning(
+                        "mDNS advertising disabled: insufficient privileges to access "
+                        "the NeoPixel driver (%s). Run RevCam with sudo or configure "
+                        "an alternate LED backend to restore lighting and mDNS.",
+                        message,
+                    )
+                else:
+                    logger.warning(
+                        "mDNS advertising disabled due to insufficient privileges: %s", message
+                    )
+                self._disabled_reason = message
+                self._info = None
+                self._current_ip = None
+                if self._zeroconf is not None:
+                    try:
+                        self._zeroconf.close()
+                    except Exception:  # pragma: no cover - best effort cleanup
+                        logger.debug(
+                            "Ignoring Zeroconf close failure after permission error",
+                            exc_info=True,
+                        )
+                    finally:
+                        self._zeroconf = None
+                return
+            logger.warning("Failed to register mDNS service: %s", message)
             return
         self._info = info
         self._current_ip = ip_address

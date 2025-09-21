@@ -1,8 +1,11 @@
 """FastAPI application wiring together the RevCam services."""
 from __future__ import annotations
 
+import asyncio
 import logging
+import math
 import os
+import string
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Response
@@ -15,6 +18,7 @@ from .camera import CAMERA_SOURCES, BaseCamera, CameraError, create_camera, iden
 from .config import ConfigManager, Resolution, RESOLUTION_PRESETS, StreamSettings
 from .diagnostics import collect_diagnostics
 from .distance import DistanceCalibration, DistanceMonitor, create_distance_overlay
+from .led_matrix import LedRing
 from .reversing_aids import create_reversing_aids_overlay
 from .pipeline import FramePipeline
 from .streaming import MJPEGStreamer, encode_frame_to_jpeg
@@ -102,6 +106,13 @@ class ReversingAidsPayload(BaseModel):
     right: list[ReversingAidSegmentPayload] | None = None
 
 
+class LedSettingsPayload(BaseModel):
+    pattern: str | None = None
+    error: bool | None = None
+    illumination_color: str | None = None
+    illumination_intensity: float | int | None = None
+
+
 def create_app(
     config_path: Path | str = Path("data/config.json"),
     *,
@@ -181,15 +192,78 @@ def create_app(
     active_resolution: Resolution = config_manager.get_resolution()
     camera_errors: dict[str, str] = {}
 
+    led_ring = LedRing(logger=logging.getLogger(f"{__name__}.led_ring"))
+
     app.state.wifi_manager = wifi_manager
     app.state.distance_monitor = distance_monitor
     app.state.battery_supervisor = battery_supervisor
+    app.state.led_ring = led_ring
+
+    async def _set_ready_pattern() -> None:
+        await led_ring.set_pattern("ready" if streamer is not None else "error")
+
+    async def _serialise_led_status() -> dict[str, object]:
+        status = await led_ring.get_status()
+        colour = status.illumination_color
+        colour_hex = "#" + "".join(f"{component:02X}" for component in colour)
+        intensity_percent = max(
+            0,
+            min(100, int(round(status.illumination_intensity * 100))),
+        )
+        return {
+            "patterns": list(status.patterns),
+            "pattern": status.pattern,
+            "active_pattern": status.active_pattern,
+            "error": status.error,
+            "available": status.available,
+            "message": status.message,
+            "illumination": {
+                "color": colour_hex,
+                "intensity": intensity_percent,
+            },
+        }
+
+    def _parse_hex_colour(value: str) -> tuple[int, int, int]:
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("Illumination colour must be a hex string in RRGGBB format")
+        candidate = value.strip()
+        if candidate.startswith("#"):
+            candidate = candidate[1:]
+        if len(candidate) != 6 or any(ch not in string.hexdigits for ch in candidate):
+            raise ValueError("Illumination colour must be a hex string in RRGGBB format")
+        red = int(candidate[0:2], 16)
+        green = int(candidate[2:4], 16)
+        blue = int(candidate[4:6], 16)
+        return red, green, blue
+
+    def _parse_illumination_intensity(value: float | int) -> float:
+        try:
+            percent = float(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Illumination intensity must be a number between 0 and 100") from exc
+        if not math.isfinite(percent):
+            raise ValueError("Illumination intensity must be finite")
+        if not 0.0 <= percent <= 100.0:
+            raise ValueError("Illumination intensity must be between 0 and 100")
+        return percent / 100.0
 
     def _record_camera_error(source: str, message: str | None) -> None:
         if message:
             camera_errors[source] = message
         else:
             camera_errors.pop(source, None)
+
+        if not camera_errors:
+            has_error = False
+        else:
+            has_error = True
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            logger.debug("Unable to signal LED error state; no running loop")
+        else:
+            loop.create_task(led_ring.set_error(has_error))
 
     async def _capture_snapshot_bytes() -> bytes:
         if camera is None:
@@ -281,6 +355,7 @@ def create_app(
     @app.on_event("startup")
     async def startup() -> None:  # pragma: no cover - framework hook
         nonlocal camera, active_camera_choice, streamer, active_resolution, stream_error
+        await led_ring.set_pattern("boot")
         selection = config_manager.get_camera()
         resolution = config_manager.get_resolution()
         camera, active_camera_choice = _build_camera(
@@ -303,11 +378,13 @@ def create_app(
             streamer = None
         else:
             stream_error = None
+        await _set_ready_pattern()
         battery_supervisor.start()
 
     @app.on_event("shutdown")
     async def shutdown() -> None:  # pragma: no cover - framework hook
         nonlocal streamer
+        await led_ring.set_pattern("boot")
         if streamer is not None:
             await streamer.aclose()
         if camera:
@@ -315,6 +392,7 @@ def create_app(
         await battery_supervisor.aclose()
         if hasattr(wifi_manager, "close"):
             await run_in_threadpool(wifi_manager.close)
+        await led_ring.aclose()
 
     @app.get("/", response_class=HTMLResponse)
     async def index() -> str:
@@ -323,6 +401,49 @@ def create_app(
     @app.get("/settings", response_class=HTMLResponse)
     async def settings() -> str:
         return _load_static("settings.html")
+
+    @app.get("/api/led")
+    async def get_led_status() -> dict[str, object]:
+        return await _serialise_led_status()
+
+    @app.post("/api/led")
+    async def update_led_status(payload: LedSettingsPayload) -> dict[str, object]:
+        updated = False
+        if payload.pattern is not None:
+            candidate = payload.pattern.strip().lower()
+            if not candidate:
+                raise HTTPException(status_code=400, detail="Pattern name must be provided")
+            try:
+                await led_ring.set_pattern(candidate)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            updated = True
+        if payload.error is not None:
+            await led_ring.set_error(bool(payload.error))
+            updated = True
+        colour_value: tuple[int, int, int] | None = None
+        intensity_value: float | None = None
+        if payload.illumination_color is not None:
+            try:
+                colour_value = _parse_hex_colour(payload.illumination_color)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if payload.illumination_intensity is not None:
+            try:
+                intensity_value = _parse_illumination_intensity(payload.illumination_intensity)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if colour_value is not None or intensity_value is not None:
+            await led_ring.set_illumination(color=colour_value, intensity=intensity_value)
+            updated = True
+        if not updated:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Specify a pattern, error flag, or illumination setting to update the LED ring"
+                ),
+            )
+        return await _serialise_led_status()
 
     @app.get("/api/orientation")
     async def get_orientation() -> dict[str, int | bool]:
@@ -645,6 +766,7 @@ def create_app(
                 "settings": stream_settings.to_dict(),
                 "active": active_stream_settings,
             }
+            await _set_ready_pattern()
             return {
                 "selected": selection,
                 "active": active_camera_choice,
@@ -656,6 +778,7 @@ def create_app(
                 },
             }
 
+        await led_ring.set_pattern("boot")
         old_selection = current_selection
         old_resolution = current_resolution
         old_camera = camera
@@ -705,6 +828,7 @@ def create_app(
                 elif streamer is not None and camera is not None:
                     streamer.camera = camera
                     stream_error = None
+            await _set_ready_pattern()
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
         camera = new_camera
@@ -729,6 +853,7 @@ def create_app(
         else:
             streamer.camera = camera
             stream_error = None
+        await _set_ready_pattern()
         stream_settings = config_manager.get_stream_settings()
         active_stream_settings = (
             {"fps": streamer.fps, "jpeg_quality": streamer.jpeg_quality}

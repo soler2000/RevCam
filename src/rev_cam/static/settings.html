@@ -456,6 +456,30 @@
         background: var(--surface-primary);
         box-shadow: var(--shadow-sm);
       }
+      #led-summary {
+        margin: 0 0 var(--stack-gap);
+        color: var(--text-muted);
+      }
+      #led-form {
+        display: flex;
+        flex-direction: column;
+        gap: var(--stack-gap);
+      }
+      #led-form label {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-sm);
+        margin: 0;
+      }
+      .led-checkbox {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--space-sm);
+        font-size: 0.95rem;
+      }
+      .led-checkbox input[type="checkbox"] {
+        margin-top: 0;
+      }
       #stream-section h2 {
         margin-top: 0;
       }
@@ -1079,6 +1103,18 @@
                   type="button"
                   class="tab-button"
                   role="tab"
+                  id="tab-lighting"
+                  aria-controls="panel-lighting"
+                  aria-selected="false"
+                  data-tab="lighting"
+                  tabindex="-1"
+                >
+                  Lighting
+                </button>
+                <button
+                  type="button"
+                  class="tab-button"
+                  role="tab"
                   id="tab-distance"
                   aria-controls="panel-distance"
                   aria-selected="false"
@@ -1262,6 +1298,35 @@
               role="alert"
               aria-live="assertive"
             ></p>
+          </section>
+        </section>
+
+            <section
+          id="panel-lighting"
+          class="tab-panel"
+          role="tabpanel"
+          aria-labelledby="tab-lighting"
+          data-tab="lighting"
+          hidden
+        >
+          <section class="card">
+            <h2>Status LEDs</h2>
+            <p class="muted">Control the LED ring indicator to reflect system state.</p>
+            <p id="led-summary" class="muted helper-text">Loading LED status…</p>
+            <form id="led-form">
+              <label>
+                Pattern
+                <select id="led-pattern" name="pattern"></select>
+              </label>
+              <label class="led-checkbox">
+                <input type="checkbox" id="led-error" />
+                Overlay error animation
+              </label>
+              <div class="form-actions">
+                <button type="submit">Apply LED settings</button>
+                <span id="led-status" class="muted helper-text status-text"></span>
+              </div>
+            </form>
           </section>
         </section>
 
@@ -1807,6 +1872,18 @@
       const CALIBRATION_OFFSET_LIMIT = 5.0;
       const CALIBRATION_SCALE_MIN = 0.5;
       const CALIBRATION_SCALE_MAX = 2.0;
+      const ledSummary = document.getElementById("led-summary");
+      const ledForm = document.getElementById("led-form");
+      const ledPatternSelect = document.getElementById("led-pattern");
+      const ledErrorToggle = document.getElementById("led-error");
+      const ledStatus = document.getElementById("led-status");
+      const ledSubmitButton = ledForm
+        ? ledForm.querySelector('button[type="submit"]')
+        : null;
+      let ledStatusTimer = null;
+      let ledHasLoaded = false;
+      let ledLoading = false;
+      let currentLedState = null;
       const distanceSummary = document.getElementById("distance-summary");
       const distanceValue = document.getElementById("distance-value");
       const distanceZone = document.getElementById("distance-zone");
@@ -2027,6 +2104,217 @@
         : null;
       const HOTSPOT_HOSTNAME = "motion.local";
       const HOTSPOT_DEV_ROLLBACK_DEFAULT = 120;
+
+      function formatLedPatternName(name) {
+        if (typeof name !== "string" || !name) {
+          return "";
+        }
+        return name
+          .split(/[-_\s]+/)
+          .filter((part) => part.length > 0)
+          .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+          .join(" ");
+      }
+
+      function summariseLedState(state) {
+        if (!state) {
+          return "LED status unavailable.";
+        }
+        const patterns = Array.isArray(state.patterns) ? state.patterns : [];
+        const pattern = typeof state.pattern === "string" ? state.pattern : "";
+        const active = typeof state.active_pattern === "string" ? state.active_pattern : "";
+        const errorActive = state.error === true;
+        const available = state.available !== false;
+        const notice = typeof state.message === "string" ? state.message : "";
+        const pieces = [];
+        if (pattern) {
+          pieces.push(`Base pattern: ${formatLedPatternName(pattern)}`);
+        } else {
+          pieces.push("Base pattern unavailable");
+        }
+        if (active && active !== pattern) {
+          pieces.push(`Active animation: ${formatLedPatternName(active)}`);
+        }
+        pieces.push(
+          errorActive ? "Error animation enabled" : "Error animation disabled",
+        );
+        if (!available) {
+          pieces.push("LED driver unavailable");
+          if (notice) {
+            pieces.push(notice);
+          }
+        }
+        if (!patterns.length) {
+          pieces.push("No LED patterns available");
+        }
+        const summary = pieces.join(" • ");
+        return summary ? `${summary}.` : "";
+      }
+
+      function setLedStatusMessage(message, options = {}) {
+        if (!ledStatus) {
+          return;
+        }
+        if (ledStatusTimer) {
+          window.clearTimeout(ledStatusTimer);
+          ledStatusTimer = null;
+        }
+        ledStatus.textContent = message || "";
+        if (message && options.persistent !== true) {
+          ledStatusTimer = window.setTimeout(() => {
+            if (ledStatus && ledStatus.textContent === message) {
+              ledStatus.textContent = "";
+            }
+            ledStatusTimer = null;
+          }, 4000);
+        }
+      }
+
+      function updateLedControls(state, options = {}) {
+        if (!ledForm) {
+          return;
+        }
+        const forceUpdate = options.forceUpdate === true;
+        const patterns = Array.isArray(state?.patterns) ? state.patterns : [];
+        if (ledPatternSelect instanceof HTMLSelectElement) {
+          const existingValues = Array.from(ledPatternSelect.options, (option) => option.value);
+          const patternsChanged =
+            forceUpdate ||
+            patterns.length !== existingValues.length ||
+            patterns.some((pattern, index) => pattern !== existingValues[index]);
+          if (patternsChanged) {
+            const fragment = document.createDocumentFragment();
+            for (const pattern of patterns) {
+              const option = document.createElement("option");
+              option.value = pattern;
+              const label = formatLedPatternName(pattern) || pattern;
+              option.textContent = label;
+              fragment.appendChild(option);
+            }
+            ledPatternSelect.replaceChildren(fragment);
+          }
+          const desired = typeof state?.pattern === "string" ? state.pattern : "";
+          if (patterns.includes(desired)) {
+            if (forceUpdate || ledPatternSelect.dataset.userEdited !== "true") {
+              ledPatternSelect.value = desired;
+              if (forceUpdate) {
+                delete ledPatternSelect.dataset.userEdited;
+              }
+            }
+          } else if (forceUpdate) {
+            ledPatternSelect.value = patterns.length ? patterns[0] : "";
+            delete ledPatternSelect.dataset.userEdited;
+          }
+          ledPatternSelect.disabled = patterns.length === 0;
+        }
+        if (ledErrorToggle instanceof HTMLInputElement) {
+          const desired = state && typeof state.error === "boolean" ? state.error : false;
+          if (forceUpdate || ledErrorToggle.dataset.userEdited !== "true") {
+            ledErrorToggle.checked = desired;
+            if (forceUpdate) {
+              delete ledErrorToggle.dataset.userEdited;
+            }
+          }
+          ledErrorToggle.disabled = patterns.length === 0;
+        }
+        if (ledSubmitButton instanceof HTMLButtonElement) {
+          ledSubmitButton.disabled = patterns.length === 0;
+        }
+      }
+
+      function applyLedStatus(state, options = {}) {
+        if (options.clearStatus === true) {
+          setLedStatusMessage("");
+        }
+        if (state && typeof state === "object") {
+          currentLedState = {
+            patterns: Array.isArray(state.patterns) ? [...state.patterns] : [],
+            pattern: typeof state.pattern === "string" ? state.pattern : "",
+            active_pattern:
+              typeof state.active_pattern === "string" ? state.active_pattern : "",
+            error: state.error === true,
+            available: state.available !== false,
+            message:
+              typeof state.message === "string" && state.message.trim()
+                ? state.message.trim()
+                : "",
+            illumination:
+              state && typeof state.illumination === "object" && state.illumination
+                ? {
+                    color:
+                      typeof state.illumination.color === "string"
+                        ? state.illumination.color
+                        : null,
+                    intensity: Number.isFinite(state.illumination.intensity)
+                      ? Number(state.illumination.intensity)
+                      : null,
+                  }
+                : null,
+          };
+        } else {
+          currentLedState = null;
+        }
+        if (ledSummary) {
+          ledSummary.textContent = summariseLedState(currentLedState);
+        }
+        updateLedControls(currentLedState, { forceUpdate: options.forceUpdate === true });
+      }
+
+      async function refreshLedStatus({ showLoading = false, forceUpdate = false } = {}) {
+        if (ledLoading) {
+          return currentLedState;
+        }
+        ledLoading = true;
+        if (showLoading && ledSummary) {
+          ledSummary.textContent = "Loading LED status…";
+        }
+        try {
+          const response = await fetch("/api/led", { cache: "no-store" });
+          if (!response.ok) {
+            let detail = `LED status request failed with ${response.status}`;
+            try {
+              const problem = await response.json();
+              if (problem && typeof problem.detail === "string" && problem.detail.trim()) {
+                detail = problem.detail.trim();
+              }
+            } catch (err) {
+              console.error(err);
+            }
+            throw new Error(detail);
+          }
+          const payload = await response.json();
+          applyLedStatus(payload, { forceUpdate: forceUpdate === true });
+          ledHasLoaded = true;
+          return payload;
+        } catch (error) {
+          console.error("LED status error", error);
+          const message =
+            error instanceof Error && error.message
+              ? error.message
+              : "Unable to load LED status.";
+          if (ledSummary) {
+            ledSummary.textContent = message;
+          }
+          ledHasLoaded = false;
+          return null;
+        } finally {
+          ledLoading = false;
+        }
+      }
+
+      if (ledPatternSelect instanceof HTMLSelectElement) {
+        ledPatternSelect.addEventListener("change", () => {
+          ledPatternSelect.dataset.userEdited = "true";
+          setLedStatusMessage("");
+        });
+      }
+
+      if (ledErrorToggle instanceof HTMLInputElement) {
+        ledErrorToggle.addEventListener("change", () => {
+          ledErrorToggle.dataset.userEdited = "true";
+          setLedStatusMessage("");
+        });
+      }
 
       function clearStreamSettingsStatus() {
         if (streamSettingsStatus) {
@@ -3408,6 +3696,10 @@
             .catch((err) => console.error(err));
         } else {
           stopBatteryStatusPolling();
+          if (desired === "lighting") {
+            refreshLedStatus({ showLoading: !ledHasLoaded, forceUpdate: true })
+              .catch((err) => console.error(err));
+          }
         }
       }
 
@@ -3979,8 +4271,14 @@
       document.addEventListener("visibilitychange", () => {
         if (document.hidden) {
           stopBatteryStatusPolling();
-        } else if (activeSettingsTab === "battery") {
-          startBatteryStatusPolling();
+        } else {
+          if (activeSettingsTab === "battery") {
+            startBatteryStatusPolling();
+          }
+          if (activeSettingsTab === "lighting") {
+            refreshLedStatus({ forceUpdate: false })
+              .catch((err) => console.error(err));
+          }
         }
       });
 
@@ -4811,6 +5109,72 @@
         });
       }
 
+      if (ledForm) {
+        ledForm.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          if (!(ledPatternSelect instanceof HTMLSelectElement)) {
+            setLedStatusMessage("LED controls unavailable.", { persistent: true });
+            return;
+          }
+          const payload = {};
+          const selectedPattern = ledPatternSelect.value;
+          const currentPattern = currentLedState ? currentLedState.pattern : "";
+          if (selectedPattern && (!currentPattern || selectedPattern !== currentPattern)) {
+            payload.pattern = selectedPattern;
+          }
+          if (ledErrorToggle instanceof HTMLInputElement) {
+            const desiredError = ledErrorToggle.checked === true;
+            const currentError = currentLedState ? currentLedState.error === true : false;
+            if (!currentLedState || desiredError !== currentError) {
+              payload.error = desiredError;
+            }
+          }
+          if (!("pattern" in payload) && !("error" in payload)) {
+            setLedStatusMessage("No LED changes to apply.");
+            return;
+          }
+          setLedStatusMessage("Applying LED settings…", { persistent: true });
+          const wasDisabled =
+            ledSubmitButton instanceof HTMLButtonElement ? ledSubmitButton.disabled : null;
+          if (ledSubmitButton instanceof HTMLButtonElement) {
+            ledSubmitButton.disabled = true;
+          }
+          let appliedState = false;
+          try {
+            const response = await fetch("/api/led", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload),
+            });
+            if (!response.ok) {
+              let detail = "Unable to update LED settings.";
+              try {
+                const problem = await response.json();
+                if (problem && typeof problem.detail === "string" && problem.detail.trim()) {
+                  detail = problem.detail.trim();
+                }
+              } catch (err) {
+                console.error(err);
+              }
+              setLedStatusMessage(detail, { persistent: true });
+              return;
+            }
+            const data = await response.json();
+            applyLedStatus(data, { forceUpdate: true });
+            appliedState = true;
+            ledHasLoaded = true;
+            setLedStatusMessage("LED settings updated");
+          } catch (error) {
+            console.error("LED settings update error", error);
+            setLedStatusMessage("Unable to update LED settings.", { persistent: true });
+          } finally {
+            if (!appliedState && ledSubmitButton instanceof HTMLButtonElement) {
+              ledSubmitButton.disabled = wasDisabled === true;
+            }
+          }
+        });
+      }
+
       if (wifiRefreshButton) {
         wifiRefreshButton.addEventListener("click", () => {
           refreshWifiStatus().catch((err) => console.error(err));
@@ -4860,11 +5224,13 @@
           cameraResponse,
           distanceResponse,
           reversingResponse,
+          ledResponse,
         ] = await Promise.all([
           fetch("/api/orientation"),
           fetch("/api/camera"),
           fetch("/api/distance"),
           fetch("/api/reversing-aids"),
+          fetch("/api/led"),
         ]);
         if (!orientationResponse.ok) {
           throw new Error("Unable to fetch current orientation");
@@ -4878,23 +5244,36 @@
         if (!reversingResponse.ok) {
           throw new Error("Unable to fetch reversing aid configuration");
         }
-        const [orientationData, cameraData, distanceData, reversingData] = await Promise.all([
+        if (!ledResponse.ok) {
+          throw new Error("Unable to fetch LED configuration");
+        }
+        const [
+          orientationData,
+          cameraData,
+          distanceData,
+          reversingData,
+          ledData,
+        ] = await Promise.all([
           orientationResponse.json(),
           cameraResponse.json(),
           distanceResponse.json(),
           reversingResponse.json(),
+          ledResponse.json(),
         ]);
         return {
           orientation: orientationData,
           camera: cameraData,
           distance: distanceData,
           reversing: reversingData,
+          led: ledData,
         };
       }
 
       async function loadSettings() {
         const data = await fetchSettings();
         applySettings(data.orientation, data.camera);
+        applyLedStatus(data.led, { forceUpdate: true, clearStatus: true });
+        ledHasLoaded = true;
         applyDistanceData(data.distance, { updateInputs: true, updateCalibration: true });
         applyReversingAids(data.reversing, { forceUpdate: true });
       }
@@ -4953,6 +5332,8 @@
           try {
             const data = await fetchSettings();
             applySettings(data.orientation, data.camera, statusLabel.textContent);
+            applyLedStatus(data.led, { forceUpdate: true });
+            ledHasLoaded = true;
             applyDistanceData(data.distance, { updateInputs: true, updateCalibration: true });
             applyReversingAids(data.reversing, { forceUpdate: true });
           } catch (err) {
@@ -4963,6 +5344,8 @@
         try {
           const data = await fetchSettings();
           applySettings(data.orientation, data.camera, "Settings saved");
+          applyLedStatus(data.led, { forceUpdate: true });
+          ledHasLoaded = true;
           applyDistanceData(data.distance, { updateInputs: true, updateCalibration: true });
           applyReversingAids(data.reversing, { forceUpdate: true });
         } catch (err) {

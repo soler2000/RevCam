@@ -181,6 +181,111 @@
         font-weight: 600;
         transition: color var(--transition), box-shadow var(--transition);
       }
+      .illumination-pill {
+        display: inline-flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: var(--space-md);
+        padding: var(--space-sm) var(--space-lg);
+        border-radius: var(--radius-pill);
+        background: var(--surface-1);
+        border: 1px solid var(--border-muted);
+        box-shadow: var(--shadow-sm);
+        backdrop-filter: blur(22px);
+        -webkit-backdrop-filter: blur(22px);
+      }
+      .illumination-pill.unavailable {
+        opacity: 0.6;
+      }
+      .illumination-pill button {
+        flex: 0 0 auto;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 2.75rem;
+        height: 2.75rem;
+        padding: 0;
+        border-radius: 50%;
+      }
+      .illumination-toggle-icon {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.4rem;
+        line-height: 1;
+      }
+      .illumination-slider,
+      .illumination-colour {
+        display: flex;
+        align-items: center;
+        gap: var(--space-xs);
+        font-size: 0.9rem;
+        color: var(--text-muted);
+      }
+      .illumination-slider input[type="range"] {
+        appearance: none;
+        width: 8rem;
+        height: 0.4rem;
+        border-radius: var(--radius-pill);
+        background: var(--surface-soft);
+        box-shadow: inset 0 0 0 1px var(--border-subtle);
+        cursor: pointer;
+      }
+      .illumination-slider input[type="range"]::-webkit-slider-thumb {
+        appearance: none;
+        width: 1rem;
+        height: 1rem;
+        border-radius: 50%;
+        background: var(--accent);
+        box-shadow: 0 0 0 2px rgba(10, 132, 255, 0.45);
+        cursor: pointer;
+        border: none;
+      }
+      .illumination-slider input[type="range"]::-moz-range-thumb {
+        width: 1rem;
+        height: 1rem;
+        border-radius: 50%;
+        background: var(--accent);
+        border: none;
+        box-shadow: 0 0 0 2px rgba(10, 132, 255, 0.45);
+        cursor: pointer;
+      }
+      .illumination-slider-value {
+        min-width: 2.5rem;
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
+      .illumination-colour input[type="color"] {
+        width: 2.25rem;
+        height: 2.25rem;
+        border-radius: var(--radius-pill);
+        border: 1px solid var(--border-muted);
+        padding: 0;
+        background: none;
+        cursor: pointer;
+      }
+      .illumination-status-box {
+        display: none;
+        margin: var(--space-xl) auto var(--space-lg);
+        width: min(720px, calc(100% - (2 * var(--space-xl))));
+        padding: var(--space-md) var(--space-lg);
+        border-radius: var(--radius-lg);
+        background: var(--surface-1);
+        border: 1px solid var(--border-muted);
+        box-shadow: var(--shadow-sm);
+        color: var(--text-muted);
+        text-align: center;
+        line-height: 1.45;
+      }
+      .illumination-status-box.is-visible {
+        display: block;
+      }
+      .illumination-status-box.is-success {
+        color: var(--success);
+      }
+      .illumination-status-box.is-error {
+        color: var(--danger);
+      }
       .status-icon {
         width: 1.6rem;
         height: 1.6rem;
@@ -376,6 +481,10 @@
           justify-content: center;
           text-align: center;
         }
+        .illumination-status-box {
+          width: calc(100% - (2 * var(--space-lg)));
+          margin: var(--space-lg) auto var(--space-lg);
+        }
       }
     </style>
   </head>
@@ -451,10 +560,44 @@
           <span id="battery-details">Battery unavailable</span>
         </div>
       </div>
+      <div class="illumination-pill" id="illumination-controls" aria-live="polite">
+        <button
+          id="toggle-illumination"
+          type="button"
+          aria-pressed="false"
+          aria-label="Enable illumination"
+          title="Enable illumination"
+        >
+          <span class="illumination-toggle-icon" aria-hidden="true">💡</span>
+        </button>
+        <label class="illumination-slider" for="illumination-intensity">
+          <span>Intensity</span>
+          <input
+            id="illumination-intensity"
+            type="range"
+            min="0"
+            max="100"
+            step="1"
+            value="100"
+          />
+          <span class="illumination-slider-value" id="illumination-intensity-display">100%</span>
+        </label>
+        <label class="illumination-colour" for="illumination-colour">
+          <span>Colour</span>
+          <input id="illumination-colour" type="color" value="#FFFFFF" />
+        </label>
+      </div>
     </header>
     <main>
       <img id="stream" alt="Camera feed" />
     </main>
+    <div
+      class="illumination-status-box"
+      id="illumination-status"
+      role="status"
+      aria-live="polite"
+      aria-hidden="true"
+    ></div>
     <footer>
       <div class="control-group">
         <button id="toggle-stream" type="button" aria-pressed="false">Pause stream</button>
@@ -476,6 +619,12 @@
       const batteryDetails = document.getElementById("battery-details");
       const statusPill = document.getElementById("status-pill");
       const statusSubtext = document.getElementById("status-subtext");
+      const illuminationControls = document.getElementById("illumination-controls");
+      const illuminationToggle = document.getElementById("toggle-illumination");
+      const illuminationIntensityInput = document.getElementById("illumination-intensity");
+      const illuminationIntensityDisplay = document.getElementById("illumination-intensity-display");
+      const illuminationColourInput = document.getElementById("illumination-colour");
+      const illuminationStatusBox = document.getElementById("illumination-status");
       const BATTERY_LEVEL_MAX = 32;
       const STATUS_CLASSES = ["is-live", "is-paused", "is-error", "is-busy"];
       function applyStatusState(reference) {
@@ -515,6 +664,11 @@
       let reconnectTimer = null;
       let batteryTimer = null;
       let shouldStream = false;
+      let illuminationState = null;
+      let illuminationPreviousPattern = null;
+      let illuminationBusy = false;
+      let illuminationLoading = false;
+      let illuminationStatusTimer = null;
       setStatus(statusLabel ? statusLabel.textContent : "Initialising…", "busy");
 
       function updateBatteryUI(data) {
@@ -623,6 +777,263 @@
         batteryTimer = setInterval(refreshBattery, interval);
       }
 
+      function setIlluminationStatus(message, options = {}) {
+        if (!illuminationStatusBox) {
+          return;
+        }
+        if (illuminationStatusTimer) {
+          window.clearTimeout(illuminationStatusTimer);
+          illuminationStatusTimer = null;
+        }
+        const text =
+          typeof message === "string" && message.trim() ? message.trim() : "";
+        illuminationStatusBox.classList.remove(
+          "is-visible",
+          "is-success",
+          "is-error",
+        );
+        illuminationStatusBox.textContent = text;
+        if (text) {
+          let tone = options.tone;
+          if (!tone) {
+            const descriptor = text.toLowerCase();
+            if (
+              descriptor.includes("error") ||
+              descriptor.includes("fail") ||
+              descriptor.includes("unavailable") ||
+              descriptor.includes("denied") ||
+              descriptor.includes("requires")
+            ) {
+              tone = "error";
+            } else if (
+              descriptor.includes("enabled") ||
+              descriptor.includes("disabled") ||
+              descriptor.includes("updated") ||
+              descriptor.includes("saved")
+            ) {
+              tone = "success";
+            }
+          }
+          if (tone === "success") {
+            illuminationStatusBox.classList.add("is-success");
+          } else if (tone === "error") {
+            illuminationStatusBox.classList.add("is-error");
+          }
+          illuminationStatusBox.classList.add("is-visible");
+          illuminationStatusBox.setAttribute("aria-hidden", "false");
+        } else {
+          illuminationStatusBox.setAttribute("aria-hidden", "true");
+        }
+        if (text && options.persistent !== true) {
+          illuminationStatusTimer = window.setTimeout(() => {
+            if (
+              illuminationStatusBox &&
+              illuminationStatusBox.textContent === text
+            ) {
+              illuminationStatusBox.textContent = "";
+              illuminationStatusBox.classList.remove(
+                "is-visible",
+                "is-success",
+                "is-error",
+              );
+              illuminationStatusBox.setAttribute("aria-hidden", "true");
+            }
+            illuminationStatusTimer = null;
+          }, 4000);
+        }
+      }
+
+      function applyIlluminationState(state) {
+        if (state && typeof state === "object") {
+          const illuminationDetails =
+            state.illumination && typeof state.illumination === "object"
+              ? state.illumination
+              : {};
+          const rawIntensity = Number.isFinite(illuminationDetails.intensity)
+            ? Number(illuminationDetails.intensity)
+            : 100;
+          const clampedIntensity = Math.max(0, Math.min(100, rawIntensity));
+          const colourValue =
+            typeof illuminationDetails.color === "string" && illuminationDetails.color.trim()
+              ? illuminationDetails.color.trim()
+              : "#FFFFFF";
+          illuminationState = {
+            pattern: typeof state.pattern === "string" ? state.pattern : "",
+            active_pattern:
+              typeof state.active_pattern === "string" ? state.active_pattern : "",
+            error: state.error === true,
+            available: state.available !== false,
+            message:
+              typeof state.message === "string" && state.message.trim()
+                ? state.message.trim()
+                : "",
+            illumination: {
+              intensity: clampedIntensity,
+              color: colourValue,
+            },
+          };
+        } else {
+          illuminationState = null;
+        }
+
+        const available = illuminationState ? illuminationState.available : false;
+        const active = illuminationState ? illuminationState.pattern === "illumination" : false;
+        const message = illuminationState && illuminationState.message ? illuminationState.message : "";
+        const intensity =
+          illuminationState && illuminationState.illumination
+            ? illuminationState.illumination.intensity
+            : 100;
+        const colour =
+          illuminationState && illuminationState.illumination
+            ? illuminationState.illumination.color
+            : "#FFFFFF";
+
+        if (illuminationControls) {
+          illuminationControls.classList.toggle("unavailable", !available);
+        }
+
+        if (illuminationToggle instanceof HTMLButtonElement) {
+          const toggleLabel = active ? "Disable illumination" : "Enable illumination";
+          illuminationToggle.disabled = !available;
+          illuminationToggle.setAttribute("aria-label", toggleLabel);
+          illuminationToggle.title = toggleLabel;
+          illuminationToggle.setAttribute("aria-pressed", active ? "true" : "false");
+        }
+
+        if (illuminationIntensityInput instanceof HTMLInputElement) {
+          if (illuminationIntensityInput.dataset.userEdited !== "true" || !illuminationBusy) {
+            illuminationIntensityInput.value = String(Math.round(intensity));
+            delete illuminationIntensityInput.dataset.userEdited;
+          }
+          illuminationIntensityInput.disabled = !available;
+          const displayValue =
+            illuminationIntensityInput.dataset.userEdited === "true"
+              ? Number(illuminationIntensityInput.value)
+              : intensity;
+          if (illuminationIntensityDisplay) {
+            illuminationIntensityDisplay.textContent = `${Math.round(displayValue)}%`;
+          }
+        } else if (illuminationIntensityDisplay) {
+          illuminationIntensityDisplay.textContent = `${Math.round(intensity)}%`;
+        }
+
+        if (illuminationColourInput instanceof HTMLInputElement) {
+          if (illuminationColourInput.dataset.userEdited !== "true" || !illuminationBusy) {
+            illuminationColourInput.value = colour;
+            delete illuminationColourInput.dataset.userEdited;
+          }
+          illuminationColourInput.disabled = !available;
+        }
+
+        if (!available) {
+          setIlluminationStatus(message || "LED driver unavailable", {
+            persistent: true,
+            tone: "error",
+          });
+        } else if (message) {
+          setIlluminationStatus(message, { persistent: true });
+        } else {
+          setIlluminationStatus("");
+        }
+
+        if (
+          illuminationState &&
+          illuminationState.pattern &&
+          illuminationState.pattern !== "illumination"
+        ) {
+          illuminationPreviousPattern = illuminationState.pattern;
+        }
+      }
+
+      async function refreshIlluminationState({ showLoading = false } = {}) {
+        if (illuminationLoading) {
+          return illuminationState;
+        }
+        illuminationLoading = true;
+        if (showLoading) {
+          setIlluminationStatus("Loading illumination status…");
+        }
+        try {
+          const response = await fetch("/api/led", { cache: "no-store" });
+          if (!response.ok) {
+            let detail = `LED status request failed with ${response.status}`;
+            try {
+              const problem = await response.json();
+              if (problem && typeof problem.detail === "string" && problem.detail.trim()) {
+                detail = problem.detail.trim();
+              }
+            } catch (err) {
+              console.error(err);
+            }
+            throw new Error(detail);
+          }
+          const payload = await response.json();
+          applyIlluminationState(payload);
+          return payload;
+        } catch (error) {
+          console.error("LED status error", error);
+          applyIlluminationState(null);
+          const message =
+            error instanceof Error && error.message
+              ? error.message
+              : "Unable to load illumination status.";
+          setIlluminationStatus(message, { persistent: true, tone: "error" });
+          return null;
+        } finally {
+          illuminationLoading = false;
+        }
+      }
+
+      async function sendIlluminationUpdate(payload, options = {}) {
+        if (!payload || typeof payload !== "object") {
+          return null;
+        }
+        illuminationBusy = true;
+        try {
+          const response = await fetch("/api/led", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          if (!response.ok) {
+            let detail = `LED update failed with ${response.status}`;
+            try {
+              const problem = await response.json();
+              if (problem && typeof problem.detail === "string" && problem.detail.trim()) {
+                detail = problem.detail.trim();
+              }
+            } catch (err) {
+              console.error(err);
+            }
+            throw new Error(detail);
+          }
+          const result = await response.json();
+          applyIlluminationState(result);
+          if (options.successMessage) {
+            setIlluminationStatus(options.successMessage, { tone: "success" });
+          } else {
+            setIlluminationStatus("");
+          }
+          return result;
+        } catch (error) {
+          console.error("LED update error", error);
+          const message =
+            error instanceof Error && error.message
+              ? error.message
+              : "Failed to update illumination.";
+          setIlluminationStatus(message, { persistent: true, tone: "error" });
+          return null;
+        } finally {
+          illuminationBusy = false;
+          if (illuminationIntensityInput instanceof HTMLInputElement) {
+            delete illuminationIntensityInput.dataset.userEdited;
+          }
+          if (illuminationColourInput instanceof HTMLInputElement) {
+            delete illuminationColourInput.dataset.userEdited;
+          }
+        }
+      }
+
       function clearReconnectTimer() {
         if (reconnectTimer) {
           clearTimeout(reconnectTimer);
@@ -706,6 +1117,85 @@
         }
       }
 
+      if (illuminationToggle instanceof HTMLButtonElement) {
+        illuminationToggle.addEventListener("click", () => {
+          if (!illuminationState || illuminationState.available === false) {
+            setIlluminationStatus("LED driver unavailable", {
+              persistent: true,
+              tone: "error",
+            });
+            refreshIlluminationState({ showLoading: true });
+            return;
+          }
+          const active = illuminationState.pattern === "illumination";
+          if (!active && illuminationState.pattern && illuminationState.pattern !== "illumination") {
+            illuminationPreviousPattern = illuminationState.pattern;
+          }
+          const targetPattern = active
+            ? illuminationPreviousPattern && illuminationPreviousPattern !== "illumination"
+              ? illuminationPreviousPattern
+              : "ready"
+            : "illumination";
+          const successMessage = active ? "Illumination disabled" : "Illumination enabled";
+          sendIlluminationUpdate({ pattern: targetPattern }, { successMessage }).catch((error) =>
+            console.error("LED toggle error", error),
+          );
+        });
+      }
+
+      if (illuminationIntensityInput instanceof HTMLInputElement) {
+        const updateDisplayFromInput = () => {
+          if (!illuminationIntensityDisplay) {
+            return;
+          }
+          const value = Number(illuminationIntensityInput.value);
+          illuminationIntensityDisplay.textContent = `${Math.round(value)}%`;
+        };
+        illuminationIntensityInput.addEventListener("input", () => {
+          illuminationIntensityInput.dataset.userEdited = "true";
+          updateDisplayFromInput();
+        });
+        illuminationIntensityInput.addEventListener("change", () => {
+          if (!illuminationState || illuminationState.available === false) {
+            setIlluminationStatus("LED driver unavailable", {
+              persistent: true,
+              tone: "error",
+            });
+            refreshIlluminationState({ showLoading: true });
+            return;
+          }
+          illuminationIntensityInput.dataset.userEdited = "true";
+          updateDisplayFromInput();
+          const value = Math.max(0, Math.min(100, Math.round(Number(illuminationIntensityInput.value))));
+          sendIlluminationUpdate(
+            { illumination_intensity: value },
+            { successMessage: "Illumination updated" },
+          ).catch((error) => console.error("LED intensity error", error));
+        });
+      }
+
+      if (illuminationColourInput instanceof HTMLInputElement) {
+        illuminationColourInput.addEventListener("input", () => {
+          illuminationColourInput.dataset.userEdited = "true";
+        });
+        illuminationColourInput.addEventListener("change", () => {
+          if (!illuminationState || illuminationState.available === false) {
+            setIlluminationStatus("LED driver unavailable", {
+              persistent: true,
+              tone: "error",
+            });
+            refreshIlluminationState({ showLoading: true });
+            return;
+          }
+          illuminationColourInput.dataset.userEdited = "true";
+          const value = illuminationColourInput.value || "#FFFFFF";
+          sendIlluminationUpdate(
+            { illumination_color: value },
+            { successMessage: "Illumination colour updated" },
+          ).catch((error) => console.error("LED colour error", error));
+        });
+      }
+
       streamElement.addEventListener("load", () => {
         if (!shouldStream) {
           return;
@@ -751,9 +1241,11 @@
       document.addEventListener("visibilitychange", () => {
         if (document.visibilityState === "visible") {
           refreshBattery();
+          refreshIlluminationState();
         }
       });
 
+      refreshIlluminationState({ showLoading: true });
       scheduleBatteryUpdates();
       startStream();
     </script>

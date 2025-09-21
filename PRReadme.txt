@@ -26,6 +26,11 @@ These packages provide the official Picamera2 stack alongside the JPEG encoder
 used by the streaming pipeline. The same set is available through
 `./scripts/install_prereqs.sh` if you prefer a reusable helper.
 
+> **Note:** SimpleJPEG is only packaged for Raspberry Pi OS as
+> `python3-simplejpeg`. Running `sudo apt install simplejpeg` will result in an
+> "unable to locate package" error. If APT cannot find the package, install
+> SimpleJPEG from PyPI after activating the virtual environment in step 3.
+
 2. Clone (or update) the RevCam repository
 -----------------------------------------
 ```bash
@@ -54,6 +59,13 @@ python -m pip install --upgrade pip
 The `--system-site-packages` flag exposes the APT-installed Picamera2 modules to
 the virtual environment so RevCam can import them without rebuilding.
 
+If `python3-simplejpeg` was unavailable in step 1, install the wheel inside the
+virtual environment before continuing:
+
+```bash
+pip install --prefer-binary --extra-index-url https://www.piwheels.org/simple simplejpeg
+```
+
 4. Install RevCam and Python dependencies
 ----------------------------------------
 ```bash
@@ -79,9 +91,12 @@ and reboot. Stop any conflicting services (for example, `libcamera-vid` or
 6. Launch the RevCam server
 ---------------------------
 ```bash
-uvicorn rev_cam.app:create_app --factory --host 0.0.0.0 --port 9000
+./scripts/run_with_sudo.sh
 ```
-Open `http://<pi-ip>:9000` in your browser. The settings page exposes camera
+The helper re-executes under `sudo` so the NeoPixel driver can access `/dev/mem`
+while preserving the virtual environment context; pass additional arguments to
+forward options to Uvicorn (for example `--port 8001`). Open
+`http://<pi-ip>:9000` in your browser. The settings page exposes camera
 source and resolution dropdowns—select *PiCamera2* to use the hardware camera
 and choose a resolution that fits your bandwidth and display needs once
 diagnostics report the device as available.
@@ -99,5 +114,8 @@ Troubleshooting
 * **Busy camera errors** – re-run `python -m rev_cam.diagnostics` to identify
   lingering processes. Disable the legacy camera interface and reboot if
   `kworker/R-mmal-vchiq` threads are reported.
-* **`simplejpeg` missing** – re-run step 4. If installation fails, verify the
-  APT packages listed in step 1 are installed.
+* **`python3-simplejpeg` missing** – install SimpleJPEG in the virtual
+  environment with `pip install --prefer-binary --extra-index-url
+  https://www.piwheels.org/simple simplejpeg`. If `pip` cannot find a wheel, make
+  sure the APT packages listed in step 1 are present so the source build can
+  compile successfully.
