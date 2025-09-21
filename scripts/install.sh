@@ -219,4 +219,7 @@ Installation complete.
 Activate the virtual environment with:
   source "$VENV_DIR/bin/activate"
 
+Launch the server (with sudo for NeoPixel access) via:
+  ./scripts/run_with_sudo.sh
+
 SUMMARY

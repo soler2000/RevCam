@@ -119,8 +119,12 @@ remains dark.
 Adafruit's WS2812 driver accesses the Pi's DMA engine via ``/dev/mem`` so it
 requires root privileges. When RevCam starts without ``sudo`` (or an
 equivalent capability such as the ``pigpiod`` backend) the helper logs "LED
-driver unavailable" and disables the animations. Run Uvicorn with ``sudo`` or
-configure an alternative backend before expecting the ring to light up.
+driver unavailable" and disables the animations. The
+``scripts/run_with_sudo.sh`` helper automatically re-executes under
+``sudo``, ensures the project's virtual environment is on ``PATH``, and
+launches Uvicorn with the default RevCam application. Use it whenever you need
+the lighting tab to drive the ring, or configure an alternative backend before
+expecting the ring to light up.
 
 ### Saving snapshots
 
@@ -156,7 +160,7 @@ use bus 29:
 
 ```bash
 export REVCAM_I2C_BUS=29
-uvicorn rev_cam.app:create_app --factory --host 0.0.0.0 --port 9000
+./scripts/run_with_sudo.sh
 ```
 
 When overriding the bus number install the optional
@@ -309,7 +313,7 @@ git checkout FETCH_HEAD
 # Install runtime deps; use --dev on non-Pi development machines
 ./scripts/install.sh --pi
 
-uvicorn rev_cam.app:create_app --factory --host 0.0.0.0 --port 9000
+./scripts/run_with_sudo.sh
 ```
 
 The script automatically reuses the existing virtual environment on subsequent
@@ -341,7 +345,7 @@ git checkout "$REVCAM_BRANCH"
 
 ./scripts/install.sh --pi
 
-uvicorn rev_cam.app:create_app --factory --host 0.0.0.0 --port 9000
+./scripts/run_with_sudo.sh
 ```
 
 ### Fast branch updates without rebuilding dependencies
@@ -366,7 +370,7 @@ rebuilding wheels:
 cd ../RevCam-my-feature
 source ../RevCam/.venv/bin/activate
 pip install --no-deps -e .
-uvicorn rev_cam.app:create_app --factory --host 0.0.0.0 --port 9000
+./scripts/run_with_sudo.sh
 ```
 
 Use `pip install -e .[dev]` only when `pyproject.toml` changes; otherwise
@@ -386,10 +390,10 @@ Camera support is pluggable:
 - **Synthetic frames** – For development without camera hardware set
   `REVCAM_CAMERA=synthetic` (default when Picamera2 is unavailable).
 
-Run the server with
+Run the server (and automatically elevate for NeoPixel access) with
 
 ```bash
-uvicorn rev_cam.app:create_app --factory --host 0.0.0.0 --port 8000
+./scripts/run_with_sudo.sh --port 8000
 ```
 
 Then open `http://<pi-address>:8000` on the iOS device to view the stream. Access the

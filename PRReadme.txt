@@ -91,9 +91,12 @@ and reboot. Stop any conflicting services (for example, `libcamera-vid` or
 6. Launch the RevCam server
 ---------------------------
 ```bash
-uvicorn rev_cam.app:create_app --factory --host 0.0.0.0 --port 9000
+./scripts/run_with_sudo.sh
 ```
-Open `http://<pi-ip>:9000` in your browser. The settings page exposes camera
+The helper re-executes under `sudo` so the NeoPixel driver can access `/dev/mem`
+while preserving the virtual environment context; pass additional arguments to
+forward options to Uvicorn (for example `--port 8001`). Open
+`http://<pi-ip>:9000` in your browser. The settings page exposes camera
 source and resolution dropdowns—select *PiCamera2* to use the hardware camera
 and choose a resolution that fits your bandwidth and display needs once
 diagnostics report the device as available.
