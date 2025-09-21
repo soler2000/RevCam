@@ -130,10 +130,17 @@ def run(argv: Sequence[str] | None = None) -> int:
         sys.stdout.write("\n")
         return 0
 
+    camera_conflicts = list(payload.get("camera_conflicts") or [])
+    picamera_stack = payload.get("picamera") or {}
+    picamera_status = picamera_stack.get("status")
+    picamera_details = list(picamera_stack.get("details") or [])
+    picamera_hints = list(picamera_stack.get("hints") or [])
+    numpy_version = picamera_stack.get("numpy_version")
+
     print(f"RevCam diagnostics (version {APP_VERSION})")
-    if hints:
+    if camera_conflicts:
         print("Detected potential PiCamera2 conflicts:")
-        for hint in hints:
+        for hint in camera_conflicts:
             print(f" - {hint}")
     else:
         print("No conflicting services or processes were detected.")
@@ -142,19 +149,28 @@ def run(argv: Sequence[str] | None = None) -> int:
             " for external processes or legacy camera settings."
         )
 
-    if picamera_stack["status"] == "ok":
+    if picamera_status == "ok":
         print("Picamera2 Python stack: OK")
-        if "numpy_version" in picamera_stack:
-            print(f" - NumPy version: {picamera_stack['numpy_version']}")
-    else:
+        if numpy_version:
+            print(f" - NumPy version: {numpy_version}")
+    elif picamera_status == "error":
         print("Picamera2 Python stack issues detected:")
-        for detail in picamera_stack["details"]:
+        for detail in picamera_details:
             print(f" - {detail}")
-        hints_payload = picamera_stack.get("hints")
-        if hints_payload:
+        if picamera_hints:
             print("Hints:")
-            for hint in hints_payload:
+            for hint in picamera_hints:
                 print(f" * {hint}")
+    else:
+        print(f"Picamera2 Python stack status: {picamera_status or 'unknown'}")
+        for detail in picamera_details:
+            print(f" - {detail}")
+        if picamera_hints:
+            print("Hints:")
+            for hint in picamera_hints:
+                print(f" * {hint}")
+        if numpy_version:
+            print(f" - NumPy version: {numpy_version}")
     return 0
 
 
