@@ -316,6 +316,84 @@
         font-size: 0.9rem;
         margin: 0;
       }
+      .reversing-preview {
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+        margin: 0.5rem 0 1.25rem;
+      }
+      .reversing-preview h3 {
+        margin: 0;
+      }
+      .reversing-preview-controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        align-items: center;
+      }
+      .reversing-preview-status {
+        min-height: 1.2rem;
+        display: block;
+      }
+      .reversing-upload-label {
+        position: relative;
+        overflow: hidden;
+        border: 1px solid #0a84ff;
+        border-radius: 999px;
+        padding: 0.6rem 1.2rem;
+        color: #0a84ff;
+        font-weight: 600;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.35rem;
+        background: transparent;
+      }
+      .reversing-upload-label:hover,
+      .reversing-upload-label:focus-within {
+        color: #fff;
+        background: rgba(10, 132, 255, 0.15);
+      }
+      .reversing-upload-label input[type="file"] {
+        position: absolute;
+        inset: 0;
+        opacity: 0;
+        cursor: pointer;
+      }
+      .reversing-preview-stage {
+        position: relative;
+        width: 100%;
+        border-radius: 12px;
+        overflow: hidden;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        background: rgba(255, 255, 255, 0.05);
+        aspect-ratio: 16 / 9;
+      }
+      .reversing-preview-stage img,
+      .reversing-preview-stage canvas {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        display: block;
+      }
+      .reversing-preview-stage canvas {
+        pointer-events: none;
+      }
+      .reversing-preview-placeholder {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        padding: 1rem;
+        color: rgba(255, 255, 255, 0.65);
+        font-size: 0.95rem;
+        letter-spacing: 0.01em;
+      }
       #status {
         font-size: 0.95rem;
         opacity: 0.85;
@@ -984,6 +1062,39 @@
               Coordinates are expressed as percentages of the frame. Adjust the nudge controls to
               shift each side without changing individual values.
             </p>
+            <div class="reversing-preview">
+              <h3>Alignment preview</h3>
+              <p class="muted" style="margin: 0;">
+                Capture the current camera view or upload a reference image to preview how the guides
+                will line up as you make adjustments.
+              </p>
+              <div class="reversing-preview-controls">
+                <button type="button" id="reversing-preview-capture">Capture snapshot</button>
+                <label class="reversing-upload-label">
+                  Upload image
+                  <input type="file" id="reversing-preview-upload" accept="image/*" />
+                </label>
+                <button
+                  type="button"
+                  id="reversing-preview-clear"
+                  class="secondary-button"
+                >
+                  Clear image
+                </button>
+              </div>
+              <span id="reversing-preview-status" class="muted reversing-preview-status"></span>
+              <div class="reversing-preview-stage" id="reversing-preview-stage">
+                <img
+                  id="reversing-preview-image"
+                  alt="Reference image for aligning reversing aids"
+                  hidden
+                />
+                <canvas id="reversing-preview-canvas" aria-hidden="true"></canvas>
+                <div class="reversing-preview-placeholder" id="reversing-preview-placeholder">
+                  Capture a snapshot or upload an image to preview the reversing aids.
+                </div>
+              </div>
+            </div>
             <div class="reversing-grid">
               <fieldset class="reversing-side" data-side="left">
                 <legend>Left guide</legend>
@@ -1712,6 +1823,7 @@
             if (reversingAidsStatus) {
               reversingAidsStatus.textContent = "";
             }
+            drawReversingPreviewOverlay();
           });
         }
       }
@@ -1720,7 +1832,21 @@
             reversingAidsForm.querySelectorAll('button[data-reversing-nudge]'),
           ).filter((element) => element instanceof HTMLButtonElement)
         : [];
+      const reversingPreviewStage = document.getElementById("reversing-preview-stage");
+      const reversingPreviewImage = document.getElementById("reversing-preview-image");
+      const reversingPreviewCanvas = document.getElementById("reversing-preview-canvas");
+      const reversingPreviewPlaceholder = document.getElementById("reversing-preview-placeholder");
+      const reversingPreviewStatus = document.getElementById("reversing-preview-status");
+      const reversingPreviewCaptureButton = document.getElementById("reversing-preview-capture");
+      const reversingPreviewUploadInput = document.getElementById("reversing-preview-upload");
+      const reversingPreviewClearButton = document.getElementById("reversing-preview-clear");
+      let reversingPreviewObjectUrl = null;
+      let reversingPreviewStatusTimer = null;
+      let reversingPreviewLoading = false;
       const REVERSING_NUDGE_STEP = 1;
+      const REVERSING_SEGMENTS_PER_SIDE = 3;
+      const REVERSING_SEGMENT_COLOURS = ["#66bb6a", "#ffc107", "#ef5350"];
+      const REVERSING_PREVIEW_DEFAULT_RATIO = "16 / 9";
       const diagnosticsButton = document.getElementById("diagnostics-refresh");
       const diagnosticsStatus = document.getElementById("diagnostics-status");
       const diagnosticsResults = document.getElementById("diagnostics-results");
@@ -1934,6 +2060,248 @@
         delete input.dataset.userEdited;
       }
 
+      function setReversingPreviewStatus(message, options = {}) {
+        if (!reversingPreviewStatus) {
+          return;
+        }
+        if (reversingPreviewStatusTimer) {
+          window.clearTimeout(reversingPreviewStatusTimer);
+          reversingPreviewStatusTimer = null;
+        }
+        reversingPreviewStatus.textContent = message || "";
+        if (message && options.persistent !== true) {
+          reversingPreviewStatusTimer = window.setTimeout(() => {
+            if (reversingPreviewStatus && reversingPreviewStatus.textContent === message) {
+              reversingPreviewStatus.textContent = "";
+            }
+            reversingPreviewStatusTimer = null;
+          }, 4000);
+        }
+      }
+
+      function hasReversingPreviewImage() {
+        return (
+          reversingPreviewImage instanceof HTMLImageElement &&
+          !reversingPreviewImage.hidden &&
+          reversingPreviewImage.naturalWidth > 0 &&
+          reversingPreviewImage.naturalHeight > 0
+        );
+      }
+
+      function updateReversingPreviewControlsState() {
+        if (reversingPreviewClearButton) {
+          reversingPreviewClearButton.disabled = !hasReversingPreviewImage();
+        }
+      }
+
+      function setReversingPreviewPlaceholderVisible(visible) {
+        if (reversingPreviewPlaceholder) {
+          reversingPreviewPlaceholder.hidden = !visible;
+        }
+      }
+
+      function setReversingPreviewAspect(width, height) {
+        if (!reversingPreviewStage) {
+          return;
+        }
+        if (
+          typeof width === "number" &&
+          width > 0 &&
+          typeof height === "number" &&
+          height > 0
+        ) {
+          reversingPreviewStage.style.aspectRatio = `${width} / ${height}`;
+        } else {
+          reversingPreviewStage.style.aspectRatio = REVERSING_PREVIEW_DEFAULT_RATIO;
+        }
+      }
+
+      function revokeReversingPreviewObjectUrl() {
+        if (reversingPreviewObjectUrl) {
+          URL.revokeObjectURL(reversingPreviewObjectUrl);
+          reversingPreviewObjectUrl = null;
+        }
+      }
+
+      function clearReversingPreviewImage() {
+        revokeReversingPreviewObjectUrl();
+        if (reversingPreviewImage instanceof HTMLImageElement) {
+          reversingPreviewImage.src = "";
+          reversingPreviewImage.hidden = true;
+        }
+        setReversingPreviewAspect();
+        setReversingPreviewPlaceholderVisible(true);
+        updateReversingPreviewControlsState();
+        drawReversingPreviewOverlay();
+      }
+
+      async function loadReversingPreviewFromBlob(blob) {
+        if (!(blob instanceof Blob)) {
+          throw new Error("Invalid image data");
+        }
+        const objectUrl = URL.createObjectURL(blob);
+        revokeReversingPreviewObjectUrl();
+        reversingPreviewObjectUrl = objectUrl;
+        if (reversingPreviewImage instanceof HTMLImageElement) {
+          reversingPreviewImage.hidden = true;
+          reversingPreviewImage.onload = null;
+          reversingPreviewImage.onerror = null;
+        }
+        const loaded = await new Promise((resolve) => {
+          if (!(reversingPreviewImage instanceof HTMLImageElement)) {
+            resolve(false);
+            return;
+          }
+          reversingPreviewImage.onload = () => {
+            reversingPreviewImage.onload = null;
+            reversingPreviewImage.onerror = null;
+            reversingPreviewImage.hidden = false;
+            setReversingPreviewAspect(
+              reversingPreviewImage.naturalWidth,
+              reversingPreviewImage.naturalHeight,
+            );
+            setReversingPreviewPlaceholderVisible(false);
+            updateReversingPreviewControlsState();
+            drawReversingPreviewOverlay();
+            resolve(true);
+          };
+          reversingPreviewImage.onerror = () => {
+            reversingPreviewImage.onload = null;
+            reversingPreviewImage.onerror = null;
+            resolve(false);
+          };
+          reversingPreviewImage.src = objectUrl;
+        });
+        if (!loaded) {
+          if (reversingPreviewObjectUrl === objectUrl) {
+            revokeReversingPreviewObjectUrl();
+          } else {
+            URL.revokeObjectURL(objectUrl);
+          }
+          setReversingPreviewAspect();
+          setReversingPreviewPlaceholderVisible(true);
+          updateReversingPreviewControlsState();
+          throw new Error("Unable to load reference image");
+        }
+        return true;
+      }
+
+      function parseReversingPreviewValue(input) {
+        if (!(input instanceof HTMLInputElement)) {
+          return null;
+        }
+        const raw = parseFloat(input.value);
+        if (!Number.isFinite(raw)) {
+          return null;
+        }
+        const normalised = raw / 100;
+        if (Number.isNaN(normalised)) {
+          return null;
+        }
+        return Math.min(1, Math.max(0, normalised));
+      }
+
+      function getReversingPreviewSegments() {
+        const geometry = {
+          left: Array.from({ length: REVERSING_SEGMENTS_PER_SIDE }, () => null),
+          right: Array.from({ length: REVERSING_SEGMENTS_PER_SIDE }, () => null),
+        };
+        if (!reversingInputMap.size) {
+          return geometry;
+        }
+        const sides = ["left", "right"];
+        for (const side of sides) {
+          for (let index = 0; index < REVERSING_SEGMENTS_PER_SIDE; index += 1) {
+            const startXInput = reversingInputMap.get(`${side}|${index}|start-x`);
+            const startYInput = reversingInputMap.get(`${side}|${index}|start-y`);
+            const endXInput = reversingInputMap.get(`${side}|${index}|end-x`);
+            const endYInput = reversingInputMap.get(`${side}|${index}|end-y`);
+            const startX = parseReversingPreviewValue(startXInput);
+            const startY = parseReversingPreviewValue(startYInput);
+            const endX = parseReversingPreviewValue(endXInput);
+            const endY = parseReversingPreviewValue(endYInput);
+            if (
+              startX === null ||
+              startY === null ||
+              endX === null ||
+              endY === null
+            ) {
+              geometry[side][index] = null;
+            } else {
+              geometry[side][index] = {
+                start: { x: startX, y: startY },
+                end: { x: endX, y: endY },
+              };
+            }
+          }
+        }
+        return geometry;
+      }
+
+      function drawReversingPreviewOverlay() {
+        if (!(reversingPreviewStage instanceof HTMLElement)) {
+          return;
+        }
+        if (!(reversingPreviewCanvas instanceof HTMLCanvasElement)) {
+          return;
+        }
+        const width = Math.round(reversingPreviewStage.clientWidth);
+        const height = Math.round(reversingPreviewStage.clientHeight);
+        if (!(width > 0 && height > 0)) {
+          return;
+        }
+        const context = reversingPreviewCanvas.getContext("2d");
+        if (!context) {
+          return;
+        }
+        if (reversingPreviewCanvas.width !== width || reversingPreviewCanvas.height !== height) {
+          reversingPreviewCanvas.width = width;
+          reversingPreviewCanvas.height = height;
+        }
+        context.clearRect(0, 0, width, height);
+        const geometry = getReversingPreviewSegments();
+        const widthScale = Math.max(1, width - 1);
+        const heightScale = Math.max(1, height - 1);
+        const thickness = Math.max(2, Math.round(Math.min(width, height) * 0.01));
+        const enabled = reversingAidsEnabledInput ? reversingAidsEnabledInput.checked : true;
+        context.save();
+        context.lineCap = "round";
+        context.lineJoin = "round";
+        context.globalAlpha = enabled ? 1 : 0.5;
+        for (const side of ["left", "right"]) {
+          const segments = geometry[side];
+          for (let index = 0; index < segments.length; index += 1) {
+            const segment = segments[index];
+            if (!segment) {
+              continue;
+            }
+            const colour =
+              REVERSING_SEGMENT_COLOURS[
+                Math.min(index, REVERSING_SEGMENT_COLOURS.length - 1)
+              ];
+            const startX = segment.start.x * widthScale;
+            const startY = segment.start.y * heightScale;
+            const endX = segment.end.x * widthScale;
+            const endY = segment.end.y * heightScale;
+            context.strokeStyle = colour;
+            context.lineWidth = thickness;
+            context.beginPath();
+            context.moveTo(startX, startY);
+            context.lineTo(endX, endY);
+            context.stroke();
+            const pointRadius = Math.max(3, Math.round(thickness * 0.6));
+            context.fillStyle = colour;
+            context.beginPath();
+            context.arc(startX, startY, pointRadius, 0, Math.PI * 2);
+            context.fill();
+            context.beginPath();
+            context.arc(endX, endY, pointRadius, 0, Math.PI * 2);
+            context.fill();
+          }
+        }
+        context.restore();
+      }
+
       function updateReversingAidsStatus(config) {
         if (!reversingAidsStatus) {
           return;
@@ -1954,7 +2322,7 @@
         const sides = ["left", "right"];
         for (const side of sides) {
           const segments = Array.isArray(config?.[side]) ? config[side] : [];
-          for (let index = 0; index < 3; index += 1) {
+          for (let index = 0; index < REVERSING_SEGMENTS_PER_SIDE; index += 1) {
             const segment = segments[index] || null;
             const start = segment && segment.start ? segment.start : null;
             const end = segment && segment.end ? segment.end : null;
@@ -1989,6 +2357,7 @@
         setReversingInputsDisabled(!enabled);
         updateReversingAidsStatus(config);
         updateReversingAidsInputs(config, forceUpdate);
+        drawReversingPreviewOverlay();
       }
 
       function readReversingInput(input) {
@@ -2015,9 +2384,8 @@
           right: [],
         };
         const sides = ["left", "right"];
-        const segmentsPerSide = 3;
         for (const side of sides) {
-          for (let index = 0; index < segmentsPerSide; index += 1) {
+          for (let index = 0; index < REVERSING_SEGMENTS_PER_SIDE; index += 1) {
             const startX = reversingInputMap.get(`${side}|${index}|start-x`);
             const startY = reversingInputMap.get(`${side}|${index}|start-y`);
             const endX = reversingInputMap.get(`${side}|${index}|end-x`);
@@ -2063,6 +2431,7 @@
             input.dataset.userEdited = "true";
           }
         }
+        drawReversingPreviewOverlay();
       }
 
       function formatDistance(value) {
@@ -2968,7 +3337,9 @@
         setReversingInputsDisabled(!reversingAidsEnabledInput.checked);
         reversingAidsEnabledInput.addEventListener("change", () => {
           setReversingInputsDisabled(!reversingAidsEnabledInput.checked);
+          drawReversingPreviewOverlay();
         });
+        drawReversingPreviewOverlay();
       }
 
       if (reversingNudgeButtons.length) {
@@ -3000,6 +3371,69 @@
           });
         }
       }
+
+      updateReversingPreviewControlsState();
+
+      if (reversingPreviewClearButton) {
+        reversingPreviewClearButton.addEventListener("click", () => {
+          clearReversingPreviewImage();
+          setReversingPreviewStatus("Reference image cleared.");
+        });
+      }
+
+      if (reversingPreviewUploadInput) {
+        reversingPreviewUploadInput.addEventListener("change", async () => {
+          const files = reversingPreviewUploadInput.files;
+          if (!files || files.length === 0) {
+            return;
+          }
+          const file = files[0];
+          setReversingPreviewStatus(`Loading ${file.name}…`);
+          try {
+            await loadReversingPreviewFromBlob(file);
+            setReversingPreviewStatus(`Loaded ${file.name}`);
+          } catch (err) {
+            console.error("Reversing preview upload error", err);
+            clearReversingPreviewImage();
+            setReversingPreviewStatus("Unable to load image.", { persistent: true });
+          } finally {
+            reversingPreviewUploadInput.value = "";
+          }
+        });
+      }
+
+      if (reversingPreviewCaptureButton) {
+        const captureDefaultText = reversingPreviewCaptureButton.textContent || "Capture snapshot";
+        reversingPreviewCaptureButton.addEventListener("click", async () => {
+          if (reversingPreviewLoading) {
+            return;
+          }
+          reversingPreviewLoading = true;
+          reversingPreviewCaptureButton.disabled = true;
+          reversingPreviewCaptureButton.textContent = "Capturing…";
+          setReversingPreviewStatus("Capturing snapshot…", { persistent: true });
+          try {
+            const response = await fetch("/api/camera/snapshot", { cache: "no-store" });
+            if (!response.ok) {
+              throw new Error(`Snapshot request failed: ${response.status}`);
+            }
+            const blob = await response.blob();
+            await loadReversingPreviewFromBlob(blob);
+            setReversingPreviewStatus("Snapshot captured.");
+          } catch (err) {
+            console.error("Reversing preview capture error", err);
+            setReversingPreviewStatus("Unable to capture snapshot.", { persistent: true });
+          } finally {
+            reversingPreviewLoading = false;
+            reversingPreviewCaptureButton.disabled = false;
+            reversingPreviewCaptureButton.textContent = captureDefaultText;
+          }
+        });
+      }
+
+      window.addEventListener("resize", () => {
+        window.requestAnimationFrame(drawReversingPreviewOverlay);
+      });
 
       if (reversingAidsForm) {
         reversingAidsForm.addEventListener("submit", async (event) => {
