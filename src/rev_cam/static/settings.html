@@ -430,14 +430,14 @@
         transform: translateY(-1px);
       }
       .tab-panel {
-        display: none;
+        display: flex;
         flex-direction: column;
         gap: var(--rhythm);
-        opacity: 0;
-        transform: translateY(0.5rem);
+      }
+      .tab-panel[hidden] {
+        display: none !important;
       }
       .tab-panel:not([hidden]) {
-        display: flex;
         animation: tab-panel-enter var(--transition) ease-out both;
       }
       .tab-panel > .card {
