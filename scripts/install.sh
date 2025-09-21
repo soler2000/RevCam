@@ -185,7 +185,7 @@ PY
 then
     echo "Installing missing runtime dependency: simplejpeg"
     set -x
-    "$VENV_DIR/bin/python" -m pip install "${PIP_FLAGS[@]}" "simplejpeg>=2.1"
+    "$VENV_DIR/bin/python" -m pip install "${PIP_FLAGS[@]}" "simplejpeg>=1.6"
     set +x
 fi
 
