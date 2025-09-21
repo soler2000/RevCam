@@ -336,14 +336,6 @@
         font-size: 0.9rem;
         margin: 0;
       }
-      .reversing-line-note {
-        margin: -0.3rem 0 1.25rem;
-        font-size: 0.85rem;
-        opacity: 0.75;
-        display: inline-flex;
-        align-items: center;
-        gap: 0.4rem;
-      }
       .reversing-preview {
         display: flex;
         flex-direction: column;
@@ -357,37 +349,26 @@
         display: flex;
         flex-wrap: wrap;
         gap: 0.75rem;
-        align-items: center;
+        align-items: stretch;
+      }
+      .reversing-preview-controls button {
+        min-height: 2.5rem;
+        white-space: nowrap;
+      }
+      .reversing-preview-file-input {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        clip-path: inset(50%);
+        border: 0;
       }
       .reversing-preview-status {
         min-height: 1.2rem;
         display: block;
-      }
-      .reversing-upload-label {
-        position: relative;
-        overflow: hidden;
-        border: 1px solid #0a84ff;
-        border-radius: 999px;
-        padding: 0.6rem 1.2rem;
-        color: #0a84ff;
-        font-weight: 600;
-        cursor: pointer;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        gap: 0.35rem;
-        background: transparent;
-      }
-      .reversing-upload-label:hover,
-      .reversing-upload-label:focus-within {
-        color: #fff;
-        background: rgba(10, 132, 255, 0.15);
-      }
-      .reversing-upload-label input[type="file"] {
-        position: absolute;
-        inset: 0;
-        opacity: 0;
-        cursor: pointer;
       }
       .reversing-preview-stage {
         position: relative;
@@ -1102,10 +1083,13 @@
               </p>
               <div class="reversing-preview-controls">
                 <button type="button" id="reversing-preview-capture">Capture snapshot</button>
-                <label class="reversing-upload-label">
-                  Upload image
-                  <input type="file" id="reversing-preview-upload" accept="image/*" />
-                </label>
+                <button type="button" id="reversing-preview-upload-button">Upload image</button>
+                <input
+                  type="file"
+                  id="reversing-preview-upload"
+                  accept="image/*"
+                  class="reversing-preview-file-input"
+                />
                 <button
                   type="button"
                   id="reversing-preview-clear"
@@ -1135,49 +1119,6 @@
             <fieldset class="reversing-side" data-side="left">
                 <legend>Left guide</legend>
                 <p>Adjust the driver’s-side guide segments. Click the preview or edit the values.</p>
-                <div class="reversing-line-point" data-side="left" data-point="far">
-                  <div class="reversing-line-header">
-                    <span class="reversing-colour" style="background: #66bb6a;"></span>
-                    <span>Far point</span>
-                    <button
-                      type="button"
-                      class="reversing-point-button"
-                      data-side="left"
-                      data-reversing-pick="far"
-                      aria-pressed="false"
-                    >
-                      Select on preview
-                    </button>
-                  </div>
-                  <div class="reversing-line-fields">
-                    <label>
-                      Horizontal (%)
-                      <input
-                        type="number"
-                        min="0"
-                        max="100"
-                        step="0.1"
-                        inputmode="decimal"
-                        data-reversing-field="far-x"
-                        data-side="left"
-                        data-axis="x"
-                      />
-                    </label>
-                    <label>
-                      Vertical (%)
-                      <input
-                        type="number"
-                        min="0"
-                        max="100"
-                        step="0.1"
-                        inputmode="decimal"
-                        data-reversing-field="far-y"
-                        data-side="left"
-                        data-axis="y"
-                      />
-                    </label>
-                  </div>
-                </div>
                 <div class="reversing-line-point" data-side="left" data-point="near">
                   <div class="reversing-line-header">
                     <span class="reversing-colour" style="background: #ef5350;"></span>
@@ -1221,22 +1162,14 @@
                     </label>
                   </div>
                 </div>
-                <p class="reversing-line-note muted">
-                  <span class="reversing-colour" style="background: #ffc107;"></span>
-                  Mid segment spacing updates automatically between the far and near points.
-                </p>
-              </fieldset>
-              <fieldset class="reversing-side" data-side="right">
-                <legend>Right guide</legend>
-                <p>Adjust the passenger-side guide segments from the preview or the inputs.</p>
-                <div class="reversing-line-point" data-side="right" data-point="far">
+                <div class="reversing-line-point" data-side="left" data-point="far">
                   <div class="reversing-line-header">
                     <span class="reversing-colour" style="background: #66bb6a;"></span>
                     <span>Far point</span>
                     <button
                       type="button"
                       class="reversing-point-button"
-                      data-side="right"
+                      data-side="left"
                       data-reversing-pick="far"
                       aria-pressed="false"
                     >
@@ -1253,7 +1186,7 @@
                         step="0.1"
                         inputmode="decimal"
                         data-reversing-field="far-x"
-                        data-side="right"
+                        data-side="left"
                         data-axis="x"
                       />
                     </label>
@@ -1266,12 +1199,16 @@
                         step="0.1"
                         inputmode="decimal"
                         data-reversing-field="far-y"
-                        data-side="right"
+                        data-side="left"
                         data-axis="y"
                       />
                     </label>
                   </div>
                 </div>
+              </fieldset>
+              <fieldset class="reversing-side" data-side="right">
+                <legend>Right guide</legend>
+                <p>Adjust the passenger-side guide segments from the preview or the inputs.</p>
                 <div class="reversing-line-point" data-side="right" data-point="near">
                   <div class="reversing-line-header">
                     <span class="reversing-colour" style="background: #ef5350;"></span>
@@ -1315,10 +1252,49 @@
                     </label>
                   </div>
                 </div>
-                <p class="reversing-line-note muted">
-                  <span class="reversing-colour" style="background: #ffc107;"></span>
-                  Mid segment spacing updates automatically between the far and near points.
-                </p>
+                <div class="reversing-line-point" data-side="right" data-point="far">
+                  <div class="reversing-line-header">
+                    <span class="reversing-colour" style="background: #66bb6a;"></span>
+                    <span>Far point</span>
+                    <button
+                      type="button"
+                      class="reversing-point-button"
+                      data-side="right"
+                      data-reversing-pick="far"
+                      aria-pressed="false"
+                    >
+                      Select on preview
+                    </button>
+                  </div>
+                  <div class="reversing-line-fields">
+                    <label>
+                      Horizontal (%)
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.1"
+                        inputmode="decimal"
+                        data-reversing-field="far-x"
+                        data-side="right"
+                        data-axis="x"
+                      />
+                    </label>
+                    <label>
+                      Vertical (%)
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.1"
+                        inputmode="decimal"
+                        data-reversing-field="far-y"
+                        data-side="right"
+                        data-axis="y"
+                      />
+                    </label>
+                  </div>
+                </div>
               </fieldset>
             </div>
             <div class="form-actions">
@@ -1595,6 +1571,9 @@
       const reversingPreviewPlaceholder = document.getElementById("reversing-preview-placeholder");
       const reversingPreviewStatus = document.getElementById("reversing-preview-status");
       const reversingPreviewCaptureButton = document.getElementById("reversing-preview-capture");
+      const reversingPreviewUploadButton = document.getElementById(
+        "reversing-preview-upload-button",
+      );
       const reversingPreviewUploadInput = document.getElementById("reversing-preview-upload");
       const reversingPreviewClearButton = document.getElementById("reversing-preview-clear");
       const reversingPreviewCaptureDefaultText =
@@ -3393,6 +3372,15 @@
         reversingPreviewClearButton.addEventListener("click", () => {
           clearReversingPreviewImage();
           setReversingPreviewStatus("Reference image cleared.");
+        });
+      }
+
+      if (reversingPreviewUploadButton && reversingPreviewUploadInput) {
+        reversingPreviewUploadButton.addEventListener("click", () => {
+          if (reversingPreviewUploadInput.disabled) {
+            return;
+          }
+          reversingPreviewUploadInput.click();
         });
       }
 
