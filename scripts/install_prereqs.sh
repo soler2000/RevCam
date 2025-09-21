@@ -50,7 +50,6 @@ packages=(
     python3-pip
     python3-picamera2
     python3-prctl
-    python3-simplejpeg
     libatlas-base-dev
     libjpeg-dev
     zlib1g-dev
@@ -64,5 +63,23 @@ fi
 
 echo "Installing prerequisites: ${packages[*]}"
 $SUDO apt install -y "${packages[@]}"
+
+echo "Ensuring SimpleJPEG is available (python3-simplejpeg)"
+set +e
+$SUDO apt install -y python3-simplejpeg
+status=$?
+set -e
+if [[ $status -ne 0 ]]; then
+    cat <<'NOTICE'
+Warning: python3-simplejpeg is not available via APT on this system.
+After creating the RevCam virtual environment, install SimpleJPEG with:
+  source .venv/bin/activate
+  python -m pip install --prefer-binary simplejpeg
+If you are using a Raspberry Pi, add "--extra-index-url https://www.piwheels.org/simple"
+to the pip command to reuse pre-built wheels.
+NOTICE
+else
+    echo "python3-simplejpeg installed successfully."
+fi
 
 echo "Prerequisite installation complete."

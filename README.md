@@ -59,7 +59,9 @@ building everything from PyPI. Follow these steps on the Pi:
 
    > **Tip:** The SimpleJPEG package is published as `python3-simplejpeg` on
    > Raspberry Pi OS. Running `sudo apt install simplejpeg` will fail with an
-   > "unable to locate package" error.
+   > "unable to locate package" error. If the package is unavailable from your
+   > mirror, install SimpleJPEG from PyPI after activating the virtual
+   > environment (see the next step).
 
    ```bash
    ./scripts/install_prereqs.sh
@@ -72,6 +74,13 @@ building everything from PyPI. Follow these steps on the Pi:
    python3 -m venv --system-site-packages .venv
    source .venv/bin/activate
    python -m pip install --upgrade pip
+   ```
+
+   If APT could not find `python3-simplejpeg`, install the wheel inside the
+   active virtual environment before proceeding:
+
+   ```bash
+   pip install --prefer-binary --extra-index-url https://www.piwheels.org/simple simplejpeg
    ```
 
 3. Install RevCam from the source tree. On Pi hardware this step pulls
@@ -277,6 +286,11 @@ REVCAM_REF="main"  # replace with a branch or pull/<ID>/head for PR testing
 
 sudo apt update
 sudo apt install -y python3-picamera2 python3-prctl python3-simplejpeg
+
+# If python3-simplejpeg is unavailable, install it from PyPI after the
+# virtual environment is created:
+#   source .venv/bin/activate
+#   pip install --prefer-binary --extra-index-url https://www.piwheels.org/simple simplejpeg
 
 if [ ! -d RevCam ]; then
   git clone "$REVCAM_REPO" RevCam

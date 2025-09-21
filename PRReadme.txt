@@ -28,7 +28,8 @@ used by the streaming pipeline. The same set is available through
 
 > **Note:** SimpleJPEG is only packaged for Raspberry Pi OS as
 > `python3-simplejpeg`. Running `sudo apt install simplejpeg` will result in an
-> "unable to locate package" error.
+> "unable to locate package" error. If APT cannot find the package, install
+> SimpleJPEG from PyPI after activating the virtual environment in step 3.
 
 2. Clone (or update) the RevCam repository
 -----------------------------------------
@@ -57,6 +58,13 @@ python -m pip install --upgrade pip
 ```
 The `--system-site-packages` flag exposes the APT-installed Picamera2 modules to
 the virtual environment so RevCam can import them without rebuilding.
+
+If `python3-simplejpeg` was unavailable in step 1, install the wheel inside the
+virtual environment before continuing:
+
+```bash
+pip install --prefer-binary --extra-index-url https://www.piwheels.org/simple simplejpeg
+```
 
 4. Install RevCam and Python dependencies
 ----------------------------------------
@@ -103,5 +111,8 @@ Troubleshooting
 * **Busy camera errors** – re-run `python -m rev_cam.diagnostics` to identify
   lingering processes. Disable the legacy camera interface and reboot if
   `kworker/R-mmal-vchiq` threads are reported.
-* **`python3-simplejpeg` missing** – re-run step 4. If installation fails, verify the
-  APT packages listed in step 1 are installed.
+* **`python3-simplejpeg` missing** – install SimpleJPEG in the virtual
+  environment with `pip install --prefer-binary --extra-index-url
+  https://www.piwheels.org/simple simplejpeg`. If `pip` cannot find a wheel, make
+  sure the APT packages listed in step 1 are present so the source build can
+  compile successfully.
