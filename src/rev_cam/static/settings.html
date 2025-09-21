@@ -283,6 +283,31 @@
         padding: 0.35rem 0.65rem;
         font-size: 0.9rem;
       }
+      .reversing-angle-group {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+        margin-bottom: 1rem;
+      }
+      .reversing-angle-buttons {
+        display: inline-flex;
+        gap: 0.25rem;
+      }
+      .reversing-angle-buttons button {
+        padding: 0.35rem 0.65rem;
+        font-size: 0.9rem;
+      }
+      .reversing-angle-value {
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+        min-width: 3rem;
+      }
+      .reversing-angle-hint {
+        margin: -0.25rem 0 0.75rem;
+        font-size: 0.85rem;
+        opacity: 0.75;
+      }
       .reversing-segment {
         display: flex;
         flex-direction: column;
@@ -1093,10 +1118,14 @@
                 <div class="reversing-preview-placeholder" id="reversing-preview-placeholder">
                   Capture a snapshot or upload an image to preview the reversing aids.
                 </div>
-              </div>
             </div>
-            <div class="reversing-grid">
-              <fieldset class="reversing-side" data-side="left">
+          </div>
+          <p class="muted reversing-angle-hint">
+            Angle controls rotate each side together so the guide segments stay parallel. Values
+            are reported in degrees from the horizontal.
+          </p>
+          <div class="reversing-grid">
+            <fieldset class="reversing-side" data-side="left">
                 <legend>Left guide</legend>
                 <p>Adjust the driver’s-side guide segments. Use nudge buttons for quick alignment.</p>
                 <div class="reversing-nudge-group">
@@ -1135,6 +1164,36 @@
                       →
                     </button>
                   </div>
+                </div>
+                <div class="reversing-angle-group" data-side="left">
+                  <span class="muted">Angle:</span>
+                  <div class="reversing-angle-buttons">
+                    <button
+                      type="button"
+                      data-reversing-angle="narrow"
+                      data-side="left"
+                      aria-label="Make left guide more vertical"
+                      title="Make left guide more vertical"
+                    >
+                      –
+                    </button>
+                    <button
+                      type="button"
+                      data-reversing-angle="wide"
+                      data-side="left"
+                      aria-label="Make left guide more horizontal"
+                      title="Make left guide more horizontal"
+                    >
+                      +
+                    </button>
+                  </div>
+                  <output
+                    class="reversing-angle-value"
+                    data-reversing-angle-value="left"
+                    aria-live="polite"
+                  >
+                    —
+                  </output>
                 </div>
                 <div class="reversing-segment" data-side="left" data-segment="0">
                   <div class="reversing-segment-header">
@@ -1370,6 +1429,36 @@
                       →
                     </button>
                   </div>
+                </div>
+                <div class="reversing-angle-group" data-side="right">
+                  <span class="muted">Angle:</span>
+                  <div class="reversing-angle-buttons">
+                    <button
+                      type="button"
+                      data-reversing-angle="narrow"
+                      data-side="right"
+                      aria-label="Make right guide more vertical"
+                      title="Make right guide more vertical"
+                    >
+                      –
+                    </button>
+                    <button
+                      type="button"
+                      data-reversing-angle="wide"
+                      data-side="right"
+                      aria-label="Make right guide more horizontal"
+                      title="Make right guide more horizontal"
+                    >
+                      +
+                    </button>
+                  </div>
+                  <output
+                    class="reversing-angle-value"
+                    data-reversing-angle-value="right"
+                    aria-live="polite"
+                  >
+                    —
+                  </output>
                 </div>
                 <div class="reversing-segment" data-side="right" data-segment="0">
                   <div class="reversing-segment-header">
@@ -1823,10 +1912,31 @@
             if (reversingAidsStatus) {
               reversingAidsStatus.textContent = "";
             }
+            handleReversingInputEdit(input);
             drawReversingPreviewOverlay();
           });
         }
       }
+      const reversingAngleValueElements = reversingAidsForm
+        ? Array.from(
+            reversingAidsForm.querySelectorAll('[data-reversing-angle-value]'),
+          ).filter((element) => element instanceof HTMLElement)
+        : [];
+      const reversingAngleValueMap = new Map();
+      if (reversingAngleValueElements.length) {
+        for (const element of reversingAngleValueElements) {
+          const side = element.dataset.reversingAngleValue;
+          if (typeof side !== "string" || !side) {
+            continue;
+          }
+          reversingAngleValueMap.set(side, element);
+        }
+      }
+      const reversingAngleButtons = reversingAidsForm
+        ? Array.from(
+            reversingAidsForm.querySelectorAll('button[data-reversing-angle]'),
+          ).filter((element) => element instanceof HTMLButtonElement)
+        : [];
       const reversingNudgeButtons = reversingAidsForm
         ? Array.from(
             reversingAidsForm.querySelectorAll('button[data-reversing-nudge]'),
@@ -1847,6 +1957,15 @@
       const REVERSING_SEGMENTS_PER_SIDE = 3;
       const REVERSING_SEGMENT_COLOURS = ["#66bb6a", "#ffc107", "#ef5350"];
       const REVERSING_PREVIEW_DEFAULT_RATIO = "16 / 9";
+      const REVERSING_ANGLE_STEP_DEGREES = 1.5;
+      const DEFAULT_REVERSING_SIDE_VECTORS = {
+        left: { dx: -0.2, dy: 0.16 },
+        right: { dx: 0.2, dy: 0.16 },
+      };
+      const reversingSideVectors = {
+        left: null,
+        right: null,
+      };
       const diagnosticsButton = document.getElementById("diagnostics-refresh");
       const diagnosticsStatus = document.getElementById("diagnostics-status");
       const diagnosticsResults = document.getElementById("diagnostics-results");
@@ -2345,6 +2464,7 @@
             }
           }
         }
+        refreshReversingSideVectors();
       }
 
       function applyReversingAids(config, options = {}) {
@@ -2357,6 +2477,7 @@
         setReversingInputsDisabled(!enabled);
         updateReversingAidsStatus(config);
         updateReversingAidsInputs(config, forceUpdate);
+        refreshReversingSideVectors();
         drawReversingPreviewOverlay();
       }
 
@@ -2408,6 +2529,323 @@
         return payload;
       }
 
+      function getReversingSegmentInputs(side, index) {
+        if (!reversingInputMap.size) {
+          return null;
+        }
+        return {
+          startX: reversingInputMap.get(`${side}|${index}|start-x`) || null,
+          startY: reversingInputMap.get(`${side}|${index}|start-y`) || null,
+          endX: reversingInputMap.get(`${side}|${index}|end-x`) || null,
+          endY: reversingInputMap.get(`${side}|${index}|end-y`) || null,
+        };
+      }
+
+      function readReversingSegmentStart(side, index) {
+        const inputs = getReversingSegmentInputs(side, index);
+        if (!inputs) {
+          return null;
+        }
+        const startX = parseReversingPreviewValue(inputs.startX);
+        const startY = parseReversingPreviewValue(inputs.startY);
+        if (startX === null || startY === null) {
+          return null;
+        }
+        return { x: startX, y: startY };
+      }
+
+      function readReversingSegmentVector(side, index) {
+        const inputs = getReversingSegmentInputs(side, index);
+        if (!inputs) {
+          return null;
+        }
+        const startX = parseReversingPreviewValue(inputs.startX);
+        const startY = parseReversingPreviewValue(inputs.startY);
+        const endX = parseReversingPreviewValue(inputs.endX);
+        const endY = parseReversingPreviewValue(inputs.endY);
+        if (
+          startX === null ||
+          startY === null ||
+          endX === null ||
+          endY === null
+        ) {
+          return null;
+        }
+        return { dx: endX - startX, dy: endY - startY };
+      }
+
+      function computeSideVector(side) {
+        for (let index = 0; index < REVERSING_SEGMENTS_PER_SIDE; index += 1) {
+          const vector = readReversingSegmentVector(side, index);
+          if (vector) {
+            return vector;
+          }
+        }
+        return null;
+      }
+
+      function updateReversingSideVectorFromInputs(side) {
+        const vector = computeSideVector(side);
+        if (!vector) {
+          return false;
+        }
+        reversingSideVectors[side] = { dx: vector.dx, dy: vector.dy };
+        updateReversingAngleValue(side);
+        return true;
+      }
+
+      function ensureReversingSideVector(side) {
+        if (!reversingSideVectors[side]) {
+          if (!updateReversingSideVectorFromInputs(side)) {
+            const fallback = DEFAULT_REVERSING_SIDE_VECTORS[side] || {
+              dx: 0,
+              dy: 0,
+            };
+            reversingSideVectors[side] = { dx: fallback.dx, dy: fallback.dy };
+            updateReversingAngleValue(side);
+          }
+        }
+        return reversingSideVectors[side];
+      }
+
+      function clampVectorForSide(side, vector) {
+        if (
+          !vector ||
+          typeof vector.dx !== "number" ||
+          typeof vector.dy !== "number"
+        ) {
+          return { dx: 0, dy: 0 };
+        }
+        const baseDx = Number.isFinite(vector.dx) ? vector.dx : 0;
+        const baseDy = Number.isFinite(vector.dy) ? vector.dy : 0;
+        let limit = 1;
+        let constrained = false;
+        for (let index = 0; index < REVERSING_SEGMENTS_PER_SIDE; index += 1) {
+          const start = readReversingSegmentStart(side, index);
+          if (!start) {
+            continue;
+          }
+          if (baseDx > 0) {
+            const ratio = (1 - start.x) / baseDx;
+            if (Number.isFinite(ratio)) {
+              limit = Math.min(limit, ratio);
+              constrained = true;
+            }
+          } else if (baseDx < 0) {
+            const ratio = start.x / -baseDx;
+            if (Number.isFinite(ratio)) {
+              limit = Math.min(limit, ratio);
+              constrained = true;
+            }
+          }
+          if (baseDy > 0) {
+            const ratio = (1 - start.y) / baseDy;
+            if (Number.isFinite(ratio)) {
+              limit = Math.min(limit, ratio);
+              constrained = true;
+            }
+          } else if (baseDy < 0) {
+            const ratio = start.y / -baseDy;
+            if (Number.isFinite(ratio)) {
+              limit = Math.min(limit, ratio);
+              constrained = true;
+            }
+          }
+        }
+        if (!constrained || !Number.isFinite(limit) || limit > 1) {
+          limit = 1;
+        }
+        if (limit < 0) {
+          limit = 0;
+        }
+        return { dx: baseDx * limit, dy: baseDy * limit };
+      }
+
+      function applyVectorToSide(side, vector, options = {}) {
+        if (
+          !vector ||
+          typeof vector.dx !== "number" ||
+          typeof vector.dy !== "number"
+        ) {
+          return false;
+        }
+        let skipSegment = null;
+        let skipFields = null;
+        if (options.skip && typeof options.skip.segment === "number") {
+          const numeric = Number(options.skip.segment);
+          if (Number.isFinite(numeric)) {
+            skipSegment = numeric;
+          }
+          const fields = options.skip.fields;
+          if (fields instanceof Set) {
+            skipFields = fields;
+          } else if (Array.isArray(fields)) {
+            skipFields = new Set(fields);
+          }
+        }
+        let changed = false;
+        for (let index = 0; index < REVERSING_SEGMENTS_PER_SIDE; index += 1) {
+          const inputs = getReversingSegmentInputs(side, index);
+          if (!inputs) {
+            continue;
+          }
+          const startX = parseReversingPreviewValue(inputs.startX);
+          const startY = parseReversingPreviewValue(inputs.startY);
+          if (startX === null || startY === null) {
+            continue;
+          }
+          const endXInput = inputs.endX;
+          const endYInput = inputs.endY;
+          if (
+            !(endXInput instanceof HTMLInputElement) ||
+            !(endYInput instanceof HTMLInputElement)
+          ) {
+            continue;
+          }
+          const endX = Math.min(1, Math.max(0, startX + vector.dx));
+          const endY = Math.min(1, Math.max(0, startY + vector.dy));
+          const endXPercent = endX * 100;
+          const endYPercent = endY * 100;
+          const formattedX = formatPercentageValue(endXPercent);
+          const formattedY = formatPercentageValue(endYPercent);
+          if (!(skipSegment === index && skipFields?.has("end-x"))) {
+            if (endXInput.value !== formattedX) {
+              endXInput.value = formattedX;
+              changed = true;
+            }
+            endXInput.dataset.userEdited = "true";
+          }
+          if (!(skipSegment === index && skipFields?.has("end-y"))) {
+            if (endYInput.value !== formattedY) {
+              endYInput.value = formattedY;
+              changed = true;
+            }
+            endYInput.dataset.userEdited = "true";
+          }
+        }
+        return changed;
+      }
+
+      function setReversingSideVector(side, vector, options = {}) {
+        const clamped = clampVectorForSide(side, vector);
+        reversingSideVectors[side] = { dx: clamped.dx, dy: clamped.dy };
+        updateReversingAngleValue(side);
+        return applyVectorToSide(side, clamped, options);
+      }
+
+      function refreshReversingSideVectors() {
+        for (const side of ["left", "right"]) {
+          if (!updateReversingSideVectorFromInputs(side)) {
+            const fallback = DEFAULT_REVERSING_SIDE_VECTORS[side] || {
+              dx: 0,
+              dy: 0,
+            };
+            reversingSideVectors[side] = { dx: fallback.dx, dy: fallback.dy };
+            updateReversingAngleValue(side);
+          }
+        }
+      }
+
+      function computeAngleFromVector(vector) {
+        if (
+          !vector ||
+          typeof vector.dx !== "number" ||
+          typeof vector.dy !== "number"
+        ) {
+          return null;
+        }
+        const dx = Math.abs(vector.dx);
+        const dy = Math.abs(vector.dy);
+        if (!(dx > 0) && !(dy > 0)) {
+          return null;
+        }
+        const radians = Math.atan2(dy, dx);
+        if (!Number.isFinite(radians)) {
+          return null;
+        }
+        const degrees = (radians * 180) / Math.PI;
+        return Math.max(0, Math.min(90, degrees));
+      }
+
+      function updateReversingAngleValue(side) {
+        const output = reversingAngleValueMap.get(side);
+        if (!output) {
+          return;
+        }
+        const angle = computeAngleFromVector(reversingSideVectors[side]);
+        if (angle === null) {
+          output.textContent = "—";
+        } else {
+          output.textContent = `${formatPercentageValue(angle)}°`;
+        }
+      }
+
+      function handleReversingInputEdit(input) {
+        if (!(input instanceof HTMLInputElement)) {
+          return;
+        }
+        const side = input.dataset.side;
+        const field = input.dataset.reversingField;
+        const segment = Number.parseInt(input.dataset.segment || "", 10);
+        if (!side || !field || !Number.isFinite(segment)) {
+          return;
+        }
+        if (field.startsWith("start-")) {
+          const vector = ensureReversingSideVector(side);
+          if (vector) {
+            applyVectorToSide(side, vector);
+            updateReversingAngleValue(side);
+          }
+        } else if (field.startsWith("end-")) {
+          const vector = readReversingSegmentVector(side, segment);
+          if (!vector) {
+            return;
+          }
+          const skipFields = new Set([field]);
+          setReversingSideVector(side, vector, {
+            skip: { segment, fields: skipFields },
+          });
+        }
+      }
+
+      function getAngleLimitsForSide(side) {
+        const epsilon = Math.PI / 180;
+        if (side === "left") {
+          return { min: Math.PI / 2 + epsilon, max: Math.PI - epsilon };
+        }
+        return { min: epsilon, max: Math.PI / 2 - epsilon };
+      }
+
+      function adjustReversingSideAngle(side, direction) {
+        if (typeof side !== "string" || !direction) {
+          return false;
+        }
+        const vector = ensureReversingSideVector(side);
+        if (!vector) {
+          return false;
+        }
+        const magnitude = Math.hypot(vector.dx, vector.dy);
+        if (!(magnitude > 0)) {
+          return false;
+        }
+        const delta = (REVERSING_ANGLE_STEP_DEGREES * Math.PI) / 180;
+        let angle = Math.atan2(vector.dy, vector.dx);
+        if (direction === "narrow") {
+          angle += side === "left" ? -delta : delta;
+        } else if (direction === "wide") {
+          angle += side === "left" ? delta : -delta;
+        } else {
+          return false;
+        }
+        const limits = getAngleLimitsForSide(side);
+        angle = Math.min(limits.max, Math.max(limits.min, angle));
+        const rotated = {
+          dx: Math.cos(angle) * magnitude,
+          dy: Math.sin(angle) * magnitude,
+        };
+        return setReversingSideVector(side, rotated);
+      }
+
       function adjustReversingSide(side, deltaX, deltaY) {
         if (!reversingInputs.length) {
           return;
@@ -2430,6 +2868,11 @@
             input.value = formatPercentageValue(updated);
             input.dataset.userEdited = "true";
           }
+        }
+        const vector = ensureReversingSideVector(side);
+        if (vector) {
+          applyVectorToSide(side, vector);
+          updateReversingAngleValue(side);
         }
         drawReversingPreviewOverlay();
       }
@@ -3340,6 +3783,23 @@
           drawReversingPreviewOverlay();
         });
         drawReversingPreviewOverlay();
+      }
+
+      if (reversingAngleButtons.length) {
+        for (const button of reversingAngleButtons) {
+          button.addEventListener("click", () => {
+            const side = button.dataset.side;
+            const direction = button.dataset.reversingAngle;
+            if (!side || !direction) {
+              return;
+            }
+            adjustReversingSideAngle(side, direction);
+            if (reversingAidsStatus) {
+              reversingAidsStatus.textContent = "";
+            }
+            drawReversingPreviewOverlay();
+          });
+        }
       }
 
       if (reversingNudgeButtons.length) {
