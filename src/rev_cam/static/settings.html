@@ -2129,19 +2129,22 @@
         if (pattern) {
           pieces.push(`Base pattern: ${formatLedPatternName(pattern)}`);
         } else {
-          pieces.push("Base pattern unavailable.");
+          pieces.push("Base pattern unavailable");
         }
         if (active && active !== pattern) {
           pieces.push(`Active animation: ${formatLedPatternName(active)}`);
         }
-        pieces.push(errorActive ? "Error animation enabled." : "Error animation disabled.");
+        pieces.push(
+          errorActive ? "Error animation enabled" : "Error animation disabled",
+        );
         if (!available) {
-          pieces.push("LED driver unavailable.");
+          pieces.push("LED driver unavailable");
         }
         if (!patterns.length) {
-          pieces.push("No LED patterns available.");
+          pieces.push("No LED patterns available");
         }
-        return pieces.join(" • ");
+        const summary = pieces.join(" • ");
+        return summary ? `${summary}.` : "";
       }
 
       function setLedStatusMessage(message, options = {}) {
