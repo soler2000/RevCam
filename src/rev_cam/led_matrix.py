@@ -14,6 +14,11 @@ import logging
 from dataclasses import dataclass
 from typing import Callable, Iterable, Iterator, Protocol, Sequence
 
+
+NEOPIXEL_PERMISSION_MESSAGE = (
+    "NeoPixel driver requires root privileges (sudo) to access /dev/mem."
+)
+
 Color = tuple[int, int, int]
 
 
@@ -60,6 +65,18 @@ class _RingDriver(Protocol):
         """Release any hardware resources."""
 
 
+def _is_permission_error(exc: BaseException) -> bool:
+    """Return ``True`` when the exception looks like a privilege failure."""
+
+    message = str(exc).lower()
+    return (
+        isinstance(exc, PermissionError)
+        or "permission" in message
+        or "sudo" in message
+        or "/dev/mem" in message
+    )
+
+
 class _NeoPixelDriver:
     """Driver that talks to a WS2812/NeoPixel ring via ``adafruit-circuitpython``."""
 
@@ -76,7 +93,9 @@ class _NeoPixelDriver:
         try:  # pragma: no cover - hardware specific import
             import board  # type: ignore
             import neopixel  # type: ignore
-        except Exception:  # pragma: no cover - exercised on systems without hardware
+        except Exception as exc:  # pragma: no cover - exercised on systems without hardware
+            if _is_permission_error(exc):
+                raise RuntimeError(NEOPIXEL_PERMISSION_MESSAGE) from None
             raise RuntimeError("NeoPixel libraries unavailable") from None
 
         try:
@@ -92,6 +111,8 @@ class _NeoPixelDriver:
                 auto_write=False,
             )
         except Exception as exc:  # pragma: no cover - defensive guard
+            if _is_permission_error(exc):
+                raise RuntimeError(NEOPIXEL_PERMISSION_MESSAGE) from None
             raise RuntimeError(f"Failed to initialise NeoPixel ring: {exc}") from exc
 
         try:
@@ -100,6 +121,8 @@ class _NeoPixelDriver:
         except RuntimeError:
             raise
         except Exception as exc:  # pragma: no cover - defensive guard
+            if _is_permission_error(exc):
+                raise RuntimeError(NEOPIXEL_PERMISSION_MESSAGE) from None
             raise RuntimeError(f"Failed to initialise NeoPixel ring: {exc}") from exc
 
     def apply(self, colors: Sequence[Color]) -> None:  # pragma: no cover - hardware path
@@ -110,18 +133,12 @@ class _NeoPixelDriver:
         except Exception as exc:  # pragma: no cover - defensive logging
             message = str(exc)
             lower_message = message.lower()
-            if (
-                isinstance(exc, (PermissionError, OSError))
-                or "sudo" in lower_message
-                or "permission" in lower_message
-            ):
+            if _is_permission_error(exc):
                 self._logger.warning(
                     "NeoPixel driver unavailable due to insufficient privileges: %s",
                     message,
                 )
-                raise RuntimeError(
-                    "NeoPixel driver requires root privileges (sudo) to access /dev/mem."
-                ) from None
+                raise RuntimeError(NEOPIXEL_PERMISSION_MESSAGE) from None
             self._logger.exception("Failed to update LED ring state")
             raise
 
@@ -373,4 +390,4 @@ class LedRing:
             yield PatternStep(colors=(dim,) * self._pixel_count, duration=0.12)
 
 
-__all__ = ["LedRing", "LedRingStatus"]
+__all__ = ["LedRing", "LedRingStatus", "NEOPIXEL_PERMISSION_MESSAGE"]

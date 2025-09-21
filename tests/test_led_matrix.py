@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from rev_cam.led_matrix import LedRing
+from rev_cam.led_matrix import LedRing, NEOPIXEL_PERMISSION_MESSAGE
 
 
 class _RecordingDriver:
@@ -79,10 +79,7 @@ def test_led_ring_reports_driver_permission_failure() -> None:
         await ring.set_pattern("boot")
         status = await ring.get_status()
         assert status.available is False
-        assert (
-            status.message
-            == "NeoPixel driver requires root privileges (sudo) to access /dev/mem."
-        )
+        assert status.message == NEOPIXEL_PERMISSION_MESSAGE
         assert driver.closed is True
 
         await ring.aclose()
