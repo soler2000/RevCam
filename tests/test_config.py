@@ -9,9 +9,11 @@ from rev_cam.config import (
     ConfigManager,
     DistanceZones,
     Orientation,
+    ReversingAidsConfig,
     StreamSettings,
     DEFAULT_BATTERY_CAPACITY_MAH,
     DEFAULT_CAMERA_CHOICE,
+    DEFAULT_REVERSING_AIDS,
 )
 from rev_cam.distance import DistanceCalibration
 
@@ -152,3 +154,51 @@ def test_stream_settings_validation(tmp_path: Path) -> None:
         manager.set_stream_settings({"fps": 0})
     with pytest.raises(ValueError):
         manager.set_stream_settings({"jpeg_quality": 120})
+
+
+def test_default_reversing_aids(tmp_path: Path) -> None:
+    manager = ConfigManager(tmp_path / "config.json")
+    aids = manager.get_reversing_aids()
+    assert isinstance(aids, ReversingAidsConfig)
+    assert aids == DEFAULT_REVERSING_AIDS
+
+
+def test_reversing_aids_persistence(tmp_path: Path) -> None:
+    config_file = tmp_path / "config.json"
+    manager = ConfigManager(config_file)
+    payload = {
+        "enabled": False,
+        "left": [
+            {"start": {"x": 0.55, "y": 0.12}, "end": {"x": 0.36, "y": 0.3}},
+            {"start": {"x": 0.46, "y": 0.42}, "end": {"x": 0.27, "y": 0.6}},
+            {"start": {"x": 0.38, "y": 0.66}, "end": {"x": 0.19, "y": 0.84}},
+        ],
+        "right": [
+            {"start": {"x": 0.45, "y": 0.12}, "end": {"x": 0.64, "y": 0.3}},
+            {"start": {"x": 0.54, "y": 0.42}, "end": {"x": 0.73, "y": 0.6}},
+            {"start": {"x": 0.62, "y": 0.66}, "end": {"x": 0.81, "y": 0.84}},
+        ],
+    }
+    updated = manager.set_reversing_aids(payload)
+    assert isinstance(updated, ReversingAidsConfig)
+    reloaded = ConfigManager(config_file)
+    assert reloaded.get_reversing_aids() == updated
+
+
+def test_reversing_aids_validation(tmp_path: Path) -> None:
+    manager = ConfigManager(tmp_path / "config.json")
+    with pytest.raises(ValueError):
+        manager.set_reversing_aids(
+            {
+                "left": [
+                    {"start": {"x": -0.1, "y": 0.2}, "end": {"x": 0.2, "y": 0.35}},
+                    {"start": {"x": 0.4, "y": 0.5}, "end": {"x": 0.25, "y": 0.65}},
+                    {"start": {"x": 0.3, "y": 0.7}, "end": {"x": 0.2, "y": 0.85}},
+                ],
+                "right": [
+                    {"start": {"x": 0.5, "y": 0.2}, "end": {"x": 0.7, "y": 0.35}},
+                    {"start": {"x": 0.6, "y": 0.5}, "end": {"x": 0.8, "y": 0.65}},
+                    {"start": {"x": 0.7, "y": 0.7}, "end": {"x": 0.9, "y": 0.85}},
+                ],
+            }
+        )

@@ -78,6 +78,81 @@ class StreamSettings:
         return {"fps": int(self.fps), "jpeg_quality": int(self.jpeg_quality)}
 
 
+@dataclass(frozen=True, slots=True)
+class ReversingAidPoint:
+    """Represents a normalised coordinate used to draw reversing aids."""
+
+    x: float
+    y: float
+
+    def __post_init__(self) -> None:
+        try:
+            x = float(self.x)
+            y = float(self.y)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Reversing aid coordinates must be numeric") from exc
+        if not (0.0 <= x <= 1.0) or not (0.0 <= y <= 1.0):
+            raise ValueError("Reversing aid coordinates must be between 0 and 1")
+        object.__setattr__(self, "x", x)
+        object.__setattr__(self, "y", y)
+
+    def to_dict(self) -> dict[str, float]:
+        return {"x": float(self.x), "y": float(self.y)}
+
+
+@dataclass(frozen=True, slots=True)
+class ReversingAidSegment:
+    """Represents a single coloured guide segment."""
+
+    start: ReversingAidPoint
+    end: ReversingAidPoint
+
+    def to_dict(self) -> dict[str, dict[str, float]]:
+        return {"start": self.start.to_dict(), "end": self.end.to_dict()}
+
+
+@dataclass(frozen=True, slots=True)
+class ReversingAidsConfig:
+    """Configuration describing the reversing aid overlay."""
+
+    enabled: bool = True
+    left: tuple[ReversingAidSegment, ...] = (
+        ReversingAidSegment(
+            start=ReversingAidPoint(0.52, 0.18),
+            end=ReversingAidPoint(0.32, 0.34),
+        ),
+        ReversingAidSegment(
+            start=ReversingAidPoint(0.42, 0.46),
+            end=ReversingAidPoint(0.22, 0.62),
+        ),
+        ReversingAidSegment(
+            start=ReversingAidPoint(0.34, 0.70),
+            end=ReversingAidPoint(0.14, 0.86),
+        ),
+    )
+    right: tuple[ReversingAidSegment, ...] = (
+        ReversingAidSegment(
+            start=ReversingAidPoint(0.48, 0.18),
+            end=ReversingAidPoint(0.68, 0.34),
+        ),
+        ReversingAidSegment(
+            start=ReversingAidPoint(0.58, 0.46),
+            end=ReversingAidPoint(0.78, 0.62),
+        ),
+        ReversingAidSegment(
+            start=ReversingAidPoint(0.66, 0.70),
+            end=ReversingAidPoint(0.86, 0.86),
+        ),
+    )
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "enabled": bool(self.enabled),
+            "left": [segment.to_dict() for segment in self.left],
+            "right": [segment.to_dict() for segment in self.right],
+        }
+
+
 RESOLUTION_PRESETS: Mapping[str, Resolution] = {
     "640x480": Resolution(640, 480),
     "800x600": Resolution(800, 600),
@@ -89,6 +164,7 @@ RESOLUTION_PRESETS: Mapping[str, Resolution] = {
 DEFAULT_RESOLUTION_KEY = "1280x720"
 DEFAULT_RESOLUTION = RESOLUTION_PRESETS[DEFAULT_RESOLUTION_KEY]
 DEFAULT_STREAM_SETTINGS = StreamSettings()
+DEFAULT_REVERSING_AIDS = ReversingAidsConfig()
 
 
 def _parse_orientation(data: Mapping[str, Any]) -> Orientation:
@@ -185,6 +261,103 @@ def _parse_stream_settings(value: Any, *, default: StreamSettings) -> StreamSett
         raise ValueError("Stream JPEG quality must be between 1 and 100")
 
     return StreamSettings(fps=fps, jpeg_quality=quality)
+
+
+def _parse_reversing_point(value: Any) -> ReversingAidPoint:
+    if isinstance(value, ReversingAidPoint):
+        return ReversingAidPoint(value.x, value.y)
+    if isinstance(value, Mapping):
+        if "x" not in value or "y" not in value:
+            raise ValueError("Reversing aid points must include 'x' and 'y'")
+        candidate = {"x": value.get("x"), "y": value.get("y")}
+    elif isinstance(value, Sequence):
+        items = list(value)
+        if len(items) != 2:
+            raise ValueError("Reversing aid points must contain two values")
+        candidate = {"x": items[0], "y": items[1]}
+    else:
+        raise ValueError("Unsupported reversing aid point value")
+    return ReversingAidPoint(candidate["x"], candidate["y"])
+
+
+def _parse_reversing_segment(value: Any) -> ReversingAidSegment:
+    if isinstance(value, ReversingAidSegment):
+        return ReversingAidSegment(
+            start=ReversingAidPoint(value.start.x, value.start.y),
+            end=ReversingAidPoint(value.end.x, value.end.y),
+        )
+    if isinstance(value, Mapping):
+        if "start" in value or "end" in value:
+            start_value = value.get("start")
+            end_value = value.get("end")
+            if start_value is None or end_value is None:
+                raise ValueError("Reversing aid segments must include 'start' and 'end'")
+        else:
+            keys = {key.lower(): key for key in value.keys()}
+            start_x = value.get(keys.get("x0")) or value.get(keys.get("start_x"))
+            start_y = value.get(keys.get("y0")) or value.get(keys.get("start_y"))
+            end_x = value.get(keys.get("x1")) or value.get(keys.get("end_x"))
+            end_y = value.get(keys.get("y1")) or value.get(keys.get("end_y"))
+            if None in (start_x, start_y, end_x, end_y):
+                raise ValueError(
+                    "Reversing aid segments must provide start and end coordinates"
+                )
+            start_value = {"x": start_x, "y": start_y}
+            end_value = {"x": end_x, "y": end_y}
+        start_point = _parse_reversing_point(start_value)
+        end_point = _parse_reversing_point(end_value)
+        return ReversingAidSegment(start=start_point, end=end_point)
+    if isinstance(value, Sequence):
+        items = list(value)
+        if len(items) != 4:
+            raise ValueError("Reversing aid segments must contain four values")
+        start_point = _parse_reversing_point(items[:2])
+        end_point = _parse_reversing_point(items[2:])
+        return ReversingAidSegment(start=start_point, end=end_point)
+    raise ValueError("Unsupported reversing aid segment value")
+
+
+def _parse_reversing_segments(
+    value: Any, *, default: tuple[ReversingAidSegment, ...]
+) -> tuple[ReversingAidSegment, ...]:
+    if value is None:
+        return tuple(default)
+    if isinstance(value, Mapping):
+        payload = value.get("segments") if "segments" in value else value
+        if isinstance(payload, Mapping):
+            payload = list(payload.values())
+        value = payload
+    if isinstance(value, Sequence):
+        segments = [_parse_reversing_segment(item) for item in value]
+    else:
+        raise ValueError("Reversing aid segments must be provided as a sequence")
+    if len(segments) != len(default):
+        raise ValueError(
+            f"Reversing aids require exactly {len(default)} segments per side"
+        )
+    return tuple(segments)
+
+
+def _parse_reversing_aids(
+    value: Any, *, default: ReversingAidsConfig
+) -> ReversingAidsConfig:
+    if value is None:
+        return default
+    if isinstance(value, ReversingAidsConfig):
+        return ReversingAidsConfig(
+            enabled=value.enabled,
+            left=tuple(_parse_reversing_segment(segment) for segment in value.left),
+            right=tuple(_parse_reversing_segment(segment) for segment in value.right),
+        )
+    if isinstance(value, Mapping):
+        payload = value.get("reversing_aids") if "reversing_aids" in value else value
+        if not isinstance(payload, Mapping):
+            raise ValueError("Reversing aids configuration must be a mapping")
+        enabled = payload.get("enabled", default.enabled)
+        left = _parse_reversing_segments(payload.get("left"), default=default.left)
+        right = _parse_reversing_segments(payload.get("right"), default=default.right)
+        return ReversingAidsConfig(enabled=bool(enabled), left=left, right=right)
+    raise ValueError("Unsupported reversing aids configuration value")
 
 
 def _parse_distance_zones(value: Any, *, default: DistanceZones) -> DistanceZones:
@@ -307,6 +480,7 @@ class ConfigManager:
             self._battery_limits,
             self._battery_capacity,
             self._stream_settings,
+            self._reversing_aids,
         ) = self._load()
 
     def _ensure_parent(self) -> None:
@@ -323,6 +497,7 @@ class ConfigManager:
         BatteryLimits,
         int,
         StreamSettings,
+        ReversingAidsConfig,
     ]:
         if not self._path.exists():
             return (
@@ -334,6 +509,7 @@ class ConfigManager:
                 DEFAULT_BATTERY_LIMITS,
                 DEFAULT_BATTERY_CAPACITY_MAH,
                 DEFAULT_STREAM_SETTINGS,
+                DEFAULT_REVERSING_AIDS,
             )
         try:
             payload = json.loads(self._path.read_text())
@@ -373,6 +549,11 @@ class ConfigManager:
                 stream_payload, default=DEFAULT_STREAM_SETTINGS
             )
 
+            reversing_payload = payload.get("reversing_aids")
+            reversing_aids = _parse_reversing_aids(
+                reversing_payload, default=DEFAULT_REVERSING_AIDS
+            )
+
             return (
                 orientation,
                 camera,
@@ -382,6 +563,7 @@ class ConfigManager:
                 battery_limits,
                 battery_capacity,
                 stream_settings,
+                reversing_aids,
             )
         except (OSError, ValueError) as exc:
             raise RuntimeError(f"Failed to load configuration: {exc}") from exc
@@ -400,6 +582,7 @@ class ConfigManager:
                 "capacity_mah": self._battery_capacity,
             },
             "stream": self._stream_settings.to_dict(),
+            "reversing_aids": self._reversing_aids.to_dict(),
         }
         self._path.write_text(json.dumps(payload, indent=2))
 
@@ -500,6 +683,19 @@ class ConfigManager:
             self._save()
         return settings
 
+    def get_reversing_aids(self) -> ReversingAidsConfig:
+        with self._lock:
+            return self._reversing_aids
+
+    def set_reversing_aids(
+        self, data: Mapping[str, Any] | ReversingAidsConfig
+    ) -> ReversingAidsConfig:
+        aids = _parse_reversing_aids(data, default=self._reversing_aids)
+        with self._lock:
+            self._reversing_aids = aids
+            self._save()
+        return aids
+
 
 __all__ = [
     "ConfigManager",
@@ -509,4 +705,8 @@ __all__ = [
     "RESOLUTION_PRESETS",
     "DEFAULT_RESOLUTION",
     "DEFAULT_RESOLUTION_KEY",
+    "ReversingAidsConfig",
+    "ReversingAidSegment",
+    "ReversingAidPoint",
+    "DEFAULT_REVERSING_AIDS",
 ]

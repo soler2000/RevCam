@@ -236,6 +236,86 @@
         gap: 0.75rem;
         flex-wrap: wrap;
       }
+      #reversing-aids-form {
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+      }
+      #reversing-aids-status {
+        min-height: 1.2rem;
+      }
+      .reversing-grid {
+        display: grid;
+        gap: 1rem;
+        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      }
+      fieldset.reversing-side {
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 12px;
+        padding: 1rem;
+        background: rgba(255, 255, 255, 0.03);
+      }
+      fieldset.reversing-side legend {
+        padding: 0 0.35rem;
+        font-weight: 600;
+      }
+      fieldset.reversing-side p {
+        margin: 0.25rem 0 0.85rem;
+        font-size: 0.9rem;
+        opacity: 0.8;
+      }
+      fieldset.reversing-side:disabled {
+        opacity: 0.6;
+      }
+      .reversing-nudge-group {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+        margin-bottom: 1rem;
+      }
+      .reversing-nudge-buttons {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 0.25rem;
+      }
+      .reversing-nudge-buttons button {
+        padding: 0.35rem 0.65rem;
+        font-size: 0.9rem;
+      }
+      .reversing-segment {
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+        margin-bottom: 1.25rem;
+      }
+      .reversing-segment:last-of-type {
+        margin-bottom: 0;
+      }
+      .reversing-segment-header {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-weight: 600;
+      }
+      .reversing-colour {
+        width: 0.9rem;
+        height: 0.9rem;
+        border-radius: 50%;
+        display: inline-block;
+      }
+      .reversing-segment-fields {
+        display: grid;
+        gap: 0.75rem;
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      }
+      .reversing-segment-fields label {
+        display: flex;
+        flex-direction: column;
+        gap: 0.4rem;
+        font-size: 0.9rem;
+        margin: 0;
+      }
       #status {
         font-size: 0.95rem;
         opacity: 0.85;
@@ -601,6 +681,18 @@
             type="button"
             class="tab-button"
             role="tab"
+            id="tab-reversing"
+            aria-controls="panel-reversing"
+            aria-selected="false"
+            data-tab="reversing"
+            tabindex="-1"
+          >
+            Reversing aids
+          </button>
+          <button
+            type="button"
+            class="tab-button"
+            role="tab"
             id="tab-network"
             aria-controls="panel-network"
             aria-selected="false"
@@ -871,6 +963,505 @@
         </section>
 
         <section
+          id="panel-reversing"
+          class="tab-panel"
+          role="tabpanel"
+          aria-labelledby="tab-reversing"
+          data-tab="reversing"
+          hidden
+        >
+          <form id="reversing-aids-form" class="card">
+            <h2>Reversing aids</h2>
+            <p class="muted">
+              Configure the on-screen guides to match your vehicle width, camera position and
+              preferred viewing angle.
+            </p>
+            <label style="display: inline-flex; align-items: center; gap: 0.5rem;">
+              <input type="checkbox" id="reversing-aids-enabled" />
+              Show reversing aids on the live view
+            </label>
+            <p class="muted" style="margin: 0;">
+              Coordinates are expressed as percentages of the frame. Adjust the nudge controls to
+              shift each side without changing individual values.
+            </p>
+            <div class="reversing-grid">
+              <fieldset class="reversing-side" data-side="left">
+                <legend>Left guide</legend>
+                <p>Adjust the driver’s-side guide segments. Use nudge buttons for quick alignment.</p>
+                <div class="reversing-nudge-group">
+                  <span class="muted">Nudge:</span>
+                  <div class="reversing-nudge-buttons">
+                    <button
+                      type="button"
+                      data-reversing-nudge="up"
+                      data-side="left"
+                      aria-label="Nudge left guide up"
+                    >
+                      ↑
+                    </button>
+                    <button
+                      type="button"
+                      data-reversing-nudge="down"
+                      data-side="left"
+                      aria-label="Nudge left guide down"
+                    >
+                      ↓
+                    </button>
+                    <button
+                      type="button"
+                      data-reversing-nudge="left"
+                      data-side="left"
+                      aria-label="Nudge left guide left"
+                    >
+                      ←
+                    </button>
+                    <button
+                      type="button"
+                      data-reversing-nudge="right"
+                      data-side="left"
+                      aria-label="Nudge left guide right"
+                    >
+                      →
+                    </button>
+                  </div>
+                </div>
+                <div class="reversing-segment" data-side="left" data-segment="0">
+                  <div class="reversing-segment-header">
+                    <span class="reversing-colour" style="background: #66bb6a;"></span>
+                    <span>Far segment</span>
+                  </div>
+                  <div class="reversing-segment-fields">
+                    <label>
+                      Start horizontal (%)
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.5"
+                        inputmode="decimal"
+                        data-reversing-field="start-x"
+                        data-segment="0"
+                        data-side="left"
+                        data-axis="x"
+                      />
+                    </label>
+                    <label>
+                      Start vertical (%)
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.5"
+                        inputmode="decimal"
+                        data-reversing-field="start-y"
+                        data-segment="0"
+                        data-side="left"
+                        data-axis="y"
+                      />
+                    </label>
+                    <label>
+                      End horizontal (%)
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.5"
+                        inputmode="decimal"
+                        data-reversing-field="end-x"
+                        data-segment="0"
+                        data-side="left"
+                        data-axis="x"
+                      />
+                    </label>
+                    <label>
+                      End vertical (%)
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.5"
+                        inputmode="decimal"
+                        data-reversing-field="end-y"
+                        data-segment="0"
+                        data-side="left"
+                        data-axis="y"
+                      />
+                    </label>
+                  </div>
+                </div>
+                <div class="reversing-segment" data-side="left" data-segment="1">
+                  <div class="reversing-segment-header">
+                    <span class="reversing-colour" style="background: #ffc107;"></span>
+                    <span>Mid segment</span>
+                  </div>
+                  <div class="reversing-segment-fields">
+                    <label>
+                      Start horizontal (%)
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.5"
+                        inputmode="decimal"
+                        data-reversing-field="start-x"
+                        data-segment="1"
+                        data-side="left"
+                        data-axis="x"
+                      />
+                    </label>
+                    <label>
+                      Start vertical (%)
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.5"
+                        inputmode="decimal"
+                        data-reversing-field="start-y"
+                        data-segment="1"
+                        data-side="left"
+                        data-axis="y"
+                      />
+                    </label>
+                    <label>
+                      End horizontal (%)
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.5"
+                        inputmode="decimal"
+                        data-reversing-field="end-x"
+                        data-segment="1"
+                        data-side="left"
+                        data-axis="x"
+                      />
+                    </label>
+                    <label>
+                      End vertical (%)
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.5"
+                        inputmode="decimal"
+                        data-reversing-field="end-y"
+                        data-segment="1"
+                        data-side="left"
+                        data-axis="y"
+                      />
+                    </label>
+                  </div>
+                </div>
+                <div class="reversing-segment" data-side="left" data-segment="2">
+                  <div class="reversing-segment-header">
+                    <span class="reversing-colour" style="background: #ef5350;"></span>
+                    <span>Near segment</span>
+                  </div>
+                  <div class="reversing-segment-fields">
+                    <label>
+                      Start horizontal (%)
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.5"
+                        inputmode="decimal"
+                        data-reversing-field="start-x"
+                        data-segment="2"
+                        data-side="left"
+                        data-axis="x"
+                      />
+                    </label>
+                    <label>
+                      Start vertical (%)
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.5"
+                        inputmode="decimal"
+                        data-reversing-field="start-y"
+                        data-segment="2"
+                        data-side="left"
+                        data-axis="y"
+                      />
+                    </label>
+                    <label>
+                      End horizontal (%)
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.5"
+                        inputmode="decimal"
+                        data-reversing-field="end-x"
+                        data-segment="2"
+                        data-side="left"
+                        data-axis="x"
+                      />
+                    </label>
+                    <label>
+                      End vertical (%)
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.5"
+                        inputmode="decimal"
+                        data-reversing-field="end-y"
+                        data-segment="2"
+                        data-side="left"
+                        data-axis="y"
+                      />
+                    </label>
+                  </div>
+                </div>
+              </fieldset>
+              <fieldset class="reversing-side" data-side="right">
+                <legend>Right guide</legend>
+                <p>
+                  Adjust the passenger-side guide segments. Nudge controls apply to the whole side.
+                </p>
+                <div class="reversing-nudge-group">
+                  <span class="muted">Nudge:</span>
+                  <div class="reversing-nudge-buttons">
+                    <button
+                      type="button"
+                      data-reversing-nudge="up"
+                      data-side="right"
+                      aria-label="Nudge right guide up"
+                    >
+                      ↑
+                    </button>
+                    <button
+                      type="button"
+                      data-reversing-nudge="down"
+                      data-side="right"
+                      aria-label="Nudge right guide down"
+                    >
+                      ↓
+                    </button>
+                    <button
+                      type="button"
+                      data-reversing-nudge="left"
+                      data-side="right"
+                      aria-label="Nudge right guide left"
+                    >
+                      ←
+                    </button>
+                    <button
+                      type="button"
+                      data-reversing-nudge="right"
+                      data-side="right"
+                      aria-label="Nudge right guide right"
+                    >
+                      →
+                    </button>
+                  </div>
+                </div>
+                <div class="reversing-segment" data-side="right" data-segment="0">
+                  <div class="reversing-segment-header">
+                    <span class="reversing-colour" style="background: #66bb6a;"></span>
+                    <span>Far segment</span>
+                  </div>
+                  <div class="reversing-segment-fields">
+                    <label>
+                      Start horizontal (%)
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.5"
+                        inputmode="decimal"
+                        data-reversing-field="start-x"
+                        data-segment="0"
+                        data-side="right"
+                        data-axis="x"
+                      />
+                    </label>
+                    <label>
+                      Start vertical (%)
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.5"
+                        inputmode="decimal"
+                        data-reversing-field="start-y"
+                        data-segment="0"
+                        data-side="right"
+                        data-axis="y"
+                      />
+                    </label>
+                    <label>
+                      End horizontal (%)
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.5"
+                        inputmode="decimal"
+                        data-reversing-field="end-x"
+                        data-segment="0"
+                        data-side="right"
+                        data-axis="x"
+                      />
+                    </label>
+                    <label>
+                      End vertical (%)
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.5"
+                        inputmode="decimal"
+                        data-reversing-field="end-y"
+                        data-segment="0"
+                        data-side="right"
+                        data-axis="y"
+                      />
+                    </label>
+                  </div>
+                </div>
+                <div class="reversing-segment" data-side="right" data-segment="1">
+                  <div class="reversing-segment-header">
+                    <span class="reversing-colour" style="background: #ffc107;"></span>
+                    <span>Mid segment</span>
+                  </div>
+                  <div class="reversing-segment-fields">
+                    <label>
+                      Start horizontal (%)
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.5"
+                        inputmode="decimal"
+                        data-reversing-field="start-x"
+                        data-segment="1"
+                        data-side="right"
+                        data-axis="x"
+                      />
+                    </label>
+                    <label>
+                      Start vertical (%)
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.5"
+                        inputmode="decimal"
+                        data-reversing-field="start-y"
+                        data-segment="1"
+                        data-side="right"
+                        data-axis="y"
+                      />
+                    </label>
+                    <label>
+                      End horizontal (%)
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.5"
+                        inputmode="decimal"
+                        data-reversing-field="end-x"
+                        data-segment="1"
+                        data-side="right"
+                        data-axis="x"
+                      />
+                    </label>
+                    <label>
+                      End vertical (%)
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.5"
+                        inputmode="decimal"
+                        data-reversing-field="end-y"
+                        data-segment="1"
+                        data-side="right"
+                        data-axis="y"
+                      />
+                    </label>
+                  </div>
+                </div>
+                <div class="reversing-segment" data-side="right" data-segment="2">
+                  <div class="reversing-segment-header">
+                    <span class="reversing-colour" style="background: #ef5350;"></span>
+                    <span>Near segment</span>
+                  </div>
+                  <div class="reversing-segment-fields">
+                    <label>
+                      Start horizontal (%)
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.5"
+                        inputmode="decimal"
+                        data-reversing-field="start-x"
+                        data-segment="2"
+                        data-side="right"
+                        data-axis="x"
+                      />
+                    </label>
+                    <label>
+                      Start vertical (%)
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.5"
+                        inputmode="decimal"
+                        data-reversing-field="start-y"
+                        data-segment="2"
+                        data-side="right"
+                        data-axis="y"
+                      />
+                    </label>
+                    <label>
+                      End horizontal (%)
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.5"
+                        inputmode="decimal"
+                        data-reversing-field="end-x"
+                        data-segment="2"
+                        data-side="right"
+                        data-axis="x"
+                      />
+                    </label>
+                    <label>
+                      End vertical (%)
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.5"
+                        inputmode="decimal"
+                        data-reversing-field="end-y"
+                        data-segment="2"
+                        data-side="right"
+                        data-axis="y"
+                      />
+                    </label>
+                  </div>
+                </div>
+              </fieldset>
+            </div>
+            <div class="form-actions">
+              <button type="submit">Save reversing aids</button>
+              <span id="reversing-aids-status" class="muted"></span>
+            </div>
+          </form>
+        </section>
+
+        <section
           id="panel-network"
           class="tab-panel"
           role="tabpanel"
@@ -1095,6 +1686,41 @@
           }
         }
       }
+      const reversingAidsForm = document.getElementById("reversing-aids-form");
+      const reversingAidsStatus = document.getElementById("reversing-aids-status");
+      const reversingAidsEnabledInput = document.getElementById("reversing-aids-enabled");
+      const reversingSideFieldsets = reversingAidsForm
+        ? Array.from(reversingAidsForm.querySelectorAll("fieldset.reversing-side")).filter(
+            (element) => element instanceof HTMLFieldSetElement,
+          )
+        : [];
+      const reversingInputs = reversingAidsForm
+        ? Array.from(
+            reversingAidsForm.querySelectorAll('input[data-reversing-field]'),
+          ).filter((element) => element instanceof HTMLInputElement)
+        : [];
+      const reversingInputMap = new Map();
+      if (reversingInputs.length) {
+        for (const input of reversingInputs) {
+          if (!input.dataset.side || !input.dataset.segment || !input.dataset.reversingField) {
+            continue;
+          }
+          const key = `${input.dataset.side}|${input.dataset.segment}|${input.dataset.reversingField}`;
+          reversingInputMap.set(key, input);
+          input.addEventListener("input", () => {
+            input.dataset.userEdited = "true";
+            if (reversingAidsStatus) {
+              reversingAidsStatus.textContent = "";
+            }
+          });
+        }
+      }
+      const reversingNudgeButtons = reversingAidsForm
+        ? Array.from(
+            reversingAidsForm.querySelectorAll('button[data-reversing-nudge]'),
+          ).filter((element) => element instanceof HTMLButtonElement)
+        : [];
+      const REVERSING_NUDGE_STEP = 1;
       const diagnosticsButton = document.getElementById("diagnostics-refresh");
       const diagnosticsStatus = document.getElementById("diagnostics-status");
       const diagnosticsResults = document.getElementById("diagnostics-results");
@@ -1265,6 +1891,179 @@
       }
 
       setStreamQualityDisplay(null);
+
+      function formatPercentageValue(value) {
+        if (typeof value !== "number" || !Number.isFinite(value)) {
+          return "";
+        }
+        const rounded = Math.round(value * 10) / 10;
+        let text = rounded.toFixed(1);
+        if (text.endsWith(".0")) {
+          text = text.slice(0, -2);
+        }
+        return text;
+      }
+
+      function normalisedToPercent(value) {
+        if (typeof value !== "number" || !Number.isFinite(value)) {
+          return null;
+        }
+        const clamped = Math.min(1, Math.max(0, value));
+        return Math.round(clamped * 1000) / 10;
+      }
+
+      function setReversingInputsDisabled(disabled) {
+        if (!reversingSideFieldsets.length) {
+          return;
+        }
+        for (const fieldset of reversingSideFieldsets) {
+          fieldset.disabled = Boolean(disabled);
+        }
+      }
+
+      function setReversingInputValue(input, normalised) {
+        if (!(input instanceof HTMLInputElement)) {
+          return;
+        }
+        const percent = normalisedToPercent(normalised);
+        if (percent === null) {
+          input.value = "";
+        } else {
+          input.value = formatPercentageValue(percent);
+        }
+        delete input.dataset.userEdited;
+      }
+
+      function updateReversingAidsStatus(config) {
+        if (!reversingAidsStatus) {
+          return;
+        }
+        if (!config) {
+          reversingAidsStatus.textContent = "Unable to load reversing aids.";
+          return;
+        }
+        reversingAidsStatus.textContent = config.enabled
+          ? "Reversing aids are enabled."
+          : "Reversing aids are disabled.";
+      }
+
+      function updateReversingAidsInputs(config, forceUpdate = false) {
+        if (!reversingInputMap.size) {
+          return;
+        }
+        const sides = ["left", "right"];
+        for (const side of sides) {
+          const segments = Array.isArray(config?.[side]) ? config[side] : [];
+          for (let index = 0; index < 3; index += 1) {
+            const segment = segments[index] || null;
+            const start = segment && segment.start ? segment.start : null;
+            const end = segment && segment.end ? segment.end : null;
+            const mappings = {
+              "start-x": start && typeof start.x === "number" ? start.x : null,
+              "start-y": start && typeof start.y === "number" ? start.y : null,
+              "end-x": end && typeof end.x === "number" ? end.x : null,
+              "end-y": end && typeof end.y === "number" ? end.y : null,
+            };
+            for (const [field, value] of Object.entries(mappings)) {
+              const key = `${side}|${index}|${field}`;
+              const input = reversingInputMap.get(key);
+              if (!(input instanceof HTMLInputElement)) {
+                continue;
+              }
+              if (!forceUpdate && input.dataset.userEdited === "true") {
+                continue;
+              }
+              setReversingInputValue(input, value);
+            }
+          }
+        }
+      }
+
+      function applyReversingAids(config, options = {}) {
+        if (!reversingAidsEnabledInput) {
+          return;
+        }
+        const forceUpdate = options.forceUpdate === true || options.updateInputs === true;
+        const enabled = config && typeof config.enabled === "boolean" ? config.enabled : false;
+        reversingAidsEnabledInput.checked = enabled;
+        setReversingInputsDisabled(!enabled);
+        updateReversingAidsStatus(config);
+        updateReversingAidsInputs(config, forceUpdate);
+      }
+
+      function readReversingInput(input) {
+        if (!(input instanceof HTMLInputElement)) {
+          throw new Error("Reversing aids input missing.");
+        }
+        const raw = parseFloat(input.value);
+        if (!Number.isFinite(raw)) {
+          throw new Error("Enter numeric values between 0 and 100.");
+        }
+        if (raw < 0 || raw > 100) {
+          throw new Error("Values must be between 0 and 100.");
+        }
+        return raw / 100;
+      }
+
+      function collectReversingAidsPayload() {
+        if (!reversingAidsEnabledInput) {
+          throw new Error("Reversing aids form unavailable.");
+        }
+        const payload = {
+          enabled: reversingAidsEnabledInput.checked,
+          left: [],
+          right: [],
+        };
+        const sides = ["left", "right"];
+        const segmentsPerSide = 3;
+        for (const side of sides) {
+          for (let index = 0; index < segmentsPerSide; index += 1) {
+            const startX = reversingInputMap.get(`${side}|${index}|start-x`);
+            const startY = reversingInputMap.get(`${side}|${index}|start-y`);
+            const endX = reversingInputMap.get(`${side}|${index}|end-x`);
+            const endY = reversingInputMap.get(`${side}|${index}|end-y`);
+            if (!startX || !startY || !endX || !endY) {
+              throw new Error("Reversing aids inputs are missing.");
+            }
+            payload[side].push({
+              start: {
+                x: readReversingInput(startX),
+                y: readReversingInput(startY),
+              },
+              end: {
+                x: readReversingInput(endX),
+                y: readReversingInput(endY),
+              },
+            });
+          }
+        }
+        return payload;
+      }
+
+      function adjustReversingSide(side, deltaX, deltaY) {
+        if (!reversingInputs.length) {
+          return;
+        }
+        for (const input of reversingInputs) {
+          if (!(input instanceof HTMLInputElement) || input.dataset.side !== side) {
+            continue;
+          }
+          const axis = input.dataset.axis;
+          const current = parseFloat(input.value);
+          if (!Number.isFinite(current)) {
+            continue;
+          }
+          if (axis === "x" && deltaX !== 0) {
+            const updated = Math.min(100, Math.max(0, current + deltaX));
+            input.value = formatPercentageValue(updated);
+            input.dataset.userEdited = "true";
+          } else if (axis === "y" && deltaY !== 0) {
+            const updated = Math.min(100, Math.max(0, current + deltaY));
+            input.value = formatPercentageValue(updated);
+            input.dataset.userEdited = "true";
+          }
+        }
+      }
 
       function formatDistance(value) {
         if (typeof value !== "number" || Number.isNaN(value)) {
@@ -2161,6 +2960,95 @@
             if (distanceZonesStatus) {
               distanceZonesStatus.textContent = "Unable to save warning zones.";
             }
+          }
+        });
+      }
+
+      if (reversingAidsEnabledInput) {
+        setReversingInputsDisabled(!reversingAidsEnabledInput.checked);
+        reversingAidsEnabledInput.addEventListener("change", () => {
+          setReversingInputsDisabled(!reversingAidsEnabledInput.checked);
+        });
+      }
+
+      if (reversingNudgeButtons.length) {
+        for (const button of reversingNudgeButtons) {
+          button.addEventListener("click", () => {
+            const side = button.dataset.side;
+            const direction = button.dataset.reversingNudge;
+            if (!side || !direction) {
+              return;
+            }
+            let deltaX = 0;
+            let deltaY = 0;
+            if (direction === "left") {
+              deltaX = -REVERSING_NUDGE_STEP;
+            } else if (direction === "right") {
+              deltaX = REVERSING_NUDGE_STEP;
+            } else if (direction === "up") {
+              deltaY = -REVERSING_NUDGE_STEP;
+            } else if (direction === "down") {
+              deltaY = REVERSING_NUDGE_STEP;
+            }
+            if (deltaX === 0 && deltaY === 0) {
+              return;
+            }
+            adjustReversingSide(side, deltaX, deltaY);
+            if (reversingAidsStatus) {
+              reversingAidsStatus.textContent = "";
+            }
+          });
+        }
+      }
+
+      if (reversingAidsForm) {
+        reversingAidsForm.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          if (!reversingAidsStatus) {
+            return;
+          }
+          let payload;
+          try {
+            payload = collectReversingAidsPayload();
+          } catch (err) {
+            const message = err instanceof Error ? err.message : "Unable to save reversing aids.";
+            reversingAidsStatus.textContent = message;
+            return;
+          }
+          reversingAidsStatus.textContent = "Saving…";
+          try {
+            const response = await fetch("/api/reversing-aids", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload),
+            });
+            if (!response.ok) {
+              let detail = "Unable to save reversing aids.";
+              try {
+                const problem = await response.json();
+                if (problem && typeof problem.detail === "string") {
+                  detail = problem.detail;
+                }
+              } catch (err2) {
+                console.error(err2);
+              }
+              reversingAidsStatus.textContent = detail;
+              return;
+            }
+            const data = await response.json();
+            applyReversingAids(data, { forceUpdate: true });
+            reversingAidsStatus.textContent = "Reversing aids saved.";
+            setTimeout(() => {
+              if (
+                reversingAidsStatus &&
+                reversingAidsStatus.textContent === "Reversing aids saved."
+              ) {
+                reversingAidsStatus.textContent = "";
+              }
+            }, 3000);
+          } catch (err) {
+            console.error("Reversing aids update error", err);
+            reversingAidsStatus.textContent = "Unable to save reversing aids.";
           }
         });
       }
@@ -3197,10 +4085,16 @@
       }
 
       async function fetchSettings() {
-        const [orientationResponse, cameraResponse, distanceResponse] = await Promise.all([
+        const [
+          orientationResponse,
+          cameraResponse,
+          distanceResponse,
+          reversingResponse,
+        ] = await Promise.all([
           fetch("/api/orientation"),
           fetch("/api/camera"),
           fetch("/api/distance"),
+          fetch("/api/reversing-aids"),
         ]);
         if (!orientationResponse.ok) {
           throw new Error("Unable to fetch current orientation");
@@ -3211,18 +4105,28 @@
         if (!distanceResponse.ok) {
           throw new Error("Unable to fetch distance configuration");
         }
-        const [orientationData, cameraData, distanceData] = await Promise.all([
+        if (!reversingResponse.ok) {
+          throw new Error("Unable to fetch reversing aid configuration");
+        }
+        const [orientationData, cameraData, distanceData, reversingData] = await Promise.all([
           orientationResponse.json(),
           cameraResponse.json(),
           distanceResponse.json(),
+          reversingResponse.json(),
         ]);
-        return { orientation: orientationData, camera: cameraData, distance: distanceData };
+        return {
+          orientation: orientationData,
+          camera: cameraData,
+          distance: distanceData,
+          reversing: reversingData,
+        };
       }
 
       async function loadSettings() {
         const data = await fetchSettings();
         applySettings(data.orientation, data.camera);
         applyDistanceData(data.distance, { updateInputs: true, updateCalibration: true });
+        applyReversingAids(data.reversing, { forceUpdate: true });
       }
 
       form.addEventListener("submit", async (event) => {
@@ -3280,6 +4184,7 @@
             const data = await fetchSettings();
             applySettings(data.orientation, data.camera, statusLabel.textContent);
             applyDistanceData(data.distance, { updateInputs: true, updateCalibration: true });
+            applyReversingAids(data.reversing, { forceUpdate: true });
           } catch (err) {
             console.error(err);
           }
@@ -3289,6 +4194,7 @@
           const data = await fetchSettings();
           applySettings(data.orientation, data.camera, "Settings saved");
           applyDistanceData(data.distance, { updateInputs: true, updateCalibration: true });
+          applyReversingAids(data.reversing, { forceUpdate: true });
         } catch (err) {
           console.error(err);
           statusLabel.textContent = "Settings saved";
