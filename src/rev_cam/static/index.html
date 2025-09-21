@@ -158,22 +158,79 @@
         gap: var(--space-sm);
         flex-wrap: wrap;
       }
-      a.settings-link {
-        color: var(--accent);
-        text-decoration: none;
-        font-weight: 600;
-        padding: var(--space-xs) var(--space-sm);
+      .control-group button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: var(--space-xs);
+        background: var(--surface-1);
+        border: 1px solid var(--border-muted);
+        color: var(--text-primary);
+        padding: calc(var(--control-padding-y) - 0.1rem)
+          calc(var(--control-padding-x) + 0.25rem);
         border-radius: var(--radius-pill);
-        transition: color var(--transition), background var(--transition);
+        font-weight: 600;
+        box-shadow: var(--shadow-sm);
+        backdrop-filter: blur(18px);
+        -webkit-backdrop-filter: blur(18px);
+        transition: transform var(--transition), box-shadow var(--transition),
+          border-color var(--transition), background var(--transition),
+          color var(--transition);
+      }
+      .control-group button:not(:disabled):hover {
+        background: var(--surface-0);
+        border-color: var(--accent-active);
+        box-shadow: 0 16px 36px rgba(0, 0, 0, 0.45);
+        transform: translateY(-1px);
+        color: var(--accent-active);
+      }
+      .control-group button:not(:disabled):focus-visible {
+        background: var(--surface-0);
+        border-color: var(--accent-active);
+        color: var(--accent-active);
+        box-shadow: 0 16px 36px rgba(0, 0, 0, 0.45),
+          0 0 0 1px var(--accent-active), 0 0 0 4px var(--accent-soft);
+        transform: translateY(-1px);
+      }
+      .control-group button:disabled {
+        opacity: 0.6;
+        box-shadow: none;
+        transform: none;
+      }
+      a.settings-link {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: var(--space-xs);
+        padding: calc(var(--control-padding-y) - 0.1rem)
+          calc(var(--control-padding-x) + 0.25rem);
+        border-radius: var(--radius-pill);
+        background: var(--surface-1);
+        border: 1px solid var(--border-muted);
+        color: var(--text-primary);
+        font-weight: 600;
+        text-decoration: none;
+        box-shadow: var(--shadow-sm);
+        backdrop-filter: blur(18px);
+        -webkit-backdrop-filter: blur(18px);
+        cursor: pointer;
+        transition: transform var(--transition), box-shadow var(--transition),
+          border-color var(--transition), background var(--transition),
+          color var(--transition);
+        white-space: nowrap;
       }
       a.settings-link:hover,
       a.settings-link:focus-visible {
+        background: var(--surface-0);
+        border-color: var(--accent-active);
+        box-shadow: 0 16px 36px rgba(0, 0, 0, 0.45);
+        transform: translateY(-1px);
         color: var(--accent-active);
-        background: var(--accent-soft);
       }
       a.settings-link:focus-visible {
         outline: none;
-        box-shadow: 0 0 0 1px var(--accent-active), 0 0 0 4px var(--accent-soft);
+        box-shadow: 0 16px 36px rgba(0, 0, 0, 0.45),
+          0 0 0 1px var(--accent-active), 0 0 0 4px var(--accent-soft);
       }
       .status-pill {
         color: var(--text-muted);
