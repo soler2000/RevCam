@@ -86,6 +86,12 @@ class BatteryReading:
         }
 
 
+@dataclass(slots=True)
+class _SmoothingState:
+    level: float | None = None
+    trend: float = 0.0
+
+
 class BatteryMonitor:
     """Provide high-level battery readings using an INA219 sensor.
 
@@ -98,13 +104,12 @@ class BatteryMonitor:
     DEFAULT_I2C_ADDRESS = 0x43
 
     _LIPO_VOLTAGE_CURVE: Sequence[tuple[float, float]] = (
-        (3.0, 0.0),
-        (3.2, 5.0),
-        (3.3, 10.0),
-        (3.4, 15.0),
+        (3.3, 0.0),
+        (3.35, 5.0),
+        (3.4, 12.0),
         (3.5, 25.0),
-        (3.6, 35.0),
-        (3.7, 50.0),
+        (3.6, 38.0),
+        (3.7, 55.0),
         (3.8, 70.0),
         (3.9, 85.0),
         (4.0, 92.0),
@@ -129,14 +134,18 @@ class BatteryMonitor:
         self._i2c_address = i2c_address
         if smoothing_alpha is None:
             self._smoothing_alpha: float | None = None
+            self._smoothing_beta: float | None = None
         else:
             alpha = float(smoothing_alpha)
             if not math.isfinite(alpha) or not (0.0 < alpha <= 1.0):
                 raise ValueError("smoothing_alpha must be between 0 and 1")
             self._smoothing_alpha = alpha
-        self._smoothed_percentage: float | None = None
-        self._smoothed_voltage: float | None = None
-        self._smoothed_current_ma: float | None = None
+            self._smoothing_beta = min(0.5, alpha * 0.5)
+        self._smoothing_states: dict[str, _SmoothingState] = {
+            "percentage": _SmoothingState(),
+            "voltage": _SmoothingState(),
+            "current": _SmoothingState(),
+        }
 
     @property
     def last_error(self) -> str | None:
@@ -232,37 +241,54 @@ class BatteryMonitor:
         return max(0.0, min(100.0, curve[-1][1]))
 
     def _reset_smoothing(self) -> None:
-        self._smoothed_percentage = None
-        self._smoothed_voltage = None
-        self._smoothed_current_ma = None
+        for state in self._smoothing_states.values():
+            state.level = None
+            state.trend = 0.0
 
     def _smooth_numeric(
         self,
-        attr: str,
+        key: str,
         value: float | None,
         *,
         allow_cross_zero: bool = True,
     ) -> float | None:
         if value is None or not math.isfinite(value):
-            setattr(self, attr, None)
+            state = self._smoothing_states[key]
+            state.level = None
+            state.trend = 0.0
             return None
 
         alpha = self._smoothing_alpha
         if alpha is None:
-            setattr(self, attr, value)
+            state = self._smoothing_states[key]
+            state.level = value
+            state.trend = 0.0
             return value
 
-        previous = getattr(self, attr)
-        if previous is None or not math.isfinite(previous):
-            result = value
-        elif not allow_cross_zero and (
-            previous == 0.0 or value == 0.0 or (previous > 0.0) != (value > 0.0)
+        state = self._smoothing_states[key]
+        beta = self._smoothing_beta
+        assert beta is not None
+
+        previous_level = state.level
+        if previous_level is None or not math.isfinite(previous_level):
+            state.level = value
+            state.trend = 0.0
+            return value
+
+        if not allow_cross_zero and (
+            previous_level == 0.0 or value == 0.0 or (previous_level > 0.0) != (value > 0.0)
         ):
-            result = value
-        else:
-            result = previous + alpha * (value - previous)
-        setattr(self, attr, result)
-        return result
+            state.level = value
+            state.trend = 0.0
+            return value
+
+        previous_trend = state.trend
+        level = alpha * value + (1.0 - alpha) * (previous_level + previous_trend)
+        trend = beta * (level - previous_level) + (1.0 - beta) * previous_trend
+
+        state.level = level
+        state.trend = trend
+        return level
 
     def read(self) -> BatteryReading:
         """Return the latest battery reading, handling hardware failures."""
@@ -318,12 +344,12 @@ class BatteryMonitor:
             current_ma = None
             charging = None
 
-        smoothed_voltage = self._smooth_numeric("_smoothed_voltage", float(voltage))
-        smoothed_percentage = self._smooth_numeric("_smoothed_percentage", float(raw_percentage))
+        smoothed_voltage = self._smooth_numeric("voltage", float(voltage))
+        smoothed_percentage = self._smooth_numeric("percentage", float(raw_percentage))
         if smoothed_percentage is not None:
             smoothed_percentage = max(0.0, min(100.0, smoothed_percentage))
         smoothed_current = self._smooth_numeric(
-            "_smoothed_current_ma",
+            "current",
             None if current_ma is None else float(current_ma),
             allow_cross_zero=False,
         )
