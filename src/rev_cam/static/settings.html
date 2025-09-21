@@ -7,10 +7,10 @@
     <style>
       :root {
         color-scheme: dark;
-        --font-family: "Inter", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont,
-          sans-serif;
-        --line-height: 1.55;
-        --transition-base: 0.25s ease;
+        --font-family: "Inter", "Manrope", "Segoe UI", system-ui, -apple-system,
+          BlinkMacSystemFont, sans-serif;
+        --line-height: 1.65;
+        --transition: 200ms ease;
         --surface-0: rgba(14, 16, 22, 0.82);
         --surface-1: rgba(26, 28, 36, 0.78);
         --surface-muted: rgba(255, 255, 255, 0.08);
@@ -96,7 +96,7 @@
       }
       a {
         color: var(--accent);
-        transition: color var(--transition-base);
+        transition: color var(--transition);
       }
       a:hover,
       a:focus-visible {
@@ -114,15 +114,136 @@
         font-size: 1rem;
         padding: var(--space-sm) var(--space-md);
         border-radius: var(--radius-sm);
-        border: 1px solid var(--border-muted);
-        background: var(--surface-1);
+        border: 1px solid transparent;
+        background: var(--surface-soft);
+        box-shadow: inset 0 0 0 1px var(--border-subtle);
         color: inherit;
         width: 100%;
         box-sizing: border-box;
+        transition: background var(--transition), box-shadow var(--transition),
+          border-color var(--transition), transform var(--transition);
+        appearance: none;
+      }
+      select {
+        padding-right: calc(var(--space-lg) * 1.25);
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='none' stroke='%23f5f7fb' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round' d='M1 1.5L6 6.5L11 1.5'/%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-size: 0.75rem;
+        background-position: right var(--space-md) center;
+      }
+      select:focus-visible,
+      input[type="text"]:focus-visible,
+      input[type="password"]:focus-visible,
+      input[type="number"]:focus-visible {
+        outline: none;
+        background: var(--surface-1);
+        box-shadow: inset 0 0 0 1px var(--accent), 0 0 0 4px var(--accent-soft);
+      }
+      select:disabled,
+      input[type="text"]:disabled,
+      input[type="password"]:disabled,
+      input[type="number"]:disabled {
+        cursor: not-allowed;
+        background: var(--surface-muted);
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+        color: var(--text-muted);
       }
       input[type="checkbox"] {
         margin-top: var(--space-xs);
-        transform: scale(1.2);
+        appearance: none;
+        width: 1.2rem;
+        height: 1.2rem;
+        border-radius: 0.35rem;
+        border: 1px solid transparent;
+        background: var(--surface-soft);
+        box-shadow: inset 0 0 0 1px var(--border-subtle);
+        display: grid;
+        place-items: center;
+        transition: background var(--transition), box-shadow var(--transition),
+          transform var(--transition);
+      }
+      input[type="checkbox"]::after {
+        content: "";
+        width: 0.55rem;
+        height: 0.35rem;
+        border: 2px solid var(--text-on-accent);
+        border-top: 0;
+        border-right: 0;
+        transform: rotate(-45deg) scale(0);
+        transform-origin: center;
+        transition: transform var(--transition);
+      }
+      input[type="checkbox"]:checked {
+        background: var(--accent);
+        box-shadow: inset 0 0 0 1px var(--accent-active),
+          0 0 0 4px rgba(10, 132, 255, 0.18);
+      }
+      input[type="checkbox"]:checked::after {
+        transform: rotate(-45deg) scale(1);
+      }
+      input[type="checkbox"]:focus-visible {
+        outline: none;
+        box-shadow: inset 0 0 0 1px var(--accent-active), 0 0 0 4px var(--accent-soft);
+      }
+      input[type="checkbox"]:active {
+        transform: scale(0.92);
+      }
+      input[type="range"] {
+        width: 100%;
+        margin-top: var(--space-xs);
+        appearance: none;
+        height: 0.4rem;
+        border-radius: var(--radius-pill);
+        background: var(--surface-soft);
+        box-shadow: inset 0 0 0 1px var(--border-subtle);
+        cursor: pointer;
+        transition: background var(--transition), box-shadow var(--transition);
+      }
+      input[type="range"]::-webkit-slider-runnable-track {
+        height: 100%;
+        border-radius: inherit;
+        background: transparent;
+      }
+      input[type="range"]::-moz-range-track {
+        height: 100%;
+        border-radius: inherit;
+        background: transparent;
+      }
+      input[type="range"]::-webkit-slider-thumb {
+        appearance: none;
+        width: 1rem;
+        height: 1rem;
+        border-radius: 50%;
+        background: var(--accent);
+        border: 2px solid rgba(10, 132, 255, 0.35);
+        box-shadow: 0 4px 10px rgba(10, 132, 255, 0.3);
+        transition: background var(--transition), box-shadow var(--transition),
+          transform var(--transition);
+        margin-top: calc(-0.3rem);
+      }
+      input[type="range"]::-moz-range-thumb {
+        width: 1rem;
+        height: 1rem;
+        border-radius: 50%;
+        background: var(--accent);
+        border: 2px solid rgba(10, 132, 255, 0.35);
+        box-shadow: 0 4px 10px rgba(10, 132, 255, 0.3);
+        transition: background var(--transition), box-shadow var(--transition),
+          transform var(--transition);
+      }
+      input[type="range"]:focus-visible {
+        outline: none;
+        box-shadow: inset 0 0 0 1px var(--accent-active), 0 0 0 4px var(--accent-soft);
+      }
+      input[type="range"]:focus-visible::-webkit-slider-thumb {
+        box-shadow: 0 0 0 4px var(--accent-soft);
+      }
+      input[type="range"]:focus-visible::-moz-range-thumb {
+        box-shadow: 0 0 0 4px var(--accent-soft);
+      }
+      input[type="range"]:active::-webkit-slider-thumb,
+      input[type="range"]:active::-moz-range-thumb {
+        transform: scale(0.92);
       }
       button {
         background: linear-gradient(135deg, var(--accent), var(--accent-hover));
@@ -133,8 +254,8 @@
         font-size: 1rem;
         cursor: pointer;
         font-weight: 600;
-        transition: background var(--transition-base), box-shadow var(--transition-base),
-          transform var(--transition-base);
+        transition: background var(--transition), box-shadow var(--transition),
+          transform var(--transition);
       }
       .button-link,
       button {
@@ -151,8 +272,8 @@
         padding: var(--control-padding-y) var(--control-padding-x);
         font-size: 1rem;
         font-weight: 600;
-        transition: background var(--transition-base), box-shadow var(--transition-base),
-          transform var(--transition-base);
+        transition: background var(--transition), box-shadow var(--transition),
+          transform var(--transition);
       }
       .button-link.disabled {
         opacity: 0.5;
@@ -167,18 +288,22 @@
         opacity: 0.5;
         cursor: not-allowed;
       }
-      button:not(:disabled):hover,
-      button:not(:disabled):focus-visible,
-      .button-link:not(.disabled):hover,
-      .button-link:not(.disabled):focus-visible {
+      button:not(.tab-button):not(:disabled):hover,
+      .button-link:not(.disabled):hover {
         background: linear-gradient(135deg, var(--accent-hover), var(--accent-active));
         box-shadow: 0 12px 26px var(--accent-shadow);
         transform: translateY(-1px);
       }
+      button:not(.tab-button):not(:disabled):focus-visible,
+      .button-link:not(.disabled):focus-visible {
+        background: linear-gradient(135deg, var(--accent-hover), var(--accent-active));
+        box-shadow: 0 12px 26px var(--accent-shadow),
+          0 0 0 1px var(--accent-active), 0 0 0 4px var(--accent-soft);
+        transform: translateY(-1px);
+      }
       button:focus-visible,
       .button-link:focus-visible {
-        outline: 2px solid var(--text-primary);
-        outline-offset: 3px;
+        outline: none;
       }
       button:disabled {
         cursor: not-allowed;
@@ -187,6 +312,20 @@
       }
       .muted {
         color: var(--text-muted);
+      }
+      .helper-text {
+        margin-top: var(--space-sm);
+      }
+      .status-text {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--space-xs);
+        min-height: 1.3rem;
+        align-self: flex-start;
+        transition: color var(--transition), opacity var(--transition);
+      }
+      .status-text:not(:empty) {
+        animation: status-reveal var(--transition) ease;
       }
       .page-shell {
         width: min(100%, var(--panel-max-width));
@@ -270,16 +409,16 @@
         padding: 0.5rem 1.25rem;
         font-size: 0.95rem;
         font-weight: 600;
-        transition: background var(--transition-base), color var(--transition-base),
-          box-shadow var(--transition-base);
+        transition: background var(--transition), color var(--transition),
+          box-shadow var(--transition), transform var(--transition);
       }
       .tab-button:hover {
         background: rgba(255, 255, 255, 0.06);
         color: var(--text-primary);
       }
       .tab-button:focus-visible {
-        outline: 2px solid var(--accent-ring);
-        outline-offset: 2px;
+        outline: none;
+        box-shadow: 0 0 0 1px var(--accent-active), 0 0 0 4px var(--accent-soft);
       }
       .tab-button[aria-selected="true"] {
         color: var(--text-primary);
@@ -289,14 +428,18 @@
       }
       .tab-button[aria-selected="true"]:hover {
         background: linear-gradient(135deg, var(--surface-primary), rgba(46, 51, 66, 0.92));
+        transform: translateY(-1px);
       }
       .tab-panel {
         display: none;
         flex-direction: column;
         gap: var(--rhythm);
+        opacity: 0;
+        transform: translateY(0.5rem);
       }
       .tab-panel:not([hidden]) {
         display: flex;
+        animation: tab-panel-enter var(--transition) ease-out both;
       }
       .tab-panel > .card {
         background: var(--surface-primary);
@@ -428,8 +571,8 @@
         align-items: center;
         gap: var(--space-xs);
         cursor: pointer;
-        transition: background var(--transition-base), color var(--transition-base),
-          border-color var(--transition-base);
+        transition: background var(--transition), color var(--transition),
+          border-color var(--transition), box-shadow var(--transition);
       }
       .reversing-point-button:hover,
       .reversing-point-button:focus {
@@ -691,7 +834,7 @@
         border-radius: calc(var(--radius-sm) / 1.5);
         background: currentColor;
         width: 0%;
-        transition: width var(--transition-base);
+        transition: width var(--transition);
       }
       .battery-icon.low {
         color: var(--warning);
@@ -875,6 +1018,26 @@
         font-size: 0.9rem;
         color: var(--text-muted);
       }
+      @keyframes tab-panel-enter {
+        from {
+          opacity: 0;
+          transform: translateY(0.65rem);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+      @keyframes status-reveal {
+        from {
+          opacity: 0;
+          transform: translateY(0.3rem);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
       @media (max-width: 640px) {
         body {
           padding: calc(var(--shell-padding-y) * 0.75) clamp(var(--rhythm), 8vw, calc(var(--rhythm) * 1.1));
@@ -1027,7 +1190,7 @@
               </div>
               <div class="form-actions">
                 <button type="submit">Save streaming settings</button>
-                <span id="stream-settings-status" class="muted"></span>
+              <span id="stream-settings-status" class="muted helper-text status-text"></span>
               </div>
             </form>
           </section>
@@ -1060,13 +1223,13 @@
             </label>
             <div class="form-actions">
               <button type="submit">Save settings</button>
-              <div id="status">Loading…</div>
+              <div id="status" class="muted helper-text status-text">Loading…</div>
             </div>
           </form>
 
           <section id="diagnostics-card" class="card">
             <h2>Diagnostics</h2>
-            <p class="muted">
+            <p class="muted helper-text">
               Check for conflicting camera services and validate the Picamera2 Python stack.
             </p>
             <div class="diagnostics-actions">
@@ -1075,13 +1238,13 @@
               </button>
               <span
                 id="diagnostics-status"
-                class="diagnostics-status"
+                class="diagnostics-status helper-text status-text"
                 role="status"
                 aria-live="polite"
               ></span>
             </div>
             <div id="diagnostics-results" class="diagnostics-results" hidden>
-              <p id="diagnostics-summary" class="muted"></p>
+              <p id="diagnostics-summary" class="muted helper-text"></p>
               <div>
                 <h3>Camera conflicts</h3>
                 <p id="diagnostics-no-conflicts" class="diagnostics-empty">
@@ -1101,7 +1264,7 @@
             </div>
             <p
               id="diagnostics-error"
-              class="diagnostics-error"
+              class="diagnostics-error helper-text"
               role="alert"
               aria-live="assertive"
             ></p>
@@ -1123,7 +1286,7 @@
               <span class="distance-value" id="distance-value">—</span>
               <span class="distance-zone zone-badge unavailable" id="distance-zone">N/A</span>
             </div>
-            <p id="distance-error" class="distance-error muted"></p>
+            <p id="distance-error" class="distance-error muted helper-text"></p>
             <div class="distance-actions">
               <button type="button" id="distance-refresh" class="secondary-button">
                 Refresh reading
@@ -1133,7 +1296,7 @@
 
           <form id="distance-calibration-form" class="card">
             <h2>Calibration</h2>
-            <p class="muted">
+            <p class="muted helper-text">
               Adjust the offset and scale applied to the sensor to match real-world distances.
             </p>
             <div class="distance-calibration-grid">
@@ -1163,9 +1326,9 @@
             <div class="form-actions">
               <button type="submit">Save calibration</button>
               <button type="button" id="distance-zero" class="secondary-button">Zero sensor</button>
-              <span id="distance-calibration-status" class="muted"></span>
+              <span id="distance-calibration-status" class="muted helper-text status-text"></span>
             </div>
-            <p class="distance-calibration-note muted">
+            <p class="distance-calibration-note muted helper-text">
               Place the target at the zero point, refresh the reading, then choose “Zero sensor” to
               automatically adjust the offset.
             </p>
@@ -1211,7 +1374,7 @@
             </label>
             <div class="form-actions">
               <button type="submit">Save warning zones</button>
-              <span id="distance-zones-status" class="muted"></span>
+              <span id="distance-zones-status" class="muted helper-text status-text"></span>
             </div>
           </form>
         </section>
@@ -1260,7 +1423,10 @@
                   Clear image
                 </button>
               </div>
-              <span id="reversing-preview-status" class="muted reversing-preview-status"></span>
+              <span
+                id="reversing-preview-status"
+                class="muted reversing-preview-status helper-text status-text"
+              ></span>
               <div class="reversing-preview-stage" id="reversing-preview-stage">
                 <img
                   id="reversing-preview-image"
@@ -1461,7 +1627,7 @@
             </div>
             <div class="form-actions">
               <button type="submit">Save reversing aids</button>
-              <span id="reversing-aids-status" class="muted"></span>
+              <span id="reversing-aids-status" class="muted helper-text status-text"></span>
             </div>
           </form>
         </section>
@@ -1484,7 +1650,12 @@
                 <input type="checkbox" id="wifi-dev-mode" /> Development mode (auto-rollback)
               </label>
             </div>
-            <div id="wifi-feedback" role="status" aria-live="polite"></div>
+            <div
+              id="wifi-feedback"
+              class="muted helper-text status-text"
+              role="status"
+              aria-live="polite"
+            ></div>
             <ul id="wifi-network-list"></ul>
             <form id="wifi-connect-form" hidden>
               <h3 style="margin: 0;">Connect to network</h3>
@@ -1620,7 +1791,7 @@
             </label>
             <div class="form-actions">
               <button type="submit">Save battery settings</button>
-              <span id="battery-limits-status" class="muted"></span>
+              <span id="battery-limits-status" class="muted helper-text status-text"></span>
             </div>
           </form>
         </section>
