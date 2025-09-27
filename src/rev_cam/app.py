@@ -681,6 +681,15 @@ def create_app(
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         return status.to_dict()
 
+    @app.get("/api/wifi/log")
+    async def get_wifi_log(limit: int = 50) -> dict[str, object]:
+        try:
+            entries = await run_in_threadpool(wifi_manager.get_connection_log, limit)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.warning("Unable to load Wi-Fi log: %s", exc)
+            raise HTTPException(status_code=503, detail="Unable to load Wi-Fi log") from exc
+        return {"entries": entries}
+
     @app.get("/api/wifi/networks")
     async def list_wifi_networks() -> dict[str, object]:
         try:

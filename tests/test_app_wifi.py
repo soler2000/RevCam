@@ -229,6 +229,13 @@ def test_wifi_scan_endpoint(client: TestClient) -> None:
     assert any(network.get("active") for network in payload["networks"])
 
 
+def test_wifi_log_endpoint_initially_empty(client: TestClient) -> None:
+    response = client.get("/api/wifi/log")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload == {"entries": []}
+
+
 def test_wifi_connect_development_mode_rolls_back(client: TestClient) -> None:
     response = client.post(
         "/api/wifi/connect",
@@ -311,3 +318,29 @@ def test_wifi_forget_endpoint_removes_network(client: TestClient) -> None:
     assert refreshed.status_code == 200
     networks = refreshed.json().get("networks", [])
     assert all(network.get("ssid") != "Home" for network in networks)
+
+
+def test_wifi_log_records_connection_and_hotspot_events(client: TestClient) -> None:
+    connect = client.post(
+        "/api/wifi/connect",
+        json={"ssid": "Guest", "development_mode": True, "rollback_seconds": 0.05},
+    )
+    assert connect.status_code == 200
+
+    enable = client.post(
+        "/api/wifi/hotspot",
+        json={"enabled": True, "ssid": "RevCam-AP", "password": "secret123"},
+    )
+    assert enable.status_code == 200
+
+    disable = client.post("/api/wifi/hotspot", json={"enabled": False})
+    assert disable.status_code == 200
+
+    log_response = client.get("/api/wifi/log")
+    assert log_response.status_code == 200
+    entries = log_response.json().get("entries", [])
+    events = {entry.get("event") for entry in entries}
+    assert "connect_attempt" in events
+    assert "connect_rollback" in events or "connect_success" in events
+    assert "hotspot_enable_attempt" in events
+    assert "hotspot_disabled" in events
