@@ -8,7 +8,7 @@ from collections import deque
 from dataclasses import dataclass
 from statistics import median
 from threading import Lock
-from typing import Callable, Deque
+from typing import Callable, Deque, Sequence
 
 try:  # pragma: no cover - optional dependency on numpy for overlays
     import numpy as _np
@@ -111,6 +111,29 @@ class DistanceReading:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class DistanceStatistics:
+    """Summary statistics describing recent raw distance samples."""
+
+    count: int
+    minimum_m: float
+    maximum_m: float
+    mean_m: float
+    median_m: float
+
+    @classmethod
+    def from_samples(cls, samples: Sequence[float]) -> "DistanceStatistics":
+        if not samples:
+            raise ValueError("samples must contain at least one value")
+
+        minimum = min(samples)
+        maximum = max(samples)
+        count = len(samples)
+        mean = float(sum(samples) / count)
+        med = float(median(samples))
+        return cls(count=count, minimum_m=minimum, maximum_m=maximum, mean_m=mean, median_m=med)
+
+
 class DistanceMonitor:
     """Read and smooth measurements from a VL53L1X time-of-flight sensor."""
 
@@ -145,6 +168,7 @@ class DistanceMonitor:
         self._i2c_address = i2c_address
         self._alpha = smoothing_alpha
         self._history: Deque[float] = deque(maxlen=history_size)
+        self._raw_samples: Deque[float] = deque(maxlen=history_size)
         self._spike_threshold = spike_threshold_m
         self._min_distance = min_distance_m
         self._max_distance = max_distance_m
@@ -306,6 +330,10 @@ class DistanceMonitor:
         self._spike_candidate = None
         self._spike_rejects = 0
 
+    def _record_raw_sample(self, measurement: float) -> None:
+        if math.isfinite(measurement):
+            self._raw_samples.append(float(measurement))
+
     def _filter_measurement(self, distance_m: float) -> float | None:
         if not math.isfinite(distance_m):
             self._reset_spike_tracking()
@@ -438,6 +466,7 @@ class DistanceMonitor:
                 self._last_timestamp = now
                 return reading
 
+            self._record_raw_sample(measurement)
             filtered = self._filter_measurement(measurement)
             if filtered is None:
                 reading = self._handle_invalid_sample(now, "Filtered invalid distance sample")
@@ -457,6 +486,20 @@ class DistanceMonitor:
             self._last_reading = reading
             self._last_timestamp = now
             return reading
+
+    def get_raw_history(self) -> tuple[float, ...]:
+        """Return a snapshot of the recent raw (pre-calibration) samples."""
+
+        with self._lock:
+            return tuple(self._raw_samples)
+
+    def get_raw_statistics(self) -> DistanceStatistics | None:
+        """Return descriptive statistics for the recent raw samples."""
+
+        with self._lock:
+            if not self._raw_samples:
+                return None
+            return DistanceStatistics.from_samples(tuple(self._raw_samples))
 
 
 _ZONE_COLOURS = {

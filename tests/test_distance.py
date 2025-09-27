@@ -11,6 +11,7 @@ import numpy as np
 from rev_cam.distance import (
     DistanceCalibration,
     DistanceMonitor,
+    DistanceStatistics,
     DistanceZones,
     create_distance_overlay,
 )
@@ -130,6 +131,37 @@ def test_distance_monitor_set_calibration_updates_immediately() -> None:
     second = monitor.read()
     assert second.raw_distance_m == pytest.approx(1.0, rel=1e-6)
     assert second.distance_m == pytest.approx(0.75, rel=1e-6)
+
+
+def test_distance_monitor_exposes_raw_history() -> None:
+    sensor = _SequenceSensor([123.0, 150.0, 160.0])
+    monitor = DistanceMonitor(sensor_factory=lambda: sensor, update_interval=0.0)
+
+    monitor.read()
+    monitor.read()
+    monitor.read()
+
+    history = monitor.get_raw_history()
+
+    assert history == pytest.approx((1.23, 1.5, 1.6))
+
+
+def test_distance_monitor_reports_raw_statistics() -> None:
+    sensor = _SequenceSensor([100.0, 120.0, 140.0])
+    monitor = DistanceMonitor(sensor_factory=lambda: sensor, update_interval=0.0)
+
+    monitor.read()
+    monitor.read()
+    monitor.read()
+
+    stats = monitor.get_raw_statistics()
+
+    assert isinstance(stats, DistanceStatistics)
+    assert stats.count == 3
+    assert stats.minimum_m == pytest.approx(1.0, rel=1e-6)
+    assert stats.maximum_m == pytest.approx(1.4, rel=1e-6)
+    assert stats.mean_m == pytest.approx((1.0 + 1.2 + 1.4) / 3, rel=1e-6)
+    assert stats.median_m == pytest.approx(1.2, rel=1e-6)
 
 
 def test_distance_overlay_draws_on_frame() -> None:
