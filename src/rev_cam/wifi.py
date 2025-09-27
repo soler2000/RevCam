@@ -539,12 +539,15 @@ class WiFiManager:
             )
             raise
         self._update_mdns(status)
+        rollback_requested = development_mode or (rollback_timeout is not None)
         effective_timeout = None
         if development_mode:
             base_timeout = (
                 self._rollback_timeout if rollback_timeout is None else max(0.0, rollback_timeout)
             )
             effective_timeout = base_timeout
+        elif rollback_timeout is not None:
+            effective_timeout = max(0.0, rollback_timeout)
         result_metadata = dict(attempt_metadata)
         if effective_timeout is not None:
             result_metadata["effective_rollback"] = effective_timeout
@@ -552,7 +555,7 @@ class WiFiManager:
         if status.connected and (status.ssid == cleaned_ssid or status.profile == cleaned_ssid):
             message = f"Connected to {status.ssid or cleaned_ssid}."
             self._record_log("connect_success", message, status=status, metadata=result_metadata)
-            if not development_mode:
+            if not rollback_requested:
                 return status
             timeout = effective_timeout
             if timeout is None or timeout <= 0:
@@ -562,15 +565,11 @@ class WiFiManager:
             detail = status.detail or "Connection did not report as active."
             message = f"Connection to {cleaned_ssid} pending: {detail}"
             self._record_log("connect_status", message, status=status, metadata=result_metadata)
-            if not development_mode:
+            if not rollback_requested:
                 return status
-            timeout = (
-                effective_timeout
-                if effective_timeout is not None
-                else self._rollback_timeout
-                if rollback_timeout is None
-                else max(0.0, rollback_timeout)
-            )
+            timeout = effective_timeout
+            if timeout is None and development_mode:
+                timeout = self._rollback_timeout
             monitor_required = True
         if timeout <= 0 or not monitor_required:
             return status
@@ -673,6 +672,7 @@ class WiFiManager:
             raise WiFiError(f"Unable to enable hotspot: {message}") from exc
         self._hotspot_profile = status.profile or self._hotspot_profile
         self._update_mdns(status)
+        rollback_requested = development_mode or (rollback_timeout is not None)
         effective_timeout = None
         if development_mode:
             base_timeout = (
@@ -681,6 +681,8 @@ class WiFiManager:
                 else max(0.0, rollback_timeout)
             )
             effective_timeout = base_timeout
+        elif rollback_timeout is not None:
+            effective_timeout = max(0.0, rollback_timeout)
         result_metadata = dict(attempt_metadata)
         if effective_timeout is not None:
             result_metadata["effective_rollback"] = effective_timeout
@@ -693,7 +695,7 @@ class WiFiManager:
                 status=status,
                 metadata=result_metadata,
             )
-            if not development_mode:
+            if not rollback_requested:
                 return status
             timeout = effective_timeout
             if timeout is None or timeout <= 0:
@@ -708,15 +710,11 @@ class WiFiManager:
                 status=status,
                 metadata=result_metadata,
             )
-            if not development_mode:
+            if not rollback_requested:
                 return status
-            timeout = (
-                effective_timeout
-                if effective_timeout is not None
-                else self._hotspot_rollback_timeout
-                if rollback_timeout is None
-                else max(0.0, rollback_timeout)
-            )
+            timeout = effective_timeout
+            if timeout is None and development_mode:
+                timeout = self._hotspot_rollback_timeout
             monitor_required = True
         if timeout <= 0 or not monitor_required:
             return status

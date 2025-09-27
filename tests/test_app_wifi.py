@@ -250,6 +250,20 @@ def test_wifi_connect_development_mode_rolls_back(client: TestClient) -> None:
     assert backend.connect_attempts[1][0] == "Home"
 
 
+def test_wifi_connect_manual_rollback_without_dev_mode(client: TestClient) -> None:
+    response = client.post(
+        "/api/wifi/connect",
+        json={"ssid": "Guest", "rollback_seconds": 0.05},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert "restored" in (payload.get("detail") or "").lower()
+    backend = getattr(client, "backend", None)
+    assert backend is not None
+    assert backend.connect_attempts[0][0] == "Guest"
+    assert backend.connect_attempts[1][0] == "Home"
+
+
 def test_wifi_hotspot_toggle(client: TestClient) -> None:
     enable = client.post(
         "/api/wifi/hotspot",
@@ -278,6 +292,25 @@ def test_wifi_hotspot_development_mode_rolls_back(client: TestClient) -> None:
             "enabled": True,
             "ssid": "RevCam-AP",
             "development_mode": True,
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["hotspot_active"] is False
+    assert "restored" in (payload.get("detail") or "").lower()
+    assert backend.connect_attempts[-1][0] == "Home"
+
+
+def test_wifi_hotspot_manual_rollback_without_dev_mode(client: TestClient) -> None:
+    backend = getattr(client, "backend", None)
+    assert backend is not None
+    backend.hotspot_inactive = True
+    response = client.post(
+        "/api/wifi/hotspot",
+        json={
+            "enabled": True,
+            "ssid": "RevCam-AP",
+            "rollback_seconds": 0.05,
         },
     )
     assert response.status_code == 200
