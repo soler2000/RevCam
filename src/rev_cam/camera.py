@@ -24,9 +24,9 @@ NUMPY_ABI_HINT = (
 )
 
 LEGACY_SDN_HINT = (
-    "The camera tuning file is using legacy SDN configuration. Update the tuning "
-    "data so the SDN section lives inside `rpi.denoise` (or install the latest "
-    "Raspberry Pi OS camera stack) to silence the warning."
+    "The camera tuning file still uses the legacy SDN layout. Move the `sdn` "
+    "block into the `rpi.denoise` section of the tuning file (or update to the "
+    "latest Raspberry Pi OS camera stack) so the warning disappears."
 )
 
 _NUMPY_ABI_TOKENS = (
@@ -35,6 +35,12 @@ _NUMPY_ABI_TOKENS = (
     "pyarray",
     "multiarray",
     "umath",
+)
+
+_LEGACY_SDN_TOKENS = (
+    "legacy sdn tuning",
+    "legacy sdn",
+    "warn rpisdn",
 )
 
 # User visible identifiers for camera backends. The order controls how they are
@@ -103,6 +109,22 @@ def detect_numpy_abi_mismatch(detail: str | None) -> bool:
         return False
 
     return any(token in lower_detail for token in _NUMPY_ABI_TOKENS)
+
+
+def detect_legacy_sdn_warning(detail: str | None) -> bool:
+    """Return ``True`` when *detail* reports legacy SDN tuning."""
+
+    if not detail:
+        return False
+
+    lower_detail = detail.lower()
+    if "sdn" not in lower_detail:
+        return False
+
+    if "rpi.denoise" in lower_detail:
+        return True
+
+    return any(token in lower_detail for token in _LEGACY_SDN_TOKENS)
 
 
 class _NullSync:
@@ -359,7 +381,7 @@ class Picamera2Camera(BaseCamera):
                         "Another process is using the camera. Close libcamera-* applications or stop conflicting services (e.g. `sudo systemctl stop libcamera-apps`)."
                     )
                     hints.extend(_collect_camera_conflicts())
-                if "legacy" in lower_detail and "sdn" in lower_detail and (
+                if detect_legacy_sdn_warning(detail) and (
                     LEGACY_SDN_HINT not in hints
                 ):
                     hints.append(LEGACY_SDN_HINT)
