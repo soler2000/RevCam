@@ -77,6 +77,7 @@ class WiFiStatus:
     profile: str | None = None
     error: str | None = None
     detail: str | None = None
+    hotspot_password: str | None = None
 
     def to_dict(self) -> dict[str, object | None]:
         return {
@@ -89,6 +90,7 @@ class WiFiStatus:
             "profile": self.profile,
             "error": self.error,
             "detail": self.detail,
+            "hotspot_password": self.hotspot_password,
         }
 
 
@@ -593,6 +595,7 @@ class WiFiManager:
         self._rollback_timeout = rollback_timeout
         self._poll_interval = max(0.1, poll_interval)
         self._hotspot_profile: str | None = None
+        self._hotspot_password: str | None = None
         self._hotspot_rollback_timeout = (
             self._rollback_timeout
             if hotspot_rollback_timeout is None
@@ -676,6 +679,7 @@ class WiFiManager:
                 metadata=attempt_metadata,
             )
             raise
+        status = self._apply_hotspot_password(status)
         self._update_mdns(status)
         rollback_requested = development_mode or (rollback_timeout is not None)
         effective_timeout = None
@@ -743,6 +747,7 @@ class WiFiManager:
             time.sleep(self._poll_interval)
             current = self._fetch_status()
         restored = self._backend.activate_profile(previous_profile)
+        restored = self._apply_hotspot_password(restored)
         self._update_mdns(restored)
         restored.detail = (
             f"Connection to {cleaned_ssid} did not establish within {int(math.ceil(timeout))}s; "
@@ -810,6 +815,8 @@ class WiFiManager:
                 metadata=attempt_metadata,
             )
             raise WiFiError(f"Unable to enable hotspot: {message}") from exc
+        self._hotspot_password = cleaned_password
+        status = self._apply_hotspot_password(status)
         self._hotspot_profile = status.profile or self._hotspot_profile
         self._update_mdns(status)
         rollback_requested = development_mode or (rollback_timeout is not None)
@@ -881,6 +888,7 @@ class WiFiManager:
             current = self._fetch_status()
         if previous_profile:
             restored = self._backend.activate_profile(previous_profile)
+            restored = self._apply_hotspot_password(restored)
             previous_name = (
                 previous_status.ssid if previous_status and previous_status.ssid else previous_profile
             )
@@ -902,6 +910,7 @@ class WiFiManager:
                 metadata=rollback_metadata,
             )
             return restored
+        current = self._apply_hotspot_password(current)
         current.detail = (
             f"Hotspot {cleaned_ssid} did not become active within {int(math.ceil(timeout))}s and "
             "no previous connection was available to restore."
@@ -930,6 +939,7 @@ class WiFiManager:
                 metadata=metadata,
             )
             raise
+        status = self._apply_hotspot_password(status)
         self._update_mdns(status)
         if not status.hotspot_active:
             self._hotspot_profile = None
@@ -954,7 +964,13 @@ class WiFiManager:
     # ------------------------------ helpers -----------------------------
     def _fetch_status(self) -> WiFiStatus:
         status = self._backend.get_status()
+        status = self._apply_hotspot_password(status)
         self._update_mdns(status)
+        return status
+
+    def _apply_hotspot_password(self, status: WiFiStatus | None) -> WiFiStatus:
+        if isinstance(status, WiFiStatus):
+            status.hotspot_password = self._hotspot_password
         return status
 
     def get_connection_log(self, limit: int | None = None) -> list[dict[str, object | None]]:

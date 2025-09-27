@@ -284,6 +284,32 @@ def test_wifi_hotspot_toggle(client: TestClient) -> None:
     assert advertiser.calls[-1] is None
 
 
+def test_wifi_hotspot_password_persisted_in_status(client: TestClient) -> None:
+    enable = client.post(
+        "/api/wifi/hotspot",
+        json={"enabled": True, "password": "secret123"},
+    )
+    assert enable.status_code == 200
+    payload = enable.json()
+    assert payload["hotspot_password"] == "secret123"
+
+    status = client.get("/api/wifi/status")
+    assert status.status_code == 200
+    assert status.json()["hotspot_password"] == "secret123"
+
+    disable = client.post("/api/wifi/hotspot", json={"enabled": False})
+    assert disable.status_code == 200
+    assert disable.json()["hotspot_password"] == "secret123"
+
+    open_hotspot = client.post("/api/wifi/hotspot", json={"enabled": True})
+    assert open_hotspot.status_code == 200
+    assert open_hotspot.json()["hotspot_password"] is None
+
+    refreshed = client.get("/api/wifi/status")
+    assert refreshed.status_code == 200
+    assert refreshed.json()["hotspot_password"] is None
+
+
 def test_wifi_hotspot_development_mode_rolls_back(client: TestClient) -> None:
     backend = getattr(client, "backend", None)
     assert backend is not None
