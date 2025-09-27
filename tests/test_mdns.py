@@ -64,6 +64,9 @@ def test_mdns_permission_error_disables_advertising(monkeypatch, caplog) -> None
 
 def test_mdns_zeroconf_constructed_off_event_loop(monkeypatch) -> None:
     created_threads: list[int] = []
+    register_threads: list[int] = []
+    unregister_threads: list[int] = []
+    close_threads: list[int] = []
     main_thread = threading.get_ident()
 
     class _ThreadRecordingZeroconf:
@@ -72,12 +75,14 @@ def test_mdns_zeroconf_constructed_off_event_loop(monkeypatch) -> None:
 
         def register_service(self, info, allow_name_change=False) -> None:  # noqa: D401
             del info, allow_name_change
+            register_threads.append(threading.get_ident())
 
         def unregister_service(self, info) -> None:  # noqa: D401 - simple stub
             del info
+            unregister_threads.append(threading.get_ident())
 
         def close(self) -> None:  # noqa: D401 - simple stub
-            return
+            close_threads.append(threading.get_ident())
 
     monkeypatch.setattr(mdns, "Zeroconf", _ThreadRecordingZeroconf)
     monkeypatch.setattr(mdns, "ServiceInfo", _FakeServiceInfo)
@@ -87,6 +92,8 @@ def test_mdns_zeroconf_constructed_off_event_loop(monkeypatch) -> None:
 
     async def _invoke() -> None:
         advertiser.advertise("192.168.1.2")
+        advertiser.advertise("192.168.1.3")
+        advertiser.close()
 
     asyncio.run(_invoke())
 
@@ -94,3 +101,9 @@ def test_mdns_zeroconf_constructed_off_event_loop(monkeypatch) -> None:
     # Ensure the Zeroconf instance was created on a different thread while the
     # event loop was running, preventing EventLoopBlocked errors.
     assert created_threads[0] != main_thread
+    assert register_threads, "register_service was not called"
+    assert unregister_threads, "unregister_service was not called"
+    assert close_threads, "close was not called"
+    assert register_threads[0] != main_thread
+    assert unregister_threads[0] != main_thread
+    assert close_threads[0] != main_thread
