@@ -23,6 +23,12 @@ NUMPY_ABI_HINT = (
     ".venv`."
 )
 
+LEGACY_SDN_HINT = (
+    "The camera tuning file is using legacy SDN configuration. Update the tuning "
+    "data so the SDN section lives inside `rpi.denoise` (or install the latest "
+    "Raspberry Pi OS camera stack) to silence the warning."
+)
+
 _NUMPY_ABI_TOKENS = (
     "abi",
     "dtype size changed",
@@ -353,6 +359,10 @@ class Picamera2Camera(BaseCamera):
                         "Another process is using the camera. Close libcamera-* applications or stop conflicting services (e.g. `sudo systemctl stop libcamera-apps`)."
                     )
                     hints.extend(_collect_camera_conflicts())
+                if "legacy" in lower_detail and "sdn" in lower_detail and (
+                    LEGACY_SDN_HINT not in hints
+                ):
+                    hints.append(LEGACY_SDN_HINT)
                 message = f"{message}: {detail}"
             if hints:
                 message = f"{message}. {' '.join(hints)}"

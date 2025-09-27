@@ -419,6 +419,25 @@ def test_picamera_busy_error_includes_legacy_camera_hint(
     assert legacy_hint in str(excinfo.value)
 
 
+def test_picamera_error_includes_legacy_sdn_hint(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Legacy SDN warnings should surface actionable tuning guidance."""
+
+    class LegacySdnCamera:
+        def __init__(self) -> None:
+            raise RuntimeError("Camera __init__ failed") from RuntimeError(
+                "WARN RPiSdn sdn.cpp:40 Using legacy SDN tuning - please consider moving SDN inside rpi.denoise"
+            )
+
+    module = types.SimpleNamespace(Picamera2=LegacySdnCamera)
+    monkeypatch.setitem(sys.modules, "picamera2", module)
+    monkeypatch.setattr(camera_module, "_collect_camera_conflicts", lambda: [])
+
+    with pytest.raises(CameraError) as excinfo:
+        Picamera2Camera()
+
+    assert camera_module.LEGACY_SDN_HINT in str(excinfo.value)
+
+
 def test_identify_camera_returns_source() -> None:
     camera = SyntheticCamera()
     assert identify_camera(camera) == "synthetic"
