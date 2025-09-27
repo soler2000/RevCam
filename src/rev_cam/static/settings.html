@@ -812,6 +812,61 @@
         flex-wrap: wrap;
         gap: var(--space-sm);
       }
+      .input-with-toggle {
+        position: relative;
+        display: flex;
+        align-items: center;
+      }
+      .input-with-toggle > input {
+        flex: 1 1 auto;
+        padding-right: 5.25rem;
+      }
+      .password-toggle {
+        position: absolute;
+        right: 0.35rem;
+        top: 50%;
+        transform: translateY(-50%);
+        min-width: 2.25rem;
+        height: 2.25rem;
+        padding: 0 var(--space-sm);
+        border: none;
+        border-radius: var(--radius-pill);
+        background: transparent;
+        color: var(--text-muted);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: var(--space-xs);
+        cursor: pointer;
+        transition: color var(--transition), background var(--transition),
+          box-shadow var(--transition);
+      }
+      .password-toggle:hover,
+      .password-toggle:focus-visible {
+        color: var(--text-primary);
+        background: var(--surface-soft);
+      }
+      .password-toggle:focus-visible {
+        outline: none;
+        box-shadow: 0 0 0 3px var(--accent-soft);
+      }
+      .password-toggle svg {
+        width: 1.25rem;
+        height: 1.25rem;
+        pointer-events: none;
+      }
+      .password-toggle-label {
+        font-size: 0.75rem;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+      .password-toggle[data-visible="true"] .icon-eye {
+        display: none;
+      }
+      .password-toggle[data-visible="false"] .icon-eye-off {
+        display: none;
+      }
       #wifi-log-section {
         margin-top: var(--stack-gap-lg);
         padding: var(--stack-gap-lg);
@@ -1800,16 +1855,41 @@
               <p id="wifi-hotspot-status" style="margin: 0; opacity: 0.85;">Hotspot disabled.</p>
               <label>
                 Hotspot name
-                <input type="text" id="wifi-hotspot-ssid" placeholder="RevCam Hotspot" autocomplete="ssid" />
+                <input type="text" id="wifi-hotspot-ssid" placeholder="RevCam" autocomplete="ssid" />
               </label>
               <label>
                 Hotspot password
-                <input
-                  type="password"
-                  id="wifi-hotspot-password"
-                  placeholder="Optional (min 8 characters)"
-                  autocomplete="new-password"
-                />
+                <div class="input-with-toggle">
+                  <input
+                    type="password"
+                    id="wifi-hotspot-password"
+                    placeholder="Optional (min 8 characters)"
+                    autocomplete="new-password"
+                  />
+                  <button
+                    type="button"
+                    id="wifi-hotspot-password-toggle"
+                    class="password-toggle"
+                    data-visible="false"
+                    aria-label="Show hotspot password"
+                    aria-pressed="false"
+                    title="Show hotspot password"
+                  >
+                    <svg class="icon-eye" viewBox="0 0 24 24" aria-hidden="true">
+                      <path
+                        fill="currentColor"
+                        d="M12 5c-5.07 0-9.39 3.17-10.94 7.77a1 1 0 0 0 0 .66C2.61 17.03 6.93 20.2 12 20.2s9.39-3.17 10.94-7.77a1 1 0 0 0 0-.66C21.39 8.17 17.07 5 12 5Zm0 13.2c-3.86 0-7.35-2.38-8.95-6.07C4.65 8.44 8.14 6.06 12 6.06s7.35 2.38 8.95 6.07c-1.6 3.69-5.09 6.07-8.95 6.07Zm0-10.14a4.08 4.08 0 1 0 0 8.16 4.08 4.08 0 0 0 0-8.16Zm0 6.12a2.04 2.04 0 1 1 0-4.08 2.04 2.04 0 0 1 0 4.08Z"
+                      />
+                    </svg>
+                    <svg class="icon-eye-off" viewBox="0 0 24 24" aria-hidden="true">
+                      <path
+                        fill="currentColor"
+                        d="M3.22 3.22a.75.75 0 0 0-1.06 1.06l2.32 2.32C2.14 8.14.78 10.2.22 11.77a1 1 0 0 0 0 .66C1.78 17.03 6.09 20.2 12 20.2c2.05 0 3.94-.47 5.62-1.32l3.16 3.16a.75.75 0 0 0 1.06-1.06Zm5.93 5.93 5.7 5.7A4.08 4.08 0 0 1 9.15 9.15ZM12 6.06c3.86 0 7.35 2.38 8.95 6.07-.69 1.58-1.75 2.93-3.05 3.96l-1.09-1.09a6.15 6.15 0 0 0-7.74-7.74l-1.42-1.42C8.68 6.29 10.3 6.06 12 6.06Z"
+                      />
+                    </svg>
+                    <span class="password-toggle-label">Show</span>
+                  </button>
+                </div>
               </label>
               <div class="button-group">
                 <button type="button" id="wifi-enable-hotspot">Enable hotspot</button>
@@ -2155,6 +2235,11 @@
       const wifiHotspotStatus = document.getElementById("wifi-hotspot-status");
       const wifiHotspotSsid = document.getElementById("wifi-hotspot-ssid");
       const wifiHotspotPassword = document.getElementById("wifi-hotspot-password");
+      const wifiHotspotPasswordToggle = document.getElementById("wifi-hotspot-password-toggle");
+      const wifiHotspotPasswordToggleLabel = wifiHotspotPasswordToggle
+        ? wifiHotspotPasswordToggle.querySelector(".password-toggle-label")
+        : null;
+      const DEFAULT_HOTSPOT_SSID = "RevCam";
       const wifiEnableHotspot = document.getElementById("wifi-enable-hotspot");
       const wifiDisableHotspot = document.getElementById("wifi-disable-hotspot");
       const wifiLogList = document.getElementById("wifi-log");
@@ -2170,9 +2255,30 @@
         : null;
       const HOTSPOT_HOSTNAME = "motion.local";
       const HOTSPOT_DEV_ROLLBACK_DEFAULT = 120;
+      if (wifiHotspotSsid && !wifiHotspotSsid.value) {
+        wifiHotspotSsid.value = DEFAULT_HOTSPOT_SSID;
+      }
       const WIFI_LOG_DEFAULT_EMPTY_MESSAGE = wifiLogEmpty
         ? wifiLogEmpty.textContent || "No Wi-Fi events recorded yet."
         : "No Wi-Fi events recorded yet.";
+
+      function setHotspotPasswordVisibility(visible) {
+        if (!wifiHotspotPassword || !wifiHotspotPasswordToggle) {
+          return;
+        }
+        const shouldShow = visible === true;
+        wifiHotspotPassword.type = shouldShow ? "text" : "password";
+        wifiHotspotPasswordToggle.dataset.visible = shouldShow ? "true" : "false";
+        wifiHotspotPasswordToggle.setAttribute("aria-pressed", shouldShow ? "true" : "false");
+        const label = shouldShow ? "Hide hotspot password" : "Show hotspot password";
+        wifiHotspotPasswordToggle.setAttribute("aria-label", label);
+        wifiHotspotPasswordToggle.title = label;
+        if (wifiHotspotPasswordToggleLabel) {
+          wifiHotspotPasswordToggleLabel.textContent = shouldShow ? "Hide" : "Show";
+        }
+      }
+
+      setHotspotPasswordVisibility(false);
 
       function formatLedPatternName(name) {
         if (typeof name !== "string" || !name) {
@@ -4726,6 +4832,27 @@
               wifiHotspotStatus.textContent = "Hotspot disabled.";
             }
           }
+          if (wifiHotspotPassword) {
+            const statusPassword =
+              typeof status.hotspot_password === "string" ? status.hotspot_password : "";
+            if (statusPassword) {
+              if (
+                wifiHotspotPassword.dataset.userEdited !== "true" ||
+                wifiHotspotPassword.value !== statusPassword
+              ) {
+                wifiHotspotPassword.value = statusPassword;
+              }
+              delete wifiHotspotPassword.dataset.userEdited;
+            } else if (
+              wifiHotspotPassword.dataset.userEdited !== "true" ||
+              wifiHotspotPassword.value !== ""
+            ) {
+              if (wifiHotspotPassword.value !== "") {
+                wifiHotspotPassword.value = "";
+              }
+              delete wifiHotspotPassword.dataset.userEdited;
+            }
+          }
           if (status.detail) {
             setWifiFeedback(status.detail, false);
           } else if (!wifiFeedback || !wifiFeedback.textContent) {
@@ -4936,6 +5063,9 @@
             ? `Hotspot enabled. Connect via http://${HOTSPOT_HOSTNAME}:9000/.`
             : "Hotspot disabled.";
           setWifiFeedback(detailMessage);
+          if (wifiHotspotPassword) {
+            delete wifiHotspotPassword.dataset.userEdited;
+          }
           await refreshWifiStatus();
         } catch (err) {
           console.error(err);
@@ -5440,6 +5570,20 @@
       if (wifiRollbackInput) {
         wifiRollbackInput.addEventListener("input", () => {
           wifiRollbackInput.dataset.userEdited = "true";
+        });
+      }
+
+      if (wifiHotspotPassword) {
+        wifiHotspotPassword.addEventListener("input", () => {
+          wifiHotspotPassword.dataset.userEdited = "true";
+        });
+      }
+
+      if (wifiHotspotPasswordToggle && wifiHotspotPassword) {
+        wifiHotspotPasswordToggle.addEventListener("click", () => {
+          const currentlyVisible = wifiHotspotPassword.type === "text";
+          setHotspotPasswordVisibility(!currentlyVisible);
+          wifiHotspotPassword.focus({ preventScroll: true });
         });
       }
 

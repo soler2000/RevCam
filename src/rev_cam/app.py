@@ -718,7 +718,7 @@ def create_app(
             try:
                 status = await run_in_threadpool(
                     wifi_manager.enable_hotspot,
-                    payload.ssid or "",
+                    payload.ssid,
                     payload.password,
                     development_mode=payload.development_mode,
                     rollback_timeout=payload.rollback_seconds,

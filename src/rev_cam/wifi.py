@@ -77,6 +77,7 @@ class WiFiStatus:
     profile: str | None = None
     error: str | None = None
     detail: str | None = None
+    hotspot_password: str | None = None
 
     def to_dict(self) -> dict[str, object | None]:
         return {
@@ -89,6 +90,7 @@ class WiFiStatus:
             "profile": self.profile,
             "error": self.error,
             "detail": self.detail,
+            "hotspot_password": self.hotspot_password,
         }
 
 
@@ -391,21 +393,156 @@ class NMCLIBackend(WiFiBackend):
     def start_hotspot(self, ssid: str, password: str | None) -> WiFiStatus:
         interface = self._get_interface()
         connection_name = "RevCam Hotspot"
-        args = [
-            "nmcli",
-            "device",
-            "wifi",
-            "hotspot",
-            "ifname",
-            interface,
-            "con-name",
-            connection_name,
-            "ssid",
-            ssid,
-        ]
-        if password:
-            args.extend(["password", password])
-        self._run(args)
+        password_provided = bool(password)
+        if password_provided:
+            args = [
+                "nmcli",
+                "device",
+                "wifi",
+                "hotspot",
+                "ifname",
+                interface,
+                "con-name",
+                connection_name,
+                "ssid",
+                ssid,
+                "password",
+                password,
+            ]
+            self._run(args)
+        else:
+            # Reconfigure the hotspot connection explicitly when no password is
+            # requested so NetworkManager does not retain an old passphrase.
+            connection_exists = True
+            try:
+                self._run(["nmcli", "connection", "show", connection_name])
+            except WiFiError:
+                connection_exists = False
+            if not connection_exists:
+                try:
+                    self._run(
+                        [
+                            "nmcli",
+                            "connection",
+                            "add",
+                            "type",
+                            "wifi",
+                            "ifname",
+                            interface,
+                            "con-name",
+                            connection_name,
+                            "autoconnect",
+                            "yes",
+                            "ssid",
+                            ssid,
+                        ]
+                    )
+                except WiFiError as exc:
+                    raise WiFiError(
+                        f"Unable to prepare hotspot connection: {exc}"
+                    ) from exc
+            else:
+                try:
+                    self._run(
+                        [
+                            "nmcli",
+                            "connection",
+                            "modify",
+                            connection_name,
+                            "connection.interface-name",
+                            interface,
+                        ]
+                    )
+                    self._run(
+                        [
+                            "nmcli",
+                            "connection",
+                            "modify",
+                            connection_name,
+                            "wifi.ssid",
+                            ssid,
+                        ]
+                    )
+                except WiFiError as exc:
+                    raise WiFiError(
+                        f"Unable to refresh hotspot configuration: {exc}"
+                    ) from exc
+            try:
+                base_configuration = [
+                    [
+                        "nmcli",
+                        "connection",
+                        "modify",
+                        connection_name,
+                        "wifi.mode",
+                        "ap",
+                    ],
+                    [
+                        "nmcli",
+                        "connection",
+                        "modify",
+                        connection_name,
+                        "ipv4.method",
+                        "shared",
+                    ],
+                    [
+                        "nmcli",
+                        "connection",
+                        "modify",
+                        connection_name,
+                        "ipv6.method",
+                        "ignore",
+                    ],
+                    [
+                        "nmcli",
+                        "connection",
+                        "modify",
+                        connection_name,
+                        "connection.autoconnect",
+                        "yes",
+                    ],
+                    [
+                        "nmcli",
+                        "connection",
+                        "modify",
+                        connection_name,
+                        "wifi-sec.key-mgmt",
+                        "none",
+                    ],
+                ]
+                for command in base_configuration:
+                    self._run(command)
+                # Remove any previously configured passphrases or keys so the
+                # hotspot broadcasts as an open network.
+                for property_name in (
+                    "wifi-sec.psk",
+                    "wifi-sec.wep-key0",
+                    "wifi-sec.wep-key1",
+                    "wifi-sec.wep-key2",
+                    "wifi-sec.wep-key3",
+                ):
+                    try:
+                        self._run(
+                            [
+                                "nmcli",
+                                "connection",
+                                "modify",
+                                connection_name,
+                                f"-{property_name}",
+                            ]
+                        )
+                    except WiFiError:
+                        # Older NetworkManager versions may not expose all key
+                        # slots; ignore missing properties.
+                        pass
+                try:
+                    self._run(["nmcli", "connection", "down", connection_name])
+                except WiFiError:
+                    # Connection might not be active yet; ignore and proceed.
+                    pass
+                self._run(["nmcli", "connection", "up", connection_name])
+            except WiFiError as exc:
+                raise WiFiError(f"Unable to configure open hotspot: {exc}") from exc
         status = self.get_status()
         status.profile = connection_name
         status.mode = "access-point"
@@ -452,17 +589,21 @@ class WiFiManager:
         poll_interval: float = 1.0,
         hotspot_rollback_timeout: float | None = 120.0,
         mdns_advertiser: MDNSAdvertiser | None = None,
+        default_hotspot_ssid: str = "RevCam",
     ) -> None:
         self._backend = backend or NMCLIBackend()
         self._rollback_timeout = rollback_timeout
         self._poll_interval = max(0.1, poll_interval)
         self._hotspot_profile: str | None = None
+        self._hotspot_password: str | None = None
         self._hotspot_rollback_timeout = (
             self._rollback_timeout
             if hotspot_rollback_timeout is None
             else max(0.0, hotspot_rollback_timeout)
         )
         self._mdns = mdns_advertiser
+        cleaned_default = default_hotspot_ssid.strip() if isinstance(default_hotspot_ssid, str) else ""
+        self._default_hotspot_ssid = cleaned_default or "RevCam"
         if self._mdns is None:
             try:
                 self._mdns = MDNSAdvertiser()
@@ -538,13 +679,17 @@ class WiFiManager:
                 metadata=attempt_metadata,
             )
             raise
+        status = self._apply_hotspot_password(status)
         self._update_mdns(status)
+        rollback_requested = development_mode or (rollback_timeout is not None)
         effective_timeout = None
         if development_mode:
             base_timeout = (
                 self._rollback_timeout if rollback_timeout is None else max(0.0, rollback_timeout)
             )
             effective_timeout = base_timeout
+        elif rollback_timeout is not None:
+            effective_timeout = max(0.0, rollback_timeout)
         result_metadata = dict(attempt_metadata)
         if effective_timeout is not None:
             result_metadata["effective_rollback"] = effective_timeout
@@ -552,7 +697,7 @@ class WiFiManager:
         if status.connected and (status.ssid == cleaned_ssid or status.profile == cleaned_ssid):
             message = f"Connected to {status.ssid or cleaned_ssid}."
             self._record_log("connect_success", message, status=status, metadata=result_metadata)
-            if not development_mode:
+            if not rollback_requested:
                 return status
             timeout = effective_timeout
             if timeout is None or timeout <= 0:
@@ -562,15 +707,11 @@ class WiFiManager:
             detail = status.detail or "Connection did not report as active."
             message = f"Connection to {cleaned_ssid} pending: {detail}"
             self._record_log("connect_status", message, status=status, metadata=result_metadata)
-            if not development_mode:
+            if not rollback_requested:
                 return status
-            timeout = (
-                effective_timeout
-                if effective_timeout is not None
-                else self._rollback_timeout
-                if rollback_timeout is None
-                else max(0.0, rollback_timeout)
-            )
+            timeout = effective_timeout
+            if timeout is None and development_mode:
+                timeout = self._rollback_timeout
             monitor_required = True
         if timeout <= 0 or not monitor_required:
             return status
@@ -606,6 +747,7 @@ class WiFiManager:
             time.sleep(self._poll_interval)
             current = self._fetch_status()
         restored = self._backend.activate_profile(previous_profile)
+        restored = self._apply_hotspot_password(restored)
         self._update_mdns(restored)
         restored.detail = (
             f"Connection to {cleaned_ssid} did not establish within {int(math.ceil(timeout))}s; "
@@ -623,15 +765,16 @@ class WiFiManager:
 
     def enable_hotspot(
         self,
-        ssid: str,
+        ssid: str | None = None,
         password: str | None = None,
         *,
         development_mode: bool = False,
         rollback_timeout: float | None = None,
     ) -> WiFiStatus:
-        if not isinstance(ssid, str) or not ssid.strip():
-            raise WiFiError("Hotspot SSID must be provided")
-        cleaned_ssid = ssid.strip()
+        cleaned_ssid = ""
+        if isinstance(ssid, str):
+            cleaned_ssid = ssid.strip()
+        cleaned_ssid = cleaned_ssid or self._default_hotspot_ssid
         if password is not None and password.strip() and len(password.strip()) < 8:
             raise WiFiError("Hotspot password must be at least 8 characters")
         cleaned_password = password.strip() if isinstance(password, str) and password.strip() else None
@@ -639,6 +782,7 @@ class WiFiManager:
             "target": cleaned_ssid,
             "development_mode": development_mode,
             "password_provided": cleaned_password is not None,
+            "default_ssid": cleaned_ssid == self._default_hotspot_ssid,
         }
         if rollback_timeout is not None:
             attempt_metadata["requested_rollback"] = max(0.0, rollback_timeout)
@@ -671,8 +815,11 @@ class WiFiManager:
                 metadata=attempt_metadata,
             )
             raise WiFiError(f"Unable to enable hotspot: {message}") from exc
+        self._hotspot_password = cleaned_password
+        status = self._apply_hotspot_password(status)
         self._hotspot_profile = status.profile or self._hotspot_profile
         self._update_mdns(status)
+        rollback_requested = development_mode or (rollback_timeout is not None)
         effective_timeout = None
         if development_mode:
             base_timeout = (
@@ -681,6 +828,8 @@ class WiFiManager:
                 else max(0.0, rollback_timeout)
             )
             effective_timeout = base_timeout
+        elif rollback_timeout is not None:
+            effective_timeout = max(0.0, rollback_timeout)
         result_metadata = dict(attempt_metadata)
         if effective_timeout is not None:
             result_metadata["effective_rollback"] = effective_timeout
@@ -693,7 +842,7 @@ class WiFiManager:
                 status=status,
                 metadata=result_metadata,
             )
-            if not development_mode:
+            if not rollback_requested:
                 return status
             timeout = effective_timeout
             if timeout is None or timeout <= 0:
@@ -708,15 +857,11 @@ class WiFiManager:
                 status=status,
                 metadata=result_metadata,
             )
-            if not development_mode:
+            if not rollback_requested:
                 return status
-            timeout = (
-                effective_timeout
-                if effective_timeout is not None
-                else self._hotspot_rollback_timeout
-                if rollback_timeout is None
-                else max(0.0, rollback_timeout)
-            )
+            timeout = effective_timeout
+            if timeout is None and development_mode:
+                timeout = self._hotspot_rollback_timeout
             monitor_required = True
         if timeout <= 0 or not monitor_required:
             return status
@@ -743,6 +888,7 @@ class WiFiManager:
             current = self._fetch_status()
         if previous_profile:
             restored = self._backend.activate_profile(previous_profile)
+            restored = self._apply_hotspot_password(restored)
             previous_name = (
                 previous_status.ssid if previous_status and previous_status.ssid else previous_profile
             )
@@ -764,6 +910,7 @@ class WiFiManager:
                 metadata=rollback_metadata,
             )
             return restored
+        current = self._apply_hotspot_password(current)
         current.detail = (
             f"Hotspot {cleaned_ssid} did not become active within {int(math.ceil(timeout))}s and "
             "no previous connection was available to restore."
@@ -792,6 +939,7 @@ class WiFiManager:
                 metadata=metadata,
             )
             raise
+        status = self._apply_hotspot_password(status)
         self._update_mdns(status)
         if not status.hotspot_active:
             self._hotspot_profile = None
@@ -816,7 +964,13 @@ class WiFiManager:
     # ------------------------------ helpers -----------------------------
     def _fetch_status(self) -> WiFiStatus:
         status = self._backend.get_status()
+        status = self._apply_hotspot_password(status)
         self._update_mdns(status)
+        return status
+
+    def _apply_hotspot_password(self, status: WiFiStatus | None) -> WiFiStatus:
+        if isinstance(status, WiFiStatus):
+            status.hotspot_password = self._hotspot_password
         return status
 
     def get_connection_log(self, limit: int | None = None) -> list[dict[str, object | None]]:
