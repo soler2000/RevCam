@@ -25,6 +25,10 @@ from .overlay_text import (
 SensorFactory = Callable[[], object]
 
 
+class _DriverUnavailableError(RuntimeError):
+    """Raised when no supported INA219 driver can be loaded."""
+
+
 @dataclass(frozen=True, slots=True)
 class BatteryLimits:
     """Represents configurable warning and shutdown thresholds."""
@@ -238,7 +242,7 @@ class BatteryMonitor:
             return sensor
 
         detail = "; ".join(attempts) if attempts else "required drivers are missing"
-        raise RuntimeError(f"INA219 driver unavailable ({detail})")
+        raise _DriverUnavailableError(f"INA219 driver unavailable ({detail})")
 
     def _try_create_adafruit_sensor(self, attempts: list[str]) -> object | None:
         try:  # Import lazily so unit tests do not require the dependencies.
@@ -345,6 +349,9 @@ class BatteryMonitor:
         if factory is None:
             try:
                 sensor = self._create_default_sensor()
+            except _DriverUnavailableError as exc:
+                self._record_error(str(exc), level=logging.WARNING)
+                return None
             except RuntimeError as exc:
                 self._record_error(str(exc), exc_info=True)
                 return None
@@ -372,13 +379,15 @@ class BatteryMonitor:
         self._last_error = None
         self._last_logged_error = None
 
-    def _record_error(self, message: str, *, exc_info: bool = False) -> None:
+    def _record_error(
+        self, message: str, *, level: int = logging.ERROR, exc_info: bool = False
+    ) -> None:
         detail = str(message).strip()
         if not detail:
             detail = "Battery monitor error"
         self._last_error = detail
         if detail != self._last_logged_error:
-            self._logger.error(detail, exc_info=exc_info)
+            self._logger.log(level, detail, exc_info=exc_info)
             self._last_logged_error = detail
 
     def _release_sensor(self, sensor: object | None) -> None:

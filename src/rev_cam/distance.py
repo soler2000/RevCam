@@ -26,6 +26,10 @@ from .overlay_text import (
 SensorFactory = Callable[[], object]
 
 
+class _DriverUnavailableError(RuntimeError):
+    """Raised when no supported VL53L1X driver can be loaded."""
+
+
 @dataclass(frozen=True, slots=True)
 class DistanceZones:
     """Represents the configurable warning thresholds in metres."""
@@ -175,13 +179,13 @@ class DistanceMonitor:
         try:  # pragma: no cover - hardware dependency
             import adafruit_vl53l1x  # type: ignore
         except Exception as exc:  # pragma: no cover - hardware dependency
-            raise RuntimeError("VL53L1X driver unavailable") from exc
+            raise _DriverUnavailableError("VL53L1X driver unavailable") from exc
 
         if self._i2c_bus is not None:
             try:  # pragma: no cover - optional dependency
                 from adafruit_extended_bus import ExtendedI2C  # type: ignore
             except Exception as exc:  # pragma: no cover - optional dependency
-                raise RuntimeError(
+                raise _DriverUnavailableError(
                     "Extended I2C support unavailable; install adafruit-circuitpython-extended-bus"
                 ) from exc
 
@@ -195,7 +199,7 @@ class DistanceMonitor:
             try:  # pragma: no cover - hardware dependency
                 import board  # type: ignore
             except Exception as exc:  # pragma: no cover - hardware dependency
-                raise RuntimeError("VL53L1X driver unavailable") from exc
+                raise _DriverUnavailableError("VL53L1X driver unavailable") from exc
 
             try:  # pragma: no cover - hardware dependency
                 i2c = board.I2C()  # type: ignore[attr-defined]
@@ -292,6 +296,10 @@ class DistanceMonitor:
         if factory is None:
             try:
                 sensor = self._create_default_sensor()
+            except _DriverUnavailableError as exc:
+                self._record_error(str(exc), level=logging.WARNING)
+                self._sensor = None
+                return None
             except RuntimeError as exc:
                 self._record_error(str(exc), exc_info=True)
                 self._sensor = None
