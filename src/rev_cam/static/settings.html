@@ -995,6 +995,69 @@
         font-size: 0.8rem;
         color: var(--text-muted);
       }
+      #development-distance-card {
+        display: flex;
+        flex-direction: column;
+        gap: var(--stack-gap);
+      }
+      #development-distance-card h3 {
+        margin: 0;
+      }
+      #development-distance-empty {
+        margin: 0;
+        font-size: 0.9rem;
+        color: var(--text-muted);
+      }
+      #development-distance-empty.error {
+        color: var(--danger);
+      }
+      #development-distance-log {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-sm);
+        max-height: 18rem;
+        overflow-y: auto;
+      }
+      #development-distance-log li {
+        padding: var(--space-md) var(--space-lg);
+        border-radius: var(--radius-md);
+        background: var(--surface-panel);
+        border: 1px solid var(--border-subtle);
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-xs);
+      }
+      #development-distance-log li time {
+        font-size: 0.8rem;
+        color: var(--text-muted);
+        letter-spacing: 0.01em;
+        font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+      }
+      .development-log-header {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: space-between;
+        gap: var(--space-xs);
+        align-items: baseline;
+      }
+      .development-log-zone {
+        font-size: 0.8rem;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--text-muted);
+      }
+      .development-log-values {
+        font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+        font-size: 0.95rem;
+      }
+      .development-log-error {
+        color: var(--danger);
+        font-size: 0.9rem;
+      }
       .battery-card {
         display: flex;
         flex-wrap: wrap;
@@ -1329,6 +1392,18 @@
                   tabindex="-1"
                 >
                   Network
+                </button>
+                <button
+                  type="button"
+                  class="tab-button"
+                  role="tab"
+                  id="tab-development"
+                  aria-controls="panel-development"
+                  aria-selected="false"
+                  data-tab="development"
+                  tabindex="-1"
+                >
+                  Development
                 </button>
                 <button
                   type="button"
@@ -2005,6 +2080,64 @@
         </section>
 
             <section
+          id="panel-development"
+          class="tab-panel"
+          role="tabpanel"
+          aria-labelledby="tab-development"
+          data-tab="development"
+          hidden
+        >
+          <section class="card">
+            <h2>Development features</h2>
+            <p class="muted">
+              Enable experimental controls and diagnostic output intended for development and troubleshooting.
+            </p>
+            <div class="toggle-row">
+              <div class="toggle-text">
+                <h3 id="development-toggle-heading">Development mode</h3>
+                <p id="development-toggle-description" class="muted helper-text">
+                  Reveal advanced controls and live diagnostic logs. These options are not intended for everyday use.
+                </p>
+              </div>
+              <label
+                class="switch-control"
+                aria-labelledby="development-toggle-heading"
+                aria-describedby="development-toggle-description"
+              >
+                <input type="checkbox" id="development-toggle" />
+                <span class="switch-track" aria-hidden="true">
+                  <span class="switch-thumb"></span>
+                </span>
+              </label>
+            </div>
+            <p
+              id="development-status"
+              class="muted helper-text status-text"
+              role="status"
+              aria-live="polite"
+            ></p>
+          </section>
+
+          <section id="development-distance-card" class="card" hidden>
+            <h3>Distance sensor raw data</h3>
+            <p class="muted helper-text">
+              Raw readings captured directly from the VL53L1X sensor. Values update automatically while development
+              mode is enabled.
+            </p>
+            <p id="development-distance-empty" class="muted">
+              Enable development features to capture raw distance readings.
+            </p>
+            <ol id="development-distance-log"></ol>
+            <div class="form-actions">
+              <button type="button" id="development-distance-refresh" class="secondary-button">
+                Refresh reading
+              </button>
+              <button type="button" id="development-distance-clear" class="secondary-button">Clear log</button>
+            </div>
+          </section>
+        </section>
+
+            <section
           id="panel-battery"
           class="tab-panel"
           role="tabpanel"
@@ -2156,6 +2289,25 @@
       let distanceLoading = false;
       let distanceCalibrationStatusTimer = null;
       let distanceOverlayStatusTimer = null;
+      const developmentToggle = document.getElementById("development-toggle");
+      const developmentStatus = document.getElementById("development-status");
+      const developmentDistanceCard = document.getElementById("development-distance-card");
+      const developmentDistanceEmpty = document.getElementById("development-distance-empty");
+      const developmentDistanceLog = document.getElementById("development-distance-log");
+      const developmentDistanceRefresh = document.getElementById("development-distance-refresh");
+      const developmentDistanceClear = document.getElementById("development-distance-clear");
+      const DEVELOPMENT_STORAGE_KEY = "revcam.development.enabled";
+      const DEVELOPMENT_DISTANCE_LOG_LIMIT = 50;
+      const DEVELOPMENT_DISTANCE_EMPTY_DEFAULT_MESSAGE = "No raw distance readings captured yet.";
+      const DEVELOPMENT_DISTANCE_DISABLED_MESSAGE = "Enable development features to capture raw readings.";
+      const DEVELOPMENT_DISTANCE_WAITING_MESSAGE = "Waiting for raw distance readings…";
+      const DEVELOPMENT_DISTANCE_POLL_INTERVAL = 2000;
+      let developmentEnabled = false;
+      let developmentStatusTimer = null;
+      let developmentDistanceTimer = null;
+      let developmentDistanceLoading = false;
+      let developmentForceLog = false;
+      let lastDevelopmentDistanceSignature = null;
       if (distanceInputs) {
         for (const input of Object.values(distanceInputs)) {
           if (input instanceof HTMLInputElement) {
@@ -3307,6 +3459,28 @@
         return `${Math.max(0, value).toFixed(1)} m`;
       }
 
+      function formatDistancePrecise(value, fractionDigits = 3) {
+        if (typeof value !== "number" || Number.isNaN(value)) {
+          return "—";
+        }
+        const digits = Number.isFinite(fractionDigits) ? Math.min(Math.max(Math.round(fractionDigits), 0), 6) : 3;
+        return `${Math.max(0, value).toFixed(digits)} m`;
+      }
+
+      function formatTimeOfDay(timestampSeconds) {
+        if (typeof timestampSeconds !== "number" || Number.isNaN(timestampSeconds)) {
+          return null;
+        }
+        const date = new Date(timestampSeconds * 1000);
+        if (Number.isNaN(date.getTime())) {
+          return null;
+        }
+        return {
+          display: date.toLocaleTimeString([], { hour12: false }),
+          iso: date.toISOString(),
+        };
+      }
+
       function updateDistanceBadge(zoneName) {
         if (!distanceZone) {
           return;
@@ -3486,6 +3660,304 @@
           const enabled = data && data.overlay_enabled === true;
           const forceUpdate = options.updateInputs === true || options.updateCalibration === true;
           updateDistanceOverlayToggle(enabled, { forceUpdate });
+        }
+        recordDevelopmentDistanceReading(data);
+      }
+
+      function setDevelopmentStatus(message, options = {}) {
+        if (!developmentStatus) {
+          return;
+        }
+        if (developmentStatusTimer) {
+          window.clearTimeout(developmentStatusTimer);
+          developmentStatusTimer = null;
+        }
+        developmentStatus.textContent = message || "";
+        if (message && options.persistent !== true) {
+          developmentStatusTimer = window.setTimeout(() => {
+            if (developmentStatus && developmentStatus.textContent === message) {
+              developmentStatus.textContent = "";
+            }
+            developmentStatusTimer = null;
+          }, 4000);
+        }
+      }
+
+      function setDevelopmentDistanceEmpty(message, isError = false) {
+        if (!developmentDistanceEmpty) {
+          return;
+        }
+        developmentDistanceEmpty.hidden = false;
+        developmentDistanceEmpty.textContent =
+          message && message.length > 0 ? message : DEVELOPMENT_DISTANCE_EMPTY_DEFAULT_MESSAGE;
+        if (isError) {
+          developmentDistanceEmpty.classList.add("error");
+        } else {
+          developmentDistanceEmpty.classList.remove("error");
+        }
+      }
+
+      function clearDevelopmentDistanceLog({ resetMessage = true } = {}) {
+        if (developmentDistanceLog) {
+          developmentDistanceLog.replaceChildren();
+        }
+        lastDevelopmentDistanceSignature = null;
+        developmentForceLog = false;
+        if (resetMessage) {
+          if (developmentEnabled) {
+            setDevelopmentDistanceEmpty(DEVELOPMENT_DISTANCE_WAITING_MESSAGE);
+          } else {
+            setDevelopmentDistanceEmpty(DEVELOPMENT_DISTANCE_DISABLED_MESSAGE);
+          }
+        }
+      }
+
+      function appendDevelopmentDistanceEntry(data, options = {}) {
+        if (!developmentDistanceLog || !data || typeof data !== "object") {
+          return;
+        }
+        const rawValue =
+          typeof data.raw_distance_m === "number" && Number.isFinite(data.raw_distance_m)
+            ? data.raw_distance_m
+            : null;
+        const filteredValue =
+          typeof data.distance_m === "number" && Number.isFinite(data.distance_m)
+            ? data.distance_m
+            : null;
+        const available = data && data.available === true;
+        const zoneKey =
+          data && typeof data.zone === "string" && data.zone.trim().length > 0
+            ? data.zone.trim().toLowerCase()
+            : "";
+        const timestampValue =
+          data && typeof data.timestamp === "number" && Number.isFinite(data.timestamp)
+            ? data.timestamp
+            : null;
+        const errorText = data && typeof data.error === "string" ? data.error.trim() : "";
+        const signature = JSON.stringify({
+          raw: rawValue !== null ? Number(rawValue.toFixed(4)) : null,
+          filtered: filteredValue !== null ? Number(filteredValue.toFixed(4)) : null,
+          available,
+          zone: zoneKey,
+          timestamp: timestampValue !== null ? Number(timestampValue.toFixed(3)) : null,
+          error: errorText,
+        });
+        if (!options.force && signature === lastDevelopmentDistanceSignature) {
+          return;
+        }
+        lastDevelopmentDistanceSignature = signature;
+        if (developmentDistanceEmpty) {
+          developmentDistanceEmpty.hidden = true;
+          developmentDistanceEmpty.classList.remove("error");
+        }
+        const item = document.createElement("li");
+        const header = document.createElement("div");
+        header.className = "development-log-header";
+        const timeElement = document.createElement("time");
+        let timeInfo = null;
+        if (timestampValue !== null) {
+          timeInfo = formatTimeOfDay(timestampValue);
+        }
+        if (!timeInfo) {
+          const now = new Date();
+          timeInfo = {
+            display: now.toLocaleTimeString([], { hour12: false }),
+            iso: now.toISOString(),
+          };
+        }
+        timeElement.dateTime = timeInfo.iso;
+        timeElement.textContent = timeInfo.display;
+        header.appendChild(timeElement);
+        const zoneLabel =
+          zoneKey && DISTANCE_ZONE_LABELS[zoneKey]
+            ? DISTANCE_ZONE_LABELS[zoneKey]
+            : available
+            ? DISTANCE_ZONE_LABELS.clear
+            : DISTANCE_ZONE_LABELS.unavailable;
+        const zoneElement = document.createElement("span");
+        zoneElement.className = "development-log-zone";
+        zoneElement.textContent = `Zone: ${zoneLabel}`;
+        header.appendChild(zoneElement);
+        item.appendChild(header);
+        const valuesElement = document.createElement("div");
+        valuesElement.className = "development-log-values";
+        const parts = [];
+        if (rawValue !== null) {
+          const rawMillimetres = Math.round(rawValue * 1000);
+          parts.push(`Raw: ${formatDistancePrecise(rawValue, 3)} (${rawMillimetres.toLocaleString()} mm)`);
+        } else {
+          parts.push("Raw: unavailable");
+        }
+        if (filteredValue !== null) {
+          parts.push(`Filtered: ${formatDistance(filteredValue)}`);
+        }
+        parts.push(available ? "Sensor available" : "Sensor unavailable");
+        valuesElement.textContent = parts.join(" • ");
+        item.appendChild(valuesElement);
+        if (errorText) {
+          const errorElement = document.createElement("div");
+          errorElement.className = "development-log-error";
+          errorElement.textContent = errorText;
+          item.appendChild(errorElement);
+        }
+        if (developmentDistanceLog.firstChild) {
+          developmentDistanceLog.insertBefore(item, developmentDistanceLog.firstChild);
+        } else {
+          developmentDistanceLog.appendChild(item);
+        }
+        while (developmentDistanceLog.children.length > DEVELOPMENT_DISTANCE_LOG_LIMIT) {
+          developmentDistanceLog.removeChild(developmentDistanceLog.lastElementChild);
+        }
+      }
+
+      function recordDevelopmentDistanceReading(data) {
+        if (!developmentEnabled) {
+          developmentForceLog = false;
+          return;
+        }
+        appendDevelopmentDistanceEntry(data, { force: developmentForceLog === true });
+        developmentForceLog = false;
+      }
+
+      function loadPersistedDevelopmentState() {
+        try {
+          const value = window.localStorage.getItem(DEVELOPMENT_STORAGE_KEY);
+          return value === "true";
+        } catch (err) {
+          console.error(err);
+          return false;
+        }
+      }
+
+      async function fetchDevelopmentDistanceReading(options = {}) {
+        if (!developmentEnabled) {
+          return;
+        }
+        if (developmentDistanceLoading || distanceLoading) {
+          return;
+        }
+        const manual = options.manual === true;
+        developmentDistanceLoading = true;
+        if (manual) {
+          setDevelopmentStatus("Refreshing raw distance…");
+        }
+        try {
+          const response = await fetch("/api/distance", { cache: "no-store" });
+          if (!response.ok) {
+            throw new Error(`Distance request failed with status ${response.status}`);
+          }
+          const payload = await response.json();
+          if (manual) {
+            developmentForceLog = true;
+          }
+          applyDistanceData(payload);
+          if (manual) {
+            setDevelopmentStatus("Raw distance updated");
+          }
+        } catch (error) {
+          console.error("Raw distance refresh failed", error);
+          if (manual) {
+            setDevelopmentStatus("Unable to refresh raw distance.", { persistent: true });
+          }
+          if (developmentEnabled) {
+            setDevelopmentDistanceEmpty("Unable to load raw distance data.", true);
+          }
+        } finally {
+          developmentDistanceLoading = false;
+        }
+      }
+
+      function startDevelopmentDistancePolling() {
+        if (!developmentEnabled) {
+          return;
+        }
+        if (developmentDistanceTimer) {
+          return;
+        }
+        if (document.visibilityState === "hidden") {
+          return;
+        }
+        developmentDistanceTimer = window.setInterval(() => {
+          if (!developmentEnabled) {
+            stopDevelopmentDistancePolling();
+            return;
+          }
+          if (document.visibilityState === "hidden") {
+            return;
+          }
+          fetchDevelopmentDistanceReading().catch((err) => console.error(err));
+        }, DEVELOPMENT_DISTANCE_POLL_INTERVAL);
+      }
+
+      function stopDevelopmentDistancePolling() {
+        if (developmentDistanceTimer) {
+          window.clearInterval(developmentDistanceTimer);
+          developmentDistanceTimer = null;
+        }
+      }
+
+      function applyDevelopmentEnabled(enabled, { persist = true, announce = false } = {}) {
+        developmentEnabled = enabled === true;
+        if (developmentToggle instanceof HTMLInputElement) {
+          developmentToggle.checked = developmentEnabled;
+        }
+        document.documentElement.classList.toggle("development-enabled", developmentEnabled);
+        document.body.classList.toggle("development-enabled", developmentEnabled);
+        if (developmentDistanceCard) {
+          developmentDistanceCard.hidden = !developmentEnabled;
+        }
+        if (developmentDistanceRefresh instanceof HTMLButtonElement) {
+          developmentDistanceRefresh.disabled = !developmentEnabled;
+        }
+        if (developmentDistanceClear instanceof HTMLButtonElement) {
+          developmentDistanceClear.disabled = !developmentEnabled;
+        }
+        if (developmentDistanceEmpty) {
+          if (developmentEnabled) {
+            if (developmentDistanceLog && developmentDistanceLog.children.length > 0) {
+              developmentDistanceEmpty.hidden = true;
+              developmentDistanceEmpty.classList.remove("error");
+            } else {
+              setDevelopmentDistanceEmpty(DEVELOPMENT_DISTANCE_WAITING_MESSAGE);
+            }
+          } else {
+            setDevelopmentDistanceEmpty(DEVELOPMENT_DISTANCE_DISABLED_MESSAGE);
+          }
+        }
+        if (persist) {
+          try {
+            window.localStorage.setItem(
+              DEVELOPMENT_STORAGE_KEY,
+              developmentEnabled ? "true" : "false",
+            );
+          } catch (err) {
+            console.error(err);
+          }
+        }
+        if (developmentEnabled) {
+          startDevelopmentDistancePolling();
+          if (!developmentDistanceLog || developmentDistanceLog.children.length === 0) {
+            fetchDevelopmentDistanceReading().catch((err) => console.error(err));
+          }
+        } else {
+          stopDevelopmentDistancePolling();
+          developmentForceLog = false;
+          lastDevelopmentDistanceSignature = null;
+        }
+        if (announce) {
+          setDevelopmentStatus(
+            developmentEnabled ? "Development features enabled" : "Development features disabled",
+          );
+        } else if (!developmentEnabled) {
+          setDevelopmentStatus("");
+        }
+      }
+
+      function initializeDevelopmentState() {
+        const stored = loadPersistedDevelopmentState();
+        applyDevelopmentEnabled(stored, { persist: false });
+        if (!stored) {
+          setDevelopmentDistanceEmpty(DEVELOPMENT_DISTANCE_DISABLED_MESSAGE);
         }
       }
 
@@ -4083,6 +4555,24 @@
         });
       }
 
+      if (developmentToggle) {
+        developmentToggle.addEventListener("change", () => {
+          applyDevelopmentEnabled(developmentToggle.checked, { announce: true });
+        });
+      }
+
+      if (developmentDistanceRefresh) {
+        developmentDistanceRefresh.addEventListener("click", () => {
+          fetchDevelopmentDistanceReading({ manual: true }).catch((err) => console.error(err));
+        });
+      }
+
+      if (developmentDistanceClear) {
+        developmentDistanceClear.addEventListener("click", () => {
+          clearDevelopmentDistanceLog();
+        });
+      }
+
       if (distanceOverlayToggle instanceof HTMLInputElement) {
         distanceOverlayToggle.dataset.serverValue = distanceOverlayToggle.checked
           ? "true"
@@ -4626,6 +5116,8 @@
         });
       }
 
+      initializeDevelopmentState();
+
       if (availableTabs.length) {
         const initialTab = getTabFromHash(window.location.hash) || availableTabs[0];
         setActiveTab(initialTab, { updateHash: false });
@@ -4641,6 +5133,7 @@
       document.addEventListener("visibilitychange", () => {
         if (document.hidden) {
           stopBatteryStatusPolling();
+          stopDevelopmentDistancePolling();
         } else {
           if (activeSettingsTab === "battery") {
             startBatteryStatusPolling();
@@ -4648,6 +5141,9 @@
           if (activeSettingsTab === "lighting") {
             refreshLedStatus({ forceUpdate: false })
               .catch((err) => console.error(err));
+          }
+          if (developmentEnabled) {
+            startDevelopmentDistancePolling();
           }
         }
       });
