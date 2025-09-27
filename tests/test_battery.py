@@ -299,3 +299,57 @@ def test_battery_supervisor_ignores_charging_state() -> None:
         assert triggered == []
 
     asyncio.run(_exercise())
+
+
+def test_battery_monitor_close_releases_resources() -> None:
+    closed: list[str] = []
+
+    class _ClosableSensor(_StubSensor):
+        def __init__(self, name: str, *, bus_voltage: float) -> None:
+            super().__init__(bus_voltage=bus_voltage, current=0.0)
+            self._name = name
+
+        def deinit(self) -> None:
+            closed.append(self._name)
+
+    class _StubBus:
+        def __init__(self, name: str) -> None:
+            self.name = name
+            self.deinit_calls = 0
+
+        def deinit(self) -> None:
+            self.deinit_calls += 1
+
+    sensors = [_ClosableSensor("first", bus_voltage=4.0), _ClosableSensor("second", bus_voltage=3.6)]
+    buses = [_StubBus("bus1"), _StubBus("bus2")]
+
+    class _Factory:
+        def __init__(self) -> None:
+            self.calls = 0
+            self.monitor: BatteryMonitor | None = None
+
+        def __call__(self) -> _ClosableSensor:
+            sensor = sensors[self.calls]
+            bus = buses[self.calls]
+            self.calls += 1
+            assert self.monitor is not None
+            self.monitor._i2c_resource = bus  # type: ignore[attr-defined]
+            return sensor
+
+    factory = _Factory()
+    monitor = BatteryMonitor(sensor_factory=factory, smoothing_alpha=None)
+    factory.monitor = monitor
+
+    first = monitor.read()
+    assert first.available is True
+    assert first.voltage == pytest.approx(4.0, abs=1e-3)
+
+    monitor.close()
+
+    assert closed == ["first"]
+    assert buses[0].deinit_calls == 1
+
+    second = monitor.read()
+    assert second.available is True
+    assert second.voltage == pytest.approx(3.6, abs=1e-3)
+    assert closed == ["first"]

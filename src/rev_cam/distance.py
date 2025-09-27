@@ -141,6 +141,7 @@ class DistanceMonitor:
 
         self._sensor_factory = sensor_factory
         self._sensor: object | None = None
+        self._i2c_resource: object | None = None
         self._i2c_bus = i2c_bus
         self._i2c_address = i2c_address
         self._alpha = smoothing_alpha
@@ -198,12 +199,15 @@ class DistanceMonitor:
         try:  # pragma: no cover - hardware dependency
             sensor = adafruit_vl53l1x.VL53L1X(i2c, address=self._i2c_address)
         except Exception as exc:  # pragma: no cover - hardware dependency
+            self._close_resource(i2c)
             raise RuntimeError(
                 (
                     "Failed to initialise VL53L1X "
                     f"(expected address 0x{self._i2c_address:02X}): {exc}"
                 )
             ) from exc
+
+        self._i2c_resource = i2c
 
         self._configure_sensor(sensor)
         return sensor
@@ -427,7 +431,8 @@ class DistanceMonitor:
             try:
                 measurement = self._read_sensor_distance(sensor)
             except Exception as exc:  # pragma: no cover - defensive guard
-                self._sensor = None
+                resources = self._pop_resources()
+                self._dispose_resources(*resources)
                 message = f"Failed to read distance: {exc}"
                 reading = self._handle_invalid_sample(now, message)
                 self._last_timestamp = now
@@ -457,6 +462,48 @@ class DistanceMonitor:
             self._last_reading = reading
             self._last_timestamp = now
             return reading
+
+    def close(self) -> None:
+        """Release any resources held by the monitor."""
+
+        with self._lock:
+            resources = self._pop_resources()
+            self._reset_smoothing()
+            self._reset_spike_tracking()
+            self._last_reading = None
+            self._last_timestamp = 0.0
+            self._last_error = None
+            self._unit_scale = None
+
+        self._dispose_resources(*resources)
+
+    def _pop_resources(self) -> tuple[object | None, object | None]:
+        sensor = self._sensor
+        i2c = self._i2c_resource
+        self._sensor = None
+        self._i2c_resource = None
+        return sensor, i2c
+
+    def _dispose_resources(self, sensor: object | None, i2c: object | None) -> None:
+        self._close_resource(sensor)
+        if i2c is not None and i2c is not sensor:
+            self._close_resource(i2c)
+
+    @staticmethod
+    def _close_resource(resource: object | None) -> None:
+        if resource is None:
+            return
+        for attr in ("deinit", "close", "__exit__"):
+            method = getattr(resource, attr, None)
+            if callable(method):
+                try:
+                    if attr == "__exit__":
+                        method(None, None, None)
+                    else:
+                        method()
+                except Exception:
+                    pass
+                break
 
 
 _ZONE_COLOURS = {

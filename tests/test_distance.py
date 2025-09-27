@@ -155,3 +155,58 @@ def test_distance_overlay_handles_non_numpy_frames() -> None:
 
     assert result == frame
 
+
+def test_distance_monitor_close_releases_resources() -> None:
+    closed: list[str] = []
+
+    class _ClosableSensor:
+        def __init__(self, name: str, value: float) -> None:
+            self._name = name
+            self._value = value
+
+        def distance(self) -> float:
+            return self._value
+
+        def deinit(self) -> None:
+            closed.append(self._name)
+
+    class _StubBus:
+        def __init__(self, name: str) -> None:
+            self.name = name
+            self.deinit_calls = 0
+
+        def deinit(self) -> None:
+            self.deinit_calls += 1
+
+    sensors = [_ClosableSensor("first", 100.0), _ClosableSensor("second", 200.0)]
+    buses = [_StubBus("bus1"), _StubBus("bus2")]
+
+    class _Factory:
+        def __init__(self) -> None:
+            self.calls = 0
+            self.monitor: DistanceMonitor | None = None
+
+        def __call__(self) -> _ClosableSensor:
+            sensor = sensors[self.calls]
+            bus = buses[self.calls]
+            self.calls += 1
+            assert self.monitor is not None
+            self.monitor._i2c_resource = bus  # type: ignore[attr-defined]
+            return sensor
+
+    factory = _Factory()
+    monitor = DistanceMonitor(sensor_factory=factory, update_interval=0.0)
+    factory.monitor = monitor
+
+    first = monitor.read()
+    assert first.distance_m == pytest.approx(1.0, rel=1e-6)
+
+    monitor.close()
+
+    assert closed == ["first"]
+    assert buses[0].deinit_calls == 1
+
+    second = monitor.read()
+    assert second.distance_m == pytest.approx(2.0, rel=1e-6)
+    assert closed == ["first"]
+

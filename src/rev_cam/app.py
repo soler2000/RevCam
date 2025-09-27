@@ -398,6 +398,8 @@ def create_app(
         if camera:
             await camera.close()
         await battery_supervisor.aclose()
+        await run_in_threadpool(battery_monitor.close)
+        await run_in_threadpool(distance_monitor.close)
         if hasattr(wifi_manager, "close"):
             await run_in_threadpool(wifi_manager.close)
         await led_ring.aclose()

@@ -7,6 +7,7 @@ import logging
 import math
 import subprocess
 from dataclasses import dataclass
+from threading import Lock
 from typing import Awaitable, Callable, Iterable, Sequence
 
 try:  # pragma: no cover - optional dependency on numpy for overlays
@@ -132,6 +133,8 @@ class BatteryMonitor:
         self.capacity_mah = capacity_mah
         self._sensor_factory = sensor_factory
         self._sensor: object | None = None
+        self._sensor_lock = Lock()
+        self._i2c_resource: object | None = None
         self._last_error: str | None = None
         self._i2c_bus = i2c_bus
         self._i2c_address = i2c_address
@@ -191,8 +194,9 @@ class BatteryMonitor:
                 raise RuntimeError("Unable to access I2C bus") from exc
 
         try:
-            return INA219(i2c, addr=self._i2c_address)  # type: ignore[call-arg]
+            sensor = INA219(i2c, addr=self._i2c_address)  # type: ignore[call-arg]
         except Exception as exc:  # pragma: no cover - hardware specific
+            self._close_resource(i2c)
             raise RuntimeError(
                 (
                     "Failed to initialise INA219 "
@@ -200,27 +204,36 @@ class BatteryMonitor:
                 )
             ) from exc
 
+        self._i2c_resource = i2c
+        return sensor
+
     def _obtain_sensor(self) -> object | None:
-        if self._sensor is not None:
-            return self._sensor
+        sensor = self._sensor
+        if sensor is not None:
+            return sensor
 
         factory = self._sensor_factory
-        if factory is None:
-            try:
-                sensor = self._create_default_sensor()
-            except RuntimeError as exc:
-                self._last_error = str(exc)
-                return None
-        else:
-            try:
-                sensor = factory()
-            except Exception as exc:
-                self._last_error = str(exc)
-                return None
+        with self._sensor_lock:
+            sensor = self._sensor
+            if sensor is not None:
+                return sensor
 
-        self._sensor = sensor
-        self._last_error = None
-        return sensor
+            if factory is None:
+                try:
+                    sensor = self._create_default_sensor()
+                except RuntimeError as exc:
+                    self._last_error = str(exc)
+                    return None
+            else:
+                try:
+                    sensor = factory()
+                except Exception as exc:
+                    self._last_error = str(exc)
+                    return None
+
+            self._sensor = sensor
+            self._last_error = None
+            return sensor
 
     def _estimate_percentage(self, voltage: float) -> float:
         curve: Sequence[tuple[float, float]] = self._LIPO_VOLTAGE_CURVE
@@ -330,8 +343,10 @@ class BatteryMonitor:
         try:
             bus_voltage = float(getattr(sensor, "bus_voltage"))
         except Exception as exc:
-            self._sensor = None
-            self._last_error = f"Failed to read battery voltage: {exc}"
+            with self._sensor_lock:
+                resources = self._pop_resources()
+                self._last_error = f"Failed to read battery voltage: {exc}"
+            self._dispose_resources(*resources)
             self._reset_smoothing()
             return BatteryReading(
                 available=False,
@@ -389,6 +404,44 @@ class BatteryMonitor:
         )
         self._last_error = None
         return reading
+
+    def close(self) -> None:
+        """Release any resources held by the monitor."""
+
+        with self._sensor_lock:
+            resources = self._pop_resources()
+            self._last_error = None
+
+        self._dispose_resources(*resources)
+        self._reset_smoothing()
+
+    def _pop_resources(self) -> tuple[object | None, object | None]:
+        sensor = self._sensor
+        i2c = self._i2c_resource
+        self._sensor = None
+        self._i2c_resource = None
+        return sensor, i2c
+
+    def _dispose_resources(self, sensor: object | None, i2c: object | None) -> None:
+        self._close_resource(sensor)
+        if i2c is not None and i2c is not sensor:
+            self._close_resource(i2c)
+
+    @staticmethod
+    def _close_resource(resource: object | None) -> None:
+        if resource is None:
+            return
+        for attr in ("deinit", "close", "__exit__"):
+            method = getattr(resource, attr, None)
+            if callable(method):
+                try:
+                    if attr == "__exit__":
+                        method(None, None, None)
+                    else:
+                        method()
+                except Exception:
+                    pass
+                break
 
 
 class BatterySupervisor:
