@@ -403,9 +403,33 @@ class NMCLIBackend(WiFiBackend):
             "ssid",
             ssid,
         ]
-        if password:
+        password_provided = bool(password)
+        if password_provided:
             args.extend(["password", password])
         self._run(args)
+        if not password_provided:
+            try:
+                self._run(
+                    [
+                        "nmcli",
+                        "connection",
+                        "modify",
+                        connection_name,
+                        "wifi-sec.key-mgmt",
+                        "none",
+                    ]
+                )
+                # Remove any previously configured passphrase to ensure the network stays open.
+                self._run([
+                    "nmcli",
+                    "connection",
+                    "modify",
+                    connection_name,
+                    "-wifi-sec.psk",
+                ])
+                self._run(["nmcli", "connection", "up", connection_name])
+            except WiFiError as exc:
+                raise WiFiError(f"Unable to configure open hotspot: {exc}") from exc
         status = self.get_status()
         status.profile = connection_name
         status.mode = "access-point"
@@ -452,6 +476,7 @@ class WiFiManager:
         poll_interval: float = 1.0,
         hotspot_rollback_timeout: float | None = 120.0,
         mdns_advertiser: MDNSAdvertiser | None = None,
+        default_hotspot_ssid: str = "RevCam",
     ) -> None:
         self._backend = backend or NMCLIBackend()
         self._rollback_timeout = rollback_timeout
@@ -463,6 +488,8 @@ class WiFiManager:
             else max(0.0, hotspot_rollback_timeout)
         )
         self._mdns = mdns_advertiser
+        cleaned_default = default_hotspot_ssid.strip() if isinstance(default_hotspot_ssid, str) else ""
+        self._default_hotspot_ssid = cleaned_default or "RevCam"
         if self._mdns is None:
             try:
                 self._mdns = MDNSAdvertiser()
@@ -622,15 +649,16 @@ class WiFiManager:
 
     def enable_hotspot(
         self,
-        ssid: str,
+        ssid: str | None = None,
         password: str | None = None,
         *,
         development_mode: bool = False,
         rollback_timeout: float | None = None,
     ) -> WiFiStatus:
-        if not isinstance(ssid, str) or not ssid.strip():
-            raise WiFiError("Hotspot SSID must be provided")
-        cleaned_ssid = ssid.strip()
+        cleaned_ssid = ""
+        if isinstance(ssid, str):
+            cleaned_ssid = ssid.strip()
+        cleaned_ssid = cleaned_ssid or self._default_hotspot_ssid
         if password is not None and password.strip() and len(password.strip()) < 8:
             raise WiFiError("Hotspot password must be at least 8 characters")
         cleaned_password = password.strip() if isinstance(password, str) and password.strip() else None
@@ -638,6 +666,7 @@ class WiFiManager:
             "target": cleaned_ssid,
             "development_mode": development_mode,
             "password_provided": cleaned_password is not None,
+            "default_ssid": cleaned_ssid == self._default_hotspot_ssid,
         }
         if rollback_timeout is not None:
             attempt_metadata["requested_rollback"] = max(0.0, rollback_timeout)

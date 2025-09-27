@@ -46,6 +46,7 @@ class FakeWiFiBackend:
         ]
         self.hotspot_error: str | None = None
         self.hotspot_inactive: bool = False
+        self.hotspot_attempts: list[tuple[str, str | None]] = []
         self.forget_attempts: list[str] = []
 
     def get_status(self) -> WiFiStatus:
@@ -97,12 +98,13 @@ class FakeWiFiBackend:
         return self.status
 
     def start_hotspot(self, ssid: str, password: str | None) -> WiFiStatus:
+        self.hotspot_attempts.append((ssid, password))
         if self.hotspot_error:
             raise WiFiError(self.hotspot_error)
         if self.hotspot_inactive:
             self.status = WiFiStatus(
                 connected=True,
-                ssid=ssid or "RevCam Hotspot",
+                ssid=ssid or "RevCam",
                 signal=None,
                 ip_address="192.168.4.1",
                 mode="station",
@@ -113,7 +115,7 @@ class FakeWiFiBackend:
             return self.status
         self.status = WiFiStatus(
             connected=True,
-            ssid=ssid or "RevCam Hotspot",
+            ssid=ssid or "RevCam",
             signal=None,
             ip_address="192.168.4.1",
             mode="access-point",
@@ -318,6 +320,19 @@ def test_wifi_hotspot_manual_rollback_without_dev_mode(client: TestClient) -> No
     assert payload["hotspot_active"] is False
     assert "restored" in (payload.get("detail") or "").lower()
     assert backend.connect_attempts[-1][0] == "Home"
+
+
+def test_wifi_hotspot_defaults_to_revcam_without_password(client: TestClient) -> None:
+    backend = getattr(client, "backend", None)
+    assert backend is not None
+    response = client.post("/api/wifi/hotspot", json={"enabled": True})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ssid"] == "RevCam"
+    assert backend.hotspot_attempts
+    hotspot_ssid, hotspot_password = backend.hotspot_attempts[-1]
+    assert hotspot_ssid == "RevCam"
+    assert hotspot_password is None
 
 
 def test_wifi_hotspot_permission_error(client: TestClient) -> None:

@@ -1800,7 +1800,7 @@
               <p id="wifi-hotspot-status" style="margin: 0; opacity: 0.85;">Hotspot disabled.</p>
               <label>
                 Hotspot name
-                <input type="text" id="wifi-hotspot-ssid" placeholder="RevCam Hotspot" autocomplete="ssid" />
+                <input type="text" id="wifi-hotspot-ssid" placeholder="RevCam" autocomplete="ssid" />
               </label>
               <label>
                 Hotspot password
@@ -2155,6 +2155,7 @@
       const wifiHotspotStatus = document.getElementById("wifi-hotspot-status");
       const wifiHotspotSsid = document.getElementById("wifi-hotspot-ssid");
       const wifiHotspotPassword = document.getElementById("wifi-hotspot-password");
+      const DEFAULT_HOTSPOT_SSID = "RevCam";
       const wifiEnableHotspot = document.getElementById("wifi-enable-hotspot");
       const wifiDisableHotspot = document.getElementById("wifi-disable-hotspot");
       const wifiLogList = document.getElementById("wifi-log");
@@ -2170,6 +2171,9 @@
         : null;
       const HOTSPOT_HOSTNAME = "motion.local";
       const HOTSPOT_DEV_ROLLBACK_DEFAULT = 120;
+      if (wifiHotspotSsid && !wifiHotspotSsid.value) {
+        wifiHotspotSsid.value = DEFAULT_HOTSPOT_SSID;
+      }
       const WIFI_LOG_DEFAULT_EMPTY_MESSAGE = wifiLogEmpty
         ? wifiLogEmpty.textContent || "No Wi-Fi events recorded yet."
         : "No Wi-Fi events recorded yet.";
