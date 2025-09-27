@@ -819,15 +819,16 @@
       }
       .input-with-toggle > input {
         flex: 1 1 auto;
-        padding-right: 2.75rem;
+        padding-right: 5.25rem;
       }
       .password-toggle {
         position: absolute;
         right: 0.35rem;
         top: 50%;
         transform: translateY(-50%);
-        width: 2.25rem;
+        min-width: 2.25rem;
         height: 2.25rem;
+        padding: 0 var(--space-sm);
         border: none;
         border-radius: var(--radius-pill);
         background: transparent;
@@ -835,6 +836,7 @@
         display: inline-flex;
         align-items: center;
         justify-content: center;
+        gap: var(--space-xs);
         cursor: pointer;
         transition: color var(--transition), background var(--transition),
           box-shadow var(--transition);
@@ -852,6 +854,12 @@
         width: 1.25rem;
         height: 1.25rem;
         pointer-events: none;
+      }
+      .password-toggle-label {
+        font-size: 0.75rem;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
       }
       .password-toggle[data-visible="true"] .icon-eye {
         display: none;
@@ -1879,6 +1887,7 @@
                         d="M3.22 3.22a.75.75 0 0 0-1.06 1.06l2.32 2.32C2.14 8.14.78 10.2.22 11.77a1 1 0 0 0 0 .66C1.78 17.03 6.09 20.2 12 20.2c2.05 0 3.94-.47 5.62-1.32l3.16 3.16a.75.75 0 0 0 1.06-1.06Zm5.93 5.93 5.7 5.7A4.08 4.08 0 0 1 9.15 9.15ZM12 6.06c3.86 0 7.35 2.38 8.95 6.07-.69 1.58-1.75 2.93-3.05 3.96l-1.09-1.09a6.15 6.15 0 0 0-7.74-7.74l-1.42-1.42C8.68 6.29 10.3 6.06 12 6.06Z"
                       />
                     </svg>
+                    <span class="password-toggle-label">Show</span>
                   </button>
                 </div>
               </label>
@@ -2227,6 +2236,9 @@
       const wifiHotspotSsid = document.getElementById("wifi-hotspot-ssid");
       const wifiHotspotPassword = document.getElementById("wifi-hotspot-password");
       const wifiHotspotPasswordToggle = document.getElementById("wifi-hotspot-password-toggle");
+      const wifiHotspotPasswordToggleLabel = wifiHotspotPasswordToggle
+        ? wifiHotspotPasswordToggle.querySelector(".password-toggle-label")
+        : null;
       const DEFAULT_HOTSPOT_SSID = "RevCam";
       const wifiEnableHotspot = document.getElementById("wifi-enable-hotspot");
       const wifiDisableHotspot = document.getElementById("wifi-disable-hotspot");
@@ -2261,6 +2273,9 @@
         const label = shouldShow ? "Hide hotspot password" : "Show hotspot password";
         wifiHotspotPasswordToggle.setAttribute("aria-label", label);
         wifiHotspotPasswordToggle.title = label;
+        if (wifiHotspotPasswordToggleLabel) {
+          wifiHotspotPasswordToggleLabel.textContent = shouldShow ? "Hide" : "Show";
+        }
       }
 
       setHotspotPasswordVisibility(false);
