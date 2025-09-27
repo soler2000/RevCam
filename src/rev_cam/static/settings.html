@@ -436,15 +436,6 @@
         flex-direction: column;
         gap: calc(var(--rhythm) / 2);
       }
-      .back-link {
-        width: fit-content;
-        font-weight: 600;
-        text-decoration: none;
-      }
-      .back-link:hover,
-      .back-link:focus-visible {
-        text-decoration: underline;
-      }
       .tab-container {
         display: flex;
         flex-direction: column;
@@ -477,6 +468,11 @@
         padding: 0.5rem 1.25rem;
         font-size: 0.95rem;
         font-weight: 600;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        text-decoration: none;
+        cursor: pointer;
         transition: background var(--transition), color var(--transition),
           box-shadow var(--transition), transform var(--transition);
       }
@@ -1323,7 +1319,6 @@
       <div class="page-panel">
         <div class="page-content">
           <header class="page-header">
-            <a class="back-link" href="/">← Back to live view</a>
             <h1>Settings</h1>
             <p id="app-version" class="muted">
               Version <span id="version-value">Loading…</span>
@@ -1333,6 +1328,7 @@
           <div class="tab-container">
             <div class="tab-header">
               <div class="tab-list" role="tablist" aria-label="Settings sections">
+                <a class="tab-button" href="/">Live view</a>
                 <button
                   type="button"
                   class="tab-button"
@@ -1397,18 +1393,6 @@
                   type="button"
                   class="tab-button"
                   role="tab"
-                  id="tab-development"
-                  aria-controls="panel-development"
-                  aria-selected="false"
-                  data-tab="development"
-                  tabindex="-1"
-                >
-                  Development
-                </button>
-                <button
-                  type="button"
-                  class="tab-button"
-                  role="tab"
                   id="tab-battery"
                   aria-controls="panel-battery"
                   aria-selected="false"
@@ -1416,6 +1400,18 @@
                   tabindex="-1"
                 >
                   Battery
+                </button>
+                <button
+                  type="button"
+                  class="tab-button"
+                  role="tab"
+                  id="tab-development"
+                  aria-controls="panel-development"
+                  aria-selected="false"
+                  data-tab="development"
+                  tabindex="-1"
+                >
+                  Development
                 </button>
               </div>
             </div>
