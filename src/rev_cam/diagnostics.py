@@ -124,6 +124,14 @@ def run(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     payload = collect_diagnostics()
+    camera_conflicts = payload.get("camera_conflicts", [])
+    picamera_stack = payload.get("picamera", {})
+
+    if not isinstance(camera_conflicts, list):
+        camera_conflicts = list(camera_conflicts) if camera_conflicts else []
+
+    if not isinstance(picamera_stack, dict):
+        picamera_stack = {}
 
     if args.json:
         json.dump(payload, sys.stdout)
@@ -131,9 +139,9 @@ def run(argv: Sequence[str] | None = None) -> int:
         return 0
 
     print(f"RevCam diagnostics (version {APP_VERSION})")
-    if hints:
+    if camera_conflicts:
         print("Detected potential PiCamera2 conflicts:")
-        for hint in hints:
+        for hint in camera_conflicts:
             print(f" - {hint}")
     else:
         print("No conflicting services or processes were detected.")
@@ -142,13 +150,15 @@ def run(argv: Sequence[str] | None = None) -> int:
             " for external processes or legacy camera settings."
         )
 
-    if picamera_stack["status"] == "ok":
+    status = picamera_stack.get("status")
+
+    if status == "ok":
         print("Picamera2 Python stack: OK")
         if "numpy_version" in picamera_stack:
             print(f" - NumPy version: {picamera_stack['numpy_version']}")
     else:
         print("Picamera2 Python stack issues detected:")
-        for detail in picamera_stack["details"]:
+        for detail in picamera_stack.get("details", []):
             print(f" - {detail}")
         hints_payload = picamera_stack.get("hints")
         if hints_payload:
