@@ -27,6 +27,8 @@ from .distance import (
     DistanceZones,
 )
 
+DEFAULT_DISTANCE_OVERLAY_ENABLED = True
+
 
 @dataclass(frozen=True, slots=True)
 class Orientation:
@@ -438,6 +440,34 @@ def _parse_distance_calibration(
     return DistanceCalibration(offset, scale)
 
 
+def _parse_distance_overlay_enabled(value: Any, *, default: bool) -> bool:
+    if value is None:
+        return default
+    candidate: Any
+    if isinstance(value, Mapping):
+        if "overlay_enabled" in value:
+            candidate = value.get("overlay_enabled", default)
+        else:
+            overlay_payload = value.get("overlay") if "overlay" in value else None
+            if isinstance(overlay_payload, Mapping):
+                candidate = overlay_payload.get("enabled", default)
+            else:
+                candidate = default
+    else:
+        candidate = value
+    if isinstance(candidate, bool):
+        return candidate
+    if isinstance(candidate, (int, float)):
+        return bool(candidate)
+    if isinstance(candidate, str):
+        normalised = candidate.strip().lower()
+        if normalised in {"1", "true", "yes", "on", "enable", "enabled"}:
+            return True
+        if normalised in {"0", "false", "no", "off", "disable", "disabled"}:
+            return False
+    raise ValueError("Distance overlay flag must be a boolean value")
+
+
 def _parse_battery_limits(value: Any, *, default: BatteryLimits) -> BatteryLimits:
     if value is None:
         return default
@@ -502,6 +532,7 @@ class ConfigManager:
             self._resolution,
             self._distance_zones,
             self._distance_calibration,
+            self._distance_overlay_enabled,
             self._battery_limits,
             self._battery_capacity,
             self._stream_settings,
@@ -519,6 +550,7 @@ class ConfigManager:
         Resolution,
         DistanceZones,
         DistanceCalibration,
+        bool,
         BatteryLimits,
         int,
         StreamSettings,
@@ -531,6 +563,7 @@ class ConfigManager:
                 DEFAULT_RESOLUTION,
                 DEFAULT_DISTANCE_ZONES,
                 DEFAULT_DISTANCE_CALIBRATION,
+                DEFAULT_DISTANCE_OVERLAY_ENABLED,
                 DEFAULT_BATTERY_LIMITS,
                 DEFAULT_BATTERY_CAPACITY_MAH,
                 DEFAULT_STREAM_SETTINGS,
@@ -560,6 +593,9 @@ class ConfigManager:
             distance_calibration = _parse_distance_calibration(
                 distance_payload, default=DEFAULT_DISTANCE_CALIBRATION
             )
+            distance_overlay_enabled = _parse_distance_overlay_enabled(
+                distance_payload, default=DEFAULT_DISTANCE_OVERLAY_ENABLED
+            )
 
             battery_payload = payload.get("battery")
             battery_limits = _parse_battery_limits(
@@ -585,6 +621,7 @@ class ConfigManager:
                 resolution,
                 distance_zones,
                 distance_calibration,
+                distance_overlay_enabled,
                 battery_limits,
                 battery_capacity,
                 stream_settings,
@@ -601,6 +638,7 @@ class ConfigManager:
             "distance": {
                 "zones": self._distance_zones.to_dict(),
                 "calibration": self._distance_calibration.to_dict(),
+                "overlay_enabled": self._distance_overlay_enabled,
             },
             "battery": {
                 "limits": self._battery_limits.to_dict(),
@@ -674,6 +712,17 @@ class ConfigManager:
             self._distance_calibration = calibration
             self._save()
         return calibration
+
+    def get_distance_overlay_enabled(self) -> bool:
+        with self._lock:
+            return self._distance_overlay_enabled
+
+    def set_distance_overlay_enabled(self, value: Any) -> bool:
+        enabled = _parse_distance_overlay_enabled(value, default=self._distance_overlay_enabled)
+        with self._lock:
+            self._distance_overlay_enabled = enabled
+            self._save()
+        return enabled
 
     def get_battery_limits(self) -> BatteryLimits:
         with self._lock:

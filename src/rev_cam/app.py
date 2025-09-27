@@ -76,6 +76,10 @@ class DistanceCalibrationPayload(BaseModel):
     scale: float
 
 
+class DistanceOverlayPayload(BaseModel):
+    enabled: bool
+
+
 class BatteryLimitsPayload(BaseModel):
     warning_percent: float
     shutdown_percent: float
@@ -182,7 +186,11 @@ def create_app(
         create_battery_overlay(battery_monitor, config_manager.get_battery_limits)
     )
     pipeline.add_overlay(
-        create_distance_overlay(distance_monitor, config_manager.get_distance_zones)
+        create_distance_overlay(
+            distance_monitor,
+            config_manager.get_distance_zones,
+            config_manager.get_distance_overlay_enabled,
+        )
     )
     pipeline.add_overlay(create_reversing_aids_overlay(config_manager.get_reversing_aids))
     camera: BaseCamera | None = None
@@ -591,6 +599,7 @@ def create_app(
         payload["zone"] = zones.classify(reading.distance_m)
         payload["zones"] = zones.to_dict()
         payload["calibration"] = config_manager.get_distance_calibration().to_dict()
+        payload["overlay_enabled"] = config_manager.get_distance_overlay_enabled()
         return payload
 
     @app.get("/api/distance/zones")
@@ -609,6 +618,7 @@ def create_app(
         response["zone"] = zones.classify(reading.distance_m)
         response["zones"] = zones.to_dict()
         response["calibration"] = config_manager.get_distance_calibration().to_dict()
+        response["overlay_enabled"] = config_manager.get_distance_overlay_enabled()
         return response
 
     @app.get("/api/distance/calibration")
@@ -632,6 +642,7 @@ def create_app(
         response["zone"] = zones.classify(reading.distance_m)
         response["zones"] = zones.to_dict()
         response["calibration"] = calibration.to_dict()
+        response["overlay_enabled"] = config_manager.get_distance_overlay_enabled()
         return response
 
     @app.post("/api/distance/calibration/zero")
@@ -658,7 +669,16 @@ def create_app(
         response["zone"] = zones.classify(refreshed.distance_m)
         response["zones"] = zones.to_dict()
         response["calibration"] = calibration.to_dict()
+        response["overlay_enabled"] = config_manager.get_distance_overlay_enabled()
         return response
+
+    @app.post("/api/distance/overlay")
+    async def update_distance_overlay(payload: DistanceOverlayPayload) -> dict[str, bool]:
+        try:
+            enabled = config_manager.set_distance_overlay_enabled(payload.enabled)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"overlay_enabled": enabled}
 
     @app.get("/api/reversing-aids")
     def get_reversing_aids() -> dict[str, object]:
