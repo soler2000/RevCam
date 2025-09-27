@@ -11,7 +11,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .battery import BatteryMonitor, BatterySupervisor, create_battery_overlay
 from .camera import CAMERA_SOURCES, BaseCamera, CameraError, create_camera, identify_camera
@@ -97,6 +97,14 @@ class StreamSettingsPayload(BaseModel):
 class WebRTCOfferPayload(BaseModel):
     sdp: str
     type: str
+
+
+class WebRTCErrorReportPayload(BaseModel):
+    """Client-side WebRTC failure report."""
+
+    name: str | None = Field(default=None, max_length=128)
+    message: str | None = Field(default=None, max_length=1024)
+    stack: str | None = Field(default=None, max_length=4096)
 
 
 class ReversingAidPointPayload(BaseModel):
@@ -1009,6 +1017,19 @@ def create_app(
             logger.exception("Failed to negotiate WebRTC session")
             raise HTTPException(status_code=500, detail="Failed to establish WebRTC session") from exc
         return {"sdp": description.sdp, "type": description.type}
+
+    @app.post("/api/log/webrtc-error")
+    async def log_webrtc_error(payload: WebRTCErrorReportPayload) -> dict[str, str]:
+        summary_parts = []
+        if payload.name:
+            summary_parts.append(payload.name)
+        if payload.message:
+            summary_parts.append(payload.message)
+        summary = " – ".join(summary_parts) if summary_parts else "Unspecified WebRTC error"
+        logger.warning("Client reported WebRTC error: %s", summary)
+        if payload.stack:
+            logger.debug("Client WebRTC error stack trace:\n%s", payload.stack)
+        return {"status": "logged"}
 
     return app
 

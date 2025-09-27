@@ -746,6 +746,73 @@
       let activeStreamMode = null;
       const webrtcSupported = typeof window.RTCPeerConnection === "function";
 
+      function extractWebRTCErrorMessage(error) {
+        if (!error) {
+          return "Unknown error";
+        }
+        if (typeof error === "string") {
+          return error;
+        }
+        if (error instanceof Error) {
+          return error.message || error.name || "Unknown error";
+        }
+        if (typeof error === "object") {
+          const possible = [error.message, error.error, error.reason, error.name];
+          for (const value of possible) {
+            if (typeof value === "string" && value.trim()) {
+              return value;
+            }
+          }
+          try {
+            return JSON.stringify(error);
+          } catch (jsonError) {
+            console.debug("Failed to serialise WebRTC error", jsonError);
+          }
+        }
+        return String(error);
+      }
+
+      function summariseWebRTCError(error) {
+        const raw = extractWebRTCErrorMessage(error).trim() || "Unknown error";
+        if (raw.length <= 160) {
+          return raw;
+        }
+        return `${raw.slice(0, 157)}…`;
+      }
+
+      function reportWebRTCFailure(error) {
+        try {
+          const payload = {
+            message: summariseWebRTCError(error),
+          };
+          if (error && typeof error === "object") {
+            if (typeof error.name === "string" && error.name.trim()) {
+              payload.name = error.name.trim().slice(0, 128);
+            }
+            if (typeof error.stack === "string" && error.stack.trim()) {
+              payload.stack = error.stack.trim().slice(0, 4096);
+            }
+          }
+          const body = JSON.stringify(payload);
+          if (navigator.sendBeacon) {
+            const blob = new Blob([body], { type: "application/json" });
+            if (navigator.sendBeacon("/api/log/webrtc-error", blob)) {
+              return;
+            }
+          }
+          fetch("/api/log/webrtc-error", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            keepalive: true,
+            body,
+          }).catch((reportError) =>
+            console.debug("Failed to report WebRTC error", reportError),
+          );
+        } catch (loggingError) {
+          console.debug("Failed to prepare WebRTC error report", loggingError);
+        }
+      }
+
       async function waitForIceGatheringComplete(peerConnection, timeout = 4000) {
         if (!peerConnection) {
           throw new Error("Missing peer connection");
@@ -1227,6 +1294,7 @@
             setStatus("Streaming", "live");
           } else if (state === "failed" || state === "disconnected") {
             setStatus("Connection lost – retrying…", "error");
+            reportWebRTCFailure(new Error(`Peer connection state ${state}`));
             scheduleReconnect();
           }
         });
@@ -1316,7 +1384,10 @@
             await startWebRTCStream();
             return;
           } catch (error) {
+            const summary = summariseWebRTCError(error);
             console.error("WebRTC stream error", error);
+            setStatus(`WebRTC failed: ${summary}`, "error");
+            reportWebRTCFailure(error);
           }
         }
 

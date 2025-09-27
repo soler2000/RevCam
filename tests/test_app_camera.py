@@ -364,3 +364,29 @@ def test_webrtc_endpoint_returns_answer(tmp_path: Path, monkeypatch: pytest.Monk
         manager = _StubWebRTCManager.instances[-1]
         assert manager.sessions
         assert manager.sessions[-1] == {"sdp": "offer", "type": "offer"}
+
+
+def test_webrtc_error_logging_endpoint(client: TestClient, caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level("DEBUG")
+    response = client.post(
+        "/api/log/webrtc-error",
+        json={
+            "name": "OperationError",
+            "message": "ICE connection failed",
+            "stack": "Error: ICE failed\n    at line",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json() == {"status": "logged"}
+    warning_messages = [
+        record.message
+        for record in caplog.records
+        if record.name == "rev_cam.app" and record.levelname == "WARNING"
+    ]
+    assert any("Client reported WebRTC error: OperationError – ICE connection failed" in msg for msg in warning_messages)
+    debug_messages = [
+        record.message
+        for record in caplog.records
+        if record.name == "rev_cam.app" and record.levelname == "DEBUG"
+    ]
+    assert any("Client WebRTC error stack trace" in msg for msg in debug_messages)
