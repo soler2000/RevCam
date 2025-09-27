@@ -21,7 +21,7 @@ from .distance import DistanceCalibration, DistanceMonitor, create_distance_over
 from .led_matrix import LedRing
 from .reversing_aids import create_reversing_aids_overlay
 from .pipeline import FramePipeline
-from .streaming import MJPEGStreamer, encode_frame_to_jpeg
+from .streaming import MJPEGStreamer, WebRTCManager, encode_frame_to_jpeg
 from .version import APP_VERSION
 from .wifi import WiFiError, WiFiManager
 
@@ -92,6 +92,11 @@ class BatteryCapacityPayload(BaseModel):
 class StreamSettingsPayload(BaseModel):
     fps: int | None = None
     jpeg_quality: int | None = None
+
+
+class WebRTCOfferPayload(BaseModel):
+    sdp: str
+    type: str
 
 
 class ReversingAidPointPayload(BaseModel):
@@ -199,7 +204,9 @@ def create_app(
     pipeline.add_overlay(create_reversing_aids_overlay(config_manager.get_reversing_aids))
     camera: BaseCamera | None = None
     streamer: MJPEGStreamer | None = None
+    webrtc_manager: WebRTCManager | None = None
     stream_error: str | None = None
+    webrtc_error: str | None = None
     active_camera_choice: str = "unknown"
     active_resolution: Resolution = config_manager.get_resolution()
     camera_errors: dict[str, str] = {}
@@ -212,7 +219,8 @@ def create_app(
     app.state.led_ring = led_ring
 
     async def _set_ready_pattern() -> None:
-        await led_ring.set_pattern("ready" if streamer is not None else "error")
+        available = streamer is not None or webrtc_manager is not None
+        await led_ring.set_pattern("ready" if available else "error")
 
     async def _serialise_led_status() -> dict[str, object]:
         status = await led_ring.get_status()
@@ -319,6 +327,44 @@ def create_app(
         response.headers["Pragma"] = "no-cache"
         return response
 
+    def _build_stream_info() -> dict[str, object | None]:
+        stream_settings = config_manager.get_stream_settings()
+        if streamer is not None:
+            active_details: dict[str, int | None] | None = {
+                "fps": streamer.fps,
+                "jpeg_quality": streamer.jpeg_quality,
+            }
+        elif webrtc_manager is not None:
+            active_details = {"fps": webrtc_manager.fps, "jpeg_quality": None}
+        else:
+            active_details = None
+
+        if webrtc_manager is None:
+            overall_error = webrtc_error or (stream_error if streamer is None else None)
+        else:
+            overall_error = stream_error if streamer is None else None
+
+        return {
+            "enabled": (streamer is not None) or (webrtc_manager is not None),
+            "endpoint": "/stream/mjpeg" if streamer else None,
+            "content_type": streamer.media_type if streamer else None,
+            "error": overall_error,
+            "settings": stream_settings.to_dict(),
+            "active": active_details,
+            "webrtc": {
+                "enabled": webrtc_manager is not None,
+                "endpoint": "/stream/webrtc",
+                "error": webrtc_error,
+                "fps": webrtc_manager.fps if webrtc_manager is not None else None,
+            },
+            "mjpeg": {
+                "enabled": streamer is not None,
+                "endpoint": "/stream/mjpeg",
+                "error": stream_error,
+                "content_type": streamer.media_type if streamer else None,
+            },
+        }
+
     def _build_camera(
         selection: str,
         resolution: Resolution,
@@ -366,7 +412,8 @@ def create_app(
 
     @app.on_event("startup")
     async def startup() -> None:  # pragma: no cover - framework hook
-        nonlocal camera, active_camera_choice, streamer, active_resolution, stream_error
+        nonlocal camera, active_camera_choice, streamer, webrtc_manager, active_resolution
+        nonlocal stream_error, webrtc_error
         await led_ring.set_pattern("boot")
         selection = config_manager.get_camera()
         resolution = config_manager.get_resolution()
@@ -390,15 +437,31 @@ def create_app(
             streamer = None
         else:
             stream_error = None
+        try:
+            webrtc_manager = WebRTCManager(
+                camera=camera,
+                pipeline=pipeline,
+                fps=stream_settings.fps,
+            )
+        except RuntimeError as exc:
+            logger.error("Failed to initialise WebRTC streamer: %s", exc)
+            webrtc_error = str(exc)
+            webrtc_manager = None
+        else:
+            webrtc_error = None
         await _set_ready_pattern()
         battery_supervisor.start()
 
     @app.on_event("shutdown")
     async def shutdown() -> None:  # pragma: no cover - framework hook
-        nonlocal streamer
+        nonlocal streamer, webrtc_manager
         await led_ring.set_pattern("boot")
         if streamer is not None:
             await streamer.aclose()
+            streamer = None
+        if webrtc_manager is not None:
+            await webrtc_manager.aclose()
+            webrtc_manager = None
         if camera:
             await camera.close()
         await battery_supervisor.aclose()
@@ -498,12 +561,6 @@ def create_app(
         options = [{"value": value, "label": label} for value, label in CAMERA_SOURCES.items()]
         errors = {source: message for source, message in camera_errors.items() if message}
         current_resolution = config_manager.get_resolution()
-        stream_settings = config_manager.get_stream_settings()
-        active_stream_settings = (
-            {"fps": streamer.fps, "jpeg_quality": streamer.jpeg_quality}
-            if streamer is not None
-            else None
-        )
         resolution_options = [
             {
                 "value": key,
@@ -511,14 +568,7 @@ def create_app(
             }
             for key, preset in RESOLUTION_PRESETS.items()
         ]
-        stream_info = {
-            "enabled": streamer is not None,
-            "endpoint": "/stream/mjpeg" if streamer else None,
-            "content_type": streamer.media_type if streamer else None,
-            "error": stream_error,
-            "settings": stream_settings.to_dict(),
-            "active": active_stream_settings,
-        }
+        stream_info = _build_stream_info()
         return {
             "selected": config_manager.get_camera(),
             "active": active_camera_choice,
@@ -535,7 +585,7 @@ def create_app(
 
     @app.post("/api/stream/settings")
     async def update_stream_settings(payload: StreamSettingsPayload) -> dict[str, object | None]:
-        nonlocal streamer
+        nonlocal streamer, webrtc_manager
         data = payload.model_dump(exclude_none=True)
         if not data:
             raise HTTPException(status_code=400, detail="No streaming settings provided")
@@ -553,6 +603,12 @@ def create_app(
             except Exception as exc:  # pragma: no cover - defensive logging
                 logger.exception("Failed to apply streaming settings")
                 raise HTTPException(status_code=500, detail="Unable to apply streaming settings") from exc
+        if webrtc_manager is not None:
+            try:
+                webrtc_manager.apply_settings(fps=settings.fps)
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.exception("Failed to apply WebRTC streaming settings")
+                raise HTTPException(status_code=500, detail="Unable to apply streaming settings") from exc
 
         response: dict[str, object | None] = settings.to_dict()
         if streamer is not None:
@@ -560,6 +616,8 @@ def create_app(
                 "fps": streamer.fps,
                 "jpeg_quality": streamer.jpeg_quality,
             }
+        elif webrtc_manager is not None:
+            response["active"] = {"fps": webrtc_manager.fps, "jpeg_quality": None}
         else:
             response["active"] = None
         return response
@@ -771,7 +829,8 @@ def create_app(
 
     @app.post("/api/camera")
     async def update_camera(payload: CameraPayload) -> dict[str, object]:
-        nonlocal camera, active_camera_choice, streamer, active_resolution, stream_error
+        nonlocal camera, active_camera_choice, streamer, webrtc_manager
+        nonlocal active_resolution, stream_error, webrtc_error
         selection = payload.source.strip().lower()
         if selection not in CAMERA_SOURCES:
             raise HTTPException(status_code=400, detail="Unknown camera source")
@@ -787,20 +846,7 @@ def create_app(
             and selection == current_selection
             and requested_resolution == current_resolution
         ):
-            stream_settings = config_manager.get_stream_settings()
-            active_stream_settings = (
-                {"fps": streamer.fps, "jpeg_quality": streamer.jpeg_quality}
-                if streamer is not None
-                else None
-            )
-            stream_info = {
-                "enabled": streamer is not None,
-                "endpoint": "/stream/mjpeg" if streamer else None,
-                "content_type": streamer.media_type if streamer else None,
-                "error": stream_error,
-                "settings": stream_settings.to_dict(),
-                "active": active_stream_settings,
-            }
+            stream_info = _build_stream_info()
             await _set_ready_pattern()
             return {
                 "selected": selection,
@@ -845,9 +891,9 @@ def create_app(
                 camera = restored_camera
                 active_camera_choice = restored_active
                 active_resolution = old_resolution
+                stream_settings = config_manager.get_stream_settings()
                 if streamer is None and camera is not None:
                     try:
-                        stream_settings = config_manager.get_stream_settings()
                         streamer = MJPEGStreamer(
                             camera=camera,
                             pipeline=pipeline,
@@ -863,6 +909,22 @@ def create_app(
                 elif streamer is not None and camera is not None:
                     streamer.camera = camera
                     stream_error = None
+                if webrtc_manager is not None:
+                    await webrtc_manager.aclose()
+                    webrtc_manager = None
+                if camera is not None:
+                    try:
+                        webrtc_manager = WebRTCManager(
+                            camera=camera,
+                            pipeline=pipeline,
+                            fps=stream_settings.fps,
+                        )
+                    except RuntimeError as webrtc_exc:
+                        logger.error("Failed to initialise WebRTC streamer: %s", webrtc_exc)
+                        webrtc_error = str(webrtc_exc)
+                        webrtc_manager = None
+                    else:
+                        webrtc_error = None
             await _set_ready_pattern()
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -870,9 +932,9 @@ def create_app(
         active_resolution = requested_resolution
         config_manager.set_camera(selection)
         config_manager.set_resolution(requested_resolution)
+        stream_settings = config_manager.get_stream_settings()
         if streamer is None:
             try:
-                stream_settings = config_manager.get_stream_settings()
                 streamer = MJPEGStreamer(
                     camera=camera,
                     pipeline=pipeline,
@@ -888,21 +950,23 @@ def create_app(
         else:
             streamer.camera = camera
             stream_error = None
+        if webrtc_manager is not None:
+            await webrtc_manager.aclose()
+            webrtc_manager = None
+        try:
+            webrtc_manager = WebRTCManager(
+                camera=camera,
+                pipeline=pipeline,
+                fps=stream_settings.fps,
+            )
+        except RuntimeError as exc:
+            logger.error("Failed to initialise WebRTC streamer: %s", exc)
+            webrtc_error = str(exc)
+            webrtc_manager = None
+        else:
+            webrtc_error = None
         await _set_ready_pattern()
-        stream_settings = config_manager.get_stream_settings()
-        active_stream_settings = (
-            {"fps": streamer.fps, "jpeg_quality": streamer.jpeg_quality}
-            if streamer is not None
-            else None
-        )
-        stream_info = {
-            "enabled": streamer is not None,
-            "endpoint": "/stream/mjpeg" if streamer else None,
-            "content_type": streamer.media_type if streamer else None,
-            "error": stream_error,
-            "settings": stream_settings.to_dict(),
-            "active": active_stream_settings,
-        }
+        stream_info = _build_stream_info()
         return {
             "selected": selection,
             "active": active_camera_choice,
@@ -933,6 +997,18 @@ def create_app(
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
         response.headers["Pragma"] = "no-cache"
         return response
+
+    @app.post("/stream/webrtc")
+    async def stream_webrtc(payload: WebRTCOfferPayload) -> dict[str, str]:
+        if webrtc_manager is None:
+            detail = webrtc_error or stream_error or "WebRTC streaming unavailable"
+            raise HTTPException(status_code=503, detail=detail)
+        try:
+            description = await webrtc_manager.create_session(payload.sdp, payload.type)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.exception("Failed to negotiate WebRTC session")
+            raise HTTPException(status_code=500, detail="Failed to establish WebRTC session") from exc
+        return {"sdp": description.sdp, "type": description.type}
 
     return app
 

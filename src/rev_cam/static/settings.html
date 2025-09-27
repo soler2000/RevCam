@@ -5773,6 +5773,16 @@
           return;
         }
         const stream = camera && camera.stream ? camera.stream : null;
+        const webrtcInfo =
+          stream && stream.webrtc && typeof stream.webrtc === "object"
+            ? stream.webrtc
+            : null;
+        const mjpegInfo =
+          stream && stream.mjpeg && typeof stream.mjpeg === "object"
+            ? stream.mjpeg
+            : null;
+        const hasWebRTC = Boolean(webrtcInfo && webrtcInfo.enabled === true);
+        const mjpegAvailable = Boolean(mjpegInfo && mjpegInfo.enabled === true);
         const configuredSettings =
           stream && stream.settings && typeof stream.settings === "object"
             ? stream.settings
@@ -5828,11 +5838,16 @@
           return;
         }
 
-        const endpoint = typeof stream.endpoint === "string" && stream.endpoint
-          ? stream.endpoint
-          : "/stream/mjpeg";
+        const endpoint =
+          mjpegAvailable && mjpegInfo && typeof mjpegInfo.endpoint === "string" && mjpegInfo.endpoint
+            ? mjpegInfo.endpoint
+            : "/stream/mjpeg";
         const absoluteUrl = new URL(endpoint, window.location.origin).toString();
-        const streamType = stream.content_type ? String(stream.content_type) : "MJPEG";
+        const streamType = hasWebRTC
+          ? "WebRTC"
+          : stream.content_type
+          ? String(stream.content_type)
+          : "MJPEG";
         const activeFps =
           activeSettings && typeof activeSettings.fps === "number"
             ? activeSettings.fps
@@ -5877,15 +5892,22 @@
           }
         }
         if (openStreamLink) {
-          openStreamLink.classList.remove("disabled");
-          openStreamLink.removeAttribute("aria-disabled");
+          if (mjpegAvailable) {
+            openStreamLink.classList.remove("disabled");
+            openStreamLink.removeAttribute("aria-disabled");
+          } else {
+            openStreamLink.classList.add("disabled");
+            openStreamLink.setAttribute("aria-disabled", "true");
+          }
           openStreamLink.href = absoluteUrl;
         }
         if (copyStreamButton) {
-          copyStreamButton.disabled = false;
+          copyStreamButton.disabled = !mjpegAvailable;
         }
         if (streamUrlElement) {
-          streamUrlElement.textContent = absoluteUrl;
+          streamUrlElement.textContent = mjpegAvailable
+            ? absoluteUrl
+            : "WebRTC negotiation handled by Live View";
         }
       }
 

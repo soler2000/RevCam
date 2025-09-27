@@ -46,6 +46,8 @@ def _apply_common_stubs(monkeypatch: pytest.MonkeyPatch) -> None:
         "rev_cam.app.create_battery_overlay",
         lambda *args, **kwargs: (lambda frame: frame),
     )
+    _StubWebRTCManager.instances.clear()
+    monkeypatch.setattr("rev_cam.app.WebRTCManager", _StubWebRTCManager)
 
 
 class _BrokenPicamera:
@@ -97,6 +99,42 @@ class _RecorderStreamer:
             self.jpeg_quality = jpeg_quality
         self.apply_calls.append({"fps": fps, "jpeg_quality": jpeg_quality})
 
+
+class _StubWebRTCManager:
+    instances: list["_StubWebRTCManager"] = []
+
+    def __init__(
+        self,
+        *,
+        camera: BaseCamera,
+        pipeline,
+        fps: int = 20,
+        **_: object,
+    ) -> None:
+        self.camera = camera
+        self.pipeline = pipeline
+        self.fps = fps
+        self.apply_calls: list[dict[str, int | None]] = []
+        self.sessions: list[dict[str, str]] = []
+        _StubWebRTCManager.instances.append(self)
+
+    async def create_session(self, sdp: str, offer_type: str):
+        self.sessions.append({"sdp": sdp, "type": offer_type})
+        return SimpleNamespace(sdp="answer", type="answer")
+
+    def apply_settings(
+        self,
+        *,
+        fps: int | None = None,
+        jpeg_quality: int | None = None,
+    ) -> None:
+        if fps is not None:
+            self.fps = fps
+        self.apply_calls.append({"fps": fps, "jpeg_quality": jpeg_quality})
+
+    async def aclose(self) -> None:  # pragma: no cover - not exercised in tests
+        return None
+
 @pytest.fixture
 def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     _apply_common_stubs(monkeypatch)
@@ -122,6 +160,10 @@ def test_camera_endpoint_reports_picamera_error(client: TestClient) -> None:
     assert "multipart/x-mixed-replace" in stream_info["content_type"]
     assert stream_info["settings"] == {"fps": 20, "jpeg_quality": 85}
     assert stream_info["active"] == {"fps": 20, "jpeg_quality": 85}
+    assert stream_info["webrtc"]["enabled"] is True
+    assert stream_info["webrtc"]["endpoint"] == "/stream/webrtc"
+    assert stream_info["webrtc"]["fps"] == 20
+    assert stream_info["mjpeg"]["enabled"] is True
     resolution_info = payload["resolution"]
     assert resolution_info["selected"] == DEFAULT_RESOLUTION_KEY
     assert resolution_info["active"] == DEFAULT_RESOLUTION_KEY
@@ -143,6 +185,8 @@ def test_camera_update_surfaces_failure(client: TestClient) -> None:
     assert "multipart/x-mixed-replace" in stream_info["content_type"]
     assert stream_info["settings"] == {"fps": 20, "jpeg_quality": 85}
     assert stream_info["active"] == {"fps": 20, "jpeg_quality": 85}
+    assert stream_info["webrtc"]["enabled"] is True
+    assert stream_info["webrtc"]["endpoint"] == "/stream/webrtc"
     resolution_info = refreshed["resolution"]
     assert resolution_info["selected"] == DEFAULT_RESOLUTION_KEY
     assert resolution_info["active"] == DEFAULT_RESOLUTION_KEY
@@ -225,11 +269,14 @@ def test_stream_error_surfaces_when_streamer_unavailable(
         assert response.status_code == 200
         payload = response.json()
         stream_info = payload["stream"]
-        assert stream_info["enabled"] is False
+        assert stream_info["enabled"] is True
         assert stream_info["endpoint"] is None
         assert stream_info["error"] == "encoder offline"
         assert stream_info["settings"] == {"fps": 20, "jpeg_quality": 85}
-        assert stream_info["active"] is None
+        assert stream_info["active"] == {"fps": 20, "jpeg_quality": None}
+        assert stream_info["webrtc"]["enabled"] is True
+        assert stream_info["mjpeg"]["enabled"] is False
+        assert stream_info["mjpeg"]["error"] == "encoder offline"
 
         stream_response = test_client.get("/stream/mjpeg")
         assert stream_response.status_code == 503
@@ -253,6 +300,8 @@ def test_stream_settings_endpoint_updates_config_and_streamer(
         assert initial_payload["stream"]["active"] == {"fps": 20, "jpeg_quality": 85}
         assert _RecorderStreamer.instances
         streamer = _RecorderStreamer.instances[-1]
+        assert _StubWebRTCManager.instances
+        webrtc_manager = _StubWebRTCManager.instances[-1]
 
         response = test_client.post(
             "/api/stream/settings",
@@ -267,6 +316,9 @@ def test_stream_settings_endpoint_updates_config_and_streamer(
         assert streamer.apply_calls[-1] == {"fps": 12, "jpeg_quality": 65}
         assert streamer.fps == 12
         assert streamer.jpeg_quality == 65
+        assert webrtc_manager.apply_calls
+        assert webrtc_manager.apply_calls[-1]["fps"] == 12
+        assert webrtc_manager.fps == 12
 
         config_data = json.loads(Path(config_path).read_text())
         assert config_data["stream"] == {"fps": 12, "jpeg_quality": 65}
@@ -276,6 +328,7 @@ def test_stream_settings_endpoint_updates_config_and_streamer(
         stream_info = refreshed.json()["stream"]
         assert stream_info["settings"] == {"fps": 12, "jpeg_quality": 65}
         assert stream_info["active"] == {"fps": 12, "jpeg_quality": 65}
+        assert stream_info["webrtc"]["fps"] == 12
 
 
 def test_stream_settings_endpoint_validates_input(client: TestClient) -> None:
@@ -291,3 +344,23 @@ def test_stream_settings_endpoint_validates_input(client: TestClient) -> None:
 
     camera = client.get("/api/camera").json()
     assert camera["stream"]["settings"] == {"fps": 20, "jpeg_quality": 85}
+
+
+def test_webrtc_endpoint_returns_answer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _apply_common_stubs(monkeypatch)
+    _RecorderStreamer.instances.clear()
+    monkeypatch.setattr("rev_cam.app.MJPEGStreamer", _RecorderStreamer)
+    config_path = tmp_path / "config.json"
+    app = create_app(config_path)
+    with TestClient(app) as test_client:
+        response = test_client.post(
+            "/stream/webrtc",
+            json={"sdp": "offer", "type": "offer"},
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload == {"sdp": "answer", "type": "answer"}
+        assert _StubWebRTCManager.instances
+        manager = _StubWebRTCManager.instances[-1]
+        assert manager.sessions
+        assert manager.sessions[-1] == {"sdp": "offer", "type": "offer"}
