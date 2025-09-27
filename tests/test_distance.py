@@ -157,30 +157,40 @@ def test_distance_overlay_handles_non_numpy_frames() -> None:
 
 
 def test_distance_monitor_close_releases_sensor_and_i2c() -> None:
-    class _ClosableSensor:
+    class _StubI2CBus:
         def __init__(self) -> None:
+            self.deinit_called = False
+
+        def deinit(self) -> None:
+            self.deinit_called = True
+
+    class _StubDevice:
+        def __init__(self, bus: _StubI2CBus) -> None:
+            self.i2c = bus
+            self.deinit_called = False
+
+        def deinit(self) -> None:
+            self.deinit_called = True
+
+    class _ClosableSensor:
+        def __init__(self, device: _StubDevice) -> None:
             self.distance = 100.0
             self.deinit_called = False
+            self.i2c_device = device
 
         def deinit(self) -> None:
             self.deinit_called = True
 
-    class _StubI2C:
-        def __init__(self) -> None:
-            self.deinit_called = False
-
-        def deinit(self) -> None:
-            self.deinit_called = True
-
-    sensor = _ClosableSensor()
+    bus = _StubI2CBus()
+    device = _StubDevice(bus)
+    sensor = _ClosableSensor(device)
     monitor = DistanceMonitor(sensor_factory=lambda: sensor, update_interval=0.0)
     monitor.read()
-    stub_i2c = _StubI2C()
-    monitor._i2c_resource = stub_i2c  # type: ignore[attr-defined]
 
     monitor.close()
 
     assert sensor.deinit_called is True
-    assert stub_i2c.deinit_called is True
+    assert device.deinit_called is True
+    assert bus.deinit_called is True
     assert monitor.last_error is None
 
