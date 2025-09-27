@@ -1,6 +1,7 @@
 """Simple mDNS advertiser used to expose RevCam services."""
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import logging
 import shutil
@@ -60,8 +61,39 @@ class _ZeroconfAdvertiser(_BaseAdvertiser):
     # ------------------------------ helpers -----------------------------
     def _ensure_zeroconf(self) -> Zeroconf:
         if self._zeroconf is None:
-            self._zeroconf = Zeroconf(interfaces=InterfaceChoice.All)
+            self._zeroconf = self._create_zeroconf()
         return self._zeroconf
+
+    def _create_zeroconf(self) -> Zeroconf:
+        if not self._event_loop_running():
+            return Zeroconf(interfaces=InterfaceChoice.All)
+
+        result: Zeroconf | None = None
+        error: BaseException | None = None
+
+        def _construct() -> None:
+            nonlocal result, error
+            try:
+                result = Zeroconf(interfaces=InterfaceChoice.All)
+            except BaseException as exc:  # pragma: no cover - defensive guard
+                error = exc
+
+        thread = threading.Thread(target=_construct, daemon=True)
+        thread.start()
+        thread.join()
+
+        if error is not None:
+            raise error
+        assert result is not None  # pragma: no cover - defensive
+        return result
+
+    @staticmethod
+    def _event_loop_running() -> bool:
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return False
+        return True
 
     def _build_service_info(self, ip: ipaddress._BaseAddress) -> ServiceInfo:
         service_name = f"{self._service_name}.{self._service_type}"
