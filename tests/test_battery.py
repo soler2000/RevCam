@@ -188,6 +188,48 @@ def test_battery_monitor_reports_address_hint_on_init_failure(
     assert monitor.last_error == reading.error
 
 
+def test_battery_monitor_falls_back_to_pi_ina219(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _StubPiIna219:
+        def __init__(self, shunt_ohms: float, *, busnum: int | None = None, address: int) -> None:
+            self._shunt_ohms = shunt_ohms
+            self._busnum = busnum
+            self._address = address
+
+        def configure(self) -> None:
+            pass
+
+        def voltage(self) -> float:
+            return 3.95
+
+        def shunt_voltage(self) -> float:
+            return 0.05
+
+        def current(self) -> float:
+            return 120.0
+
+    class _StubRangeError(Exception):
+        pass
+
+    monkeypatch.delitem(sys.modules, "adafruit_ina219", raising=False)
+    monkeypatch.delitem(sys.modules, "adafruit_extended_bus", raising=False)
+    monkeypatch.delitem(sys.modules, "board", raising=False)
+
+    module = types.ModuleType("ina219")
+    module.INA219 = _StubPiIna219  # type: ignore[attr-defined]
+    module.DeviceRangeError = _StubRangeError  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "ina219", module)
+
+    monitor = BatteryMonitor()
+
+    reading = monitor.read()
+
+    assert reading.available is True
+    assert reading.voltage == pytest.approx(4.0, abs=1e-6)
+    assert reading.percentage is not None
+    assert reading.current_ma == pytest.approx(120.0)
+    assert reading.error is None
+
+
 def test_battery_monitor_close_only_releases_supplied_sensor() -> None:
     class _StubI2CBus:
         def __init__(self) -> None:

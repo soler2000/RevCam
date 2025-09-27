@@ -95,6 +95,68 @@ class _SmoothingState:
     ema: float | None = None
 
 
+class _PiIna219Adapter:
+    """Bridge the :mod:`pi-ina219` driver to the attribute-based API we expect."""
+
+    __slots__ = ("_driver", "_device_range_error")
+
+    def __init__(self, driver: object, device_range_error: type[Exception] | None) -> None:
+        self._driver = driver
+        self._device_range_error = device_range_error
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._driver, name)
+
+    @property
+    def bus_voltage(self) -> float:
+        voltage = getattr(self._driver, "voltage")
+        if callable(voltage):
+            return float(voltage())
+        return float(voltage)
+
+    @property
+    def shunt_voltage(self) -> float:
+        shunt = getattr(self._driver, "shunt_voltage", None)
+        if shunt is None:
+            return 0.0
+        if callable(shunt):
+            try:
+                return float(shunt())
+            except Exception:
+                return 0.0
+        try:
+            return float(shunt)
+        except Exception:
+            return 0.0
+
+    @property
+    def current(self) -> float | None:
+        current = getattr(self._driver, "current", None)
+        if current is None:
+            return None
+        try:
+            value = current() if callable(current) else current
+        except Exception as exc:  # pragma: no cover - defensive guard
+            device_range_error = self._device_range_error
+            if device_range_error is not None and isinstance(exc, device_range_error):
+                return None
+            raise
+        try:
+            return float(value)
+        except Exception:
+            return None
+
+    def deinit(self) -> None:
+        for method_name in ("close", "deinit", "shutdown", "sleep"):
+            method = getattr(self._driver, method_name, None)
+            if callable(method):
+                try:
+                    method()
+                except Exception:  # pragma: no cover - defensive guard
+                    pass
+                break
+
+
 class BatteryMonitor:
     """Provide high-level battery readings using an INA219 sensor.
 
@@ -165,48 +227,115 @@ class BatteryMonitor:
     def _create_default_sensor(self) -> object:
         """Attempt to instantiate the INA219 driver."""
 
+        attempts: list[str] = []
+
+        sensor = self._try_create_adafruit_sensor(attempts)
+        if sensor is not None:
+            return sensor
+
+        sensor = self._try_create_pi_ina219_sensor(attempts)
+        if sensor is not None:
+            return sensor
+
+        detail = "; ".join(attempts) if attempts else "required drivers are missing"
+        raise RuntimeError(f"INA219 driver unavailable ({detail})")
+
+    def _try_create_adafruit_sensor(self, attempts: list[str]) -> object | None:
         try:  # Import lazily so unit tests do not require the dependencies.
             from adafruit_ina219 import INA219  # type: ignore
+        except ModuleNotFoundError:
+            attempts.append("install adafruit-circuitpython-ina219")
+            return None
         except Exception as exc:  # pragma: no cover - import varies by environment
-            raise RuntimeError("INA219 driver unavailable") from exc
+            attempts.append(f"adafruit INA219 import failed: {exc}")
+            return None
 
         bus_number = self._i2c_bus
         if bus_number is not None:
             try:
                 from adafruit_extended_bus import ExtendedI2C  # type: ignore
+            except ModuleNotFoundError:
+                attempts.append(
+                    "install adafruit-circuitpython-extended-bus for custom I2C buses"
+                )
+                return None
             except Exception as exc:  # pragma: no cover - optional dependency
-                raise RuntimeError(
-                    "Extended I2C support unavailable; install adafruit-circuitpython-extended-bus"
-                ) from exc
+                attempts.append(f"ExtendedI2C unavailable: {exc}")
+                return None
 
             try:
                 i2c = ExtendedI2C(bus_number)  # type: ignore[call-arg]
             except Exception as exc:  # pragma: no cover - hardware specific
-                raise RuntimeError(f"Unable to access I2C bus {bus_number}: {exc}") from exc
+                attempts.append(f"Unable to access I2C bus {bus_number}: {exc}")
+                return None
             self._owned_i2c_bus = i2c
             self._owns_i2c_bus = True
         else:
             try:
                 import board  # type: ignore
+            except ModuleNotFoundError:
+                attempts.append("install adafruit-blinka to access board.I2C")
+                return None
             except Exception as exc:  # pragma: no cover - import varies by environment
-                raise RuntimeError("INA219 driver unavailable") from exc
+                attempts.append(f"board.I2C unavailable: {exc}")
+                return None
 
             try:
                 i2c = board.I2C()  # type: ignore[attr-defined]
             except Exception as exc:  # pragma: no cover - hardware specific
-                raise RuntimeError("Unable to access I2C bus") from exc
+                attempts.append(f"Unable to access I2C bus: {exc}")
+                return None
             self._owned_i2c_bus = i2c
             self._owns_i2c_bus = True
+
         try:
             return INA219(i2c, addr=self._i2c_address)  # type: ignore[call-arg]
         except Exception as exc:  # pragma: no cover - hardware specific
             self._release_owned_i2c_bus()
-            raise RuntimeError(
+            attempts.append(
                 (
                     "Failed to initialise INA219 "
                     f"(expected address 0x{self._i2c_address:02X}): {exc}"
                 )
-            ) from exc
+            )
+            return None
+
+    def _try_create_pi_ina219_sensor(self, attempts: list[str]) -> object | None:
+        try:
+            from ina219 import INA219 as PiINA219  # type: ignore
+        except ModuleNotFoundError:
+            attempts.append("install pi-ina219")
+            return None
+        except Exception as exc:  # pragma: no cover - import varies by environment
+            attempts.append(f"pi-ina219 import failed: {exc}")
+            return None
+
+        try:
+            from ina219 import DeviceRangeError as PiDeviceRangeError  # type: ignore
+        except Exception:  # pragma: no cover - optional dependency
+            PiDeviceRangeError = None
+
+        kwargs: dict[str, object] = {"address": self._i2c_address}
+        if self._i2c_bus is not None:
+            kwargs["busnum"] = self._i2c_bus
+
+        try:
+            driver = PiINA219(0.1, **kwargs)  # type: ignore[call-arg]
+        except TypeError:
+            driver = PiINA219(0.1, self._i2c_bus, self._i2c_address)  # type: ignore[call-arg]
+        except Exception as exc:  # pragma: no cover - hardware specific
+            attempts.append(f"Failed to initialise pi-ina219: {exc}")
+            return None
+
+        configure = getattr(driver, "configure", None)
+        if callable(configure):
+            try:
+                configure()
+            except Exception as exc:  # pragma: no cover - hardware specific
+                attempts.append(f"Failed to configure pi-ina219: {exc}")
+                return None
+
+        return _PiIna219Adapter(driver, PiDeviceRangeError)
 
     def _obtain_sensor(self) -> object | None:
         if self._sensor is not None:
