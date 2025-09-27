@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import math
 import time
 from collections import deque
@@ -154,6 +155,7 @@ class DistanceMonitor:
         self._spike_candidate: float | None = None
         self._spike_rejects: int = 0
         self._last_error: str | None = None
+        self._last_logged_error: str | None = None
         self._last_reading: DistanceReading | None = None
         self._last_timestamp: float = 0.0
         self._lock = Lock()
@@ -163,6 +165,7 @@ class DistanceMonitor:
             self._calibration = DistanceCalibration(calibration.offset_m, calibration.scale)
         self._owned_i2c_bus: object | None = None
         self._owns_i2c_bus = False
+        self._logger = logging.getLogger(f"{__name__}.{type(self).__name__}")
 
     @property
     def last_error(self) -> str | None:
@@ -290,20 +293,20 @@ class DistanceMonitor:
             try:
                 sensor = self._create_default_sensor()
             except RuntimeError as exc:
-                self._last_error = str(exc)
+                self._record_error(str(exc), exc_info=True)
                 self._sensor = None
                 return None
         else:
             try:
                 sensor = factory()
             except Exception as exc:
-                self._last_error = str(exc)
+                self._record_error(str(exc), exc_info=True)
                 self._sensor = None
                 return None
             self._configure_sensor(sensor)
 
         self._sensor = sensor
-        self._last_error = None
+        self._clear_error_state()
         return sensor
 
     def close(self) -> None:
@@ -313,9 +316,25 @@ class DistanceMonitor:
             sensor = self._sensor
             self._sensor = None
             self._last_reading = None
-            self._last_error = None
+            self._clear_error_state()
         self._release_sensor(sensor)
         self._release_owned_i2c_bus()
+
+    def _clear_error_state(self) -> None:
+        self._last_error = None
+        self._last_logged_error = None
+
+    def _record_error(
+        self, message: str, *, level: int = logging.ERROR, exc_info: bool = False
+    ) -> str:
+        detail = str(message).strip()
+        if not detail:
+            detail = "Distance monitor error"
+        self._last_error = detail
+        if detail != self._last_logged_error:
+            self._logger.log(level, detail, exc_info=exc_info)
+            self._last_logged_error = detail
+        return detail
 
     def _read_sensor_distance(self, sensor: object) -> float | None:
         value = getattr(sensor, "distance", None)
@@ -439,7 +458,15 @@ class DistanceMonitor:
                 self._last_timestamp = 0.0
             return self._calibration
 
-    def _handle_invalid_sample(self, now: float, message: str) -> DistanceReading:
+    def _handle_invalid_sample(
+        self,
+        now: float,
+        message: str,
+        *,
+        level: int = logging.WARNING,
+        exc_info: bool = False,
+    ) -> DistanceReading:
+        detail = self._record_error(message, level=level, exc_info=exc_info)
         last = self._last_reading
         if last and last.available and last.distance_m is not None:
             reading = DistanceReading(
@@ -447,7 +474,7 @@ class DistanceMonitor:
                 distance_m=last.distance_m,
                 raw_distance_m=None,
                 timestamp=now,
-                error=message,
+                error=detail,
             )
         else:
             reading = DistanceReading(
@@ -455,9 +482,8 @@ class DistanceMonitor:
                 distance_m=None,
                 raw_distance_m=None,
                 timestamp=now,
-                error=message,
+                error=detail,
             )
-        self._last_error = message
         self._last_reading = reading
         return reading
 
@@ -485,41 +511,43 @@ class DistanceMonitor:
                 self._last_timestamp = now
                 return reading
 
-            try:
-                measurement = self._read_sensor_distance(sensor)
-            except Exception as exc:  # pragma: no cover - defensive guard
-                self._release_sensor(sensor)
-                self._release_owned_i2c_bus()
-                self._sensor = None
-                message = f"Failed to read distance: {exc}"
-                reading = self._handle_invalid_sample(now, message)
-                self._last_timestamp = now
-                return reading
-
-            if measurement is None:
-                reading = self._handle_invalid_sample(now, "Distance measurement unavailable")
-                self._last_timestamp = now
-                return reading
-
-            filtered = self._filter_measurement(measurement)
-            if filtered is None:
-                reading = self._handle_invalid_sample(now, "Filtered invalid distance sample")
-                self._last_timestamp = now
-                return reading
-
-            calibrated = self._apply_calibration(filtered)
-            smoothed = self._apply_smoothing(calibrated)
-            reading = DistanceReading(
-                available=True,
-                distance_m=smoothed,
-                raw_distance_m=filtered,
-                timestamp=now,
-                error=None,
+        try:
+            measurement = self._read_sensor_distance(sensor)
+        except Exception as exc:  # pragma: no cover - defensive guard
+            self._release_sensor(sensor)
+            self._release_owned_i2c_bus()
+            self._sensor = None
+            message = f"Failed to read distance: {exc}"
+            reading = self._handle_invalid_sample(
+                now, message, level=logging.ERROR, exc_info=True
             )
-            self._last_error = None
-            self._last_reading = reading
             self._last_timestamp = now
             return reading
+
+        if measurement is None:
+            reading = self._handle_invalid_sample(now, "Distance measurement unavailable")
+            self._last_timestamp = now
+            return reading
+
+        filtered = self._filter_measurement(measurement)
+        if filtered is None:
+            reading = self._handle_invalid_sample(now, "Filtered invalid distance sample")
+            self._last_timestamp = now
+            return reading
+
+        calibrated = self._apply_calibration(filtered)
+        smoothed = self._apply_smoothing(calibrated)
+        reading = DistanceReading(
+            available=True,
+            distance_m=smoothed,
+            raw_distance_m=filtered,
+            timestamp=now,
+            error=None,
+        )
+        self._clear_error_state()
+        self._last_reading = reading
+        self._last_timestamp = now
+        return reading
 
 
 _ZONE_COLOURS = {

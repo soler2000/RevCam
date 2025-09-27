@@ -133,10 +133,12 @@ class BatteryMonitor:
         self._sensor_factory = sensor_factory
         self._sensor: object | None = None
         self._last_error: str | None = None
+        self._last_logged_error: str | None = None
         self._i2c_bus = i2c_bus
         self._i2c_address = i2c_address
         self._owned_i2c_bus: object | None = None
         self._owns_i2c_bus = False
+        self._logger = logging.getLogger(f"{__name__}.{type(self).__name__}")
         if smoothing_alpha is None:
             self._smoothing_alpha: float | None = None
             self._smoothing_beta: float | None = None
@@ -215,17 +217,17 @@ class BatteryMonitor:
             try:
                 sensor = self._create_default_sensor()
             except RuntimeError as exc:
-                self._last_error = str(exc)
+                self._record_error(str(exc), exc_info=True)
                 return None
         else:
             try:
                 sensor = factory()
             except Exception as exc:
-                self._last_error = str(exc)
+                self._record_error(str(exc), exc_info=True)
                 return None
 
         self._sensor = sensor
-        self._last_error = None
+        self._clear_error_state()
         return sensor
 
     def close(self) -> None:
@@ -233,9 +235,22 @@ class BatteryMonitor:
 
         sensor = self._sensor
         self._sensor = None
-        self._last_error = None
+        self._clear_error_state()
         self._release_sensor(sensor)
         self._release_owned_i2c_bus()
+
+    def _clear_error_state(self) -> None:
+        self._last_error = None
+        self._last_logged_error = None
+
+    def _record_error(self, message: str, *, exc_info: bool = False) -> None:
+        detail = str(message).strip()
+        if not detail:
+            detail = "Battery monitor error"
+        self._last_error = detail
+        if detail != self._last_logged_error:
+            self._logger.error(detail, exc_info=exc_info)
+            self._last_logged_error = detail
 
     def _release_sensor(self, sensor: object | None) -> None:
         if sensor is None:
@@ -392,7 +407,7 @@ class BatteryMonitor:
             self._release_sensor(sensor)
             self._release_owned_i2c_bus()
             self._sensor = None
-            self._last_error = f"Failed to read battery voltage: {exc}"
+            self._record_error(f"Failed to read battery voltage: {exc}", exc_info=True)
             self._reset_smoothing()
             return BatteryReading(
                 available=False,
@@ -448,7 +463,7 @@ class BatteryMonitor:
             capacity_mah=self.capacity_mah,
             error=None,
         )
-        self._last_error = None
+        self._clear_error_state()
         return reading
 
 
