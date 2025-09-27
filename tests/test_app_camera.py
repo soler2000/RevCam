@@ -170,6 +170,17 @@ def test_camera_endpoint_reports_picamera_error(client: TestClient) -> None:
     assert any(opt["value"] == DEFAULT_RESOLUTION_KEY for opt in resolution_info["options"])
 
 
+def test_stream_status_endpoint_reports_capabilities(client: TestClient) -> None:
+    response = client.get("/api/stream")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["enabled"] is True
+    assert payload["settings"] == {"fps": 20, "jpeg_quality": 85}
+    assert payload["webrtc"]["enabled"] is True
+    assert payload["webrtc"]["error"] is None
+    assert payload["mjpeg"]["enabled"] is True
+
+
 def test_camera_update_surfaces_failure(client: TestClient) -> None:
     response = client.post("/api/camera", json={"source": "picamera"})
     assert response.status_code == 400
@@ -282,6 +293,29 @@ def test_stream_error_surfaces_when_streamer_unavailable(
         assert stream_response.status_code == 503
         detail = stream_response.json()["detail"]
         assert "encoder offline" in detail
+
+
+def test_stream_status_endpoint_reports_webrtc_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _apply_common_stubs(monkeypatch)
+
+    class _BrokenWebRTCManager:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            raise RuntimeError("aiortc unavailable")
+
+    monkeypatch.setattr("rev_cam.app.WebRTCManager", _BrokenWebRTCManager)
+
+    config_path = tmp_path / "config.json"
+    app = create_app(config_path)
+    with TestClient(app) as test_client:
+        response = test_client.get("/api/stream")
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["enabled"] is True
+        assert payload["webrtc"]["enabled"] is False
+        assert payload["webrtc"]["error"] == "aiortc unavailable"
+        assert payload["mjpeg"]["enabled"] is True
 
 
 def test_stream_settings_endpoint_updates_config_and_streamer(

@@ -745,6 +745,7 @@
       let peerConnection = null;
       let activeStreamMode = null;
       const webrtcSupported = typeof window.RTCPeerConnection === "function";
+      let streamCapabilities = null;
 
       function extractWebRTCErrorMessage(error) {
         if (!error) {
@@ -811,6 +812,66 @@
         } catch (loggingError) {
           console.debug("Failed to prepare WebRTC error report", loggingError);
         }
+      }
+
+      function getWebRTCCapabilities() {
+        if (!streamCapabilities || typeof streamCapabilities !== "object") {
+          return null;
+        }
+        const { webrtc } = streamCapabilities;
+        if (!webrtc || typeof webrtc !== "object") {
+          return null;
+        }
+        return webrtc;
+      }
+
+      function getWebRTCErrorMessage() {
+        const details = getWebRTCCapabilities();
+        if (!details) {
+          return "";
+        }
+        if (typeof details.error === "string" && details.error.trim()) {
+          return details.error.trim();
+        }
+        return "";
+      }
+
+      function isServerWebRTCReady() {
+        const details = getWebRTCCapabilities();
+        if (!details) {
+          return false;
+        }
+        if (details.enabled !== true) {
+          return false;
+        }
+        if (typeof details.error === "string" && details.error.trim()) {
+          return false;
+        }
+        return true;
+      }
+
+      function isStreamingServiceAvailable() {
+        if (!streamCapabilities || typeof streamCapabilities !== "object") {
+          return true;
+        }
+        return streamCapabilities.enabled !== false;
+      }
+
+      async function refreshStreamCapabilities() {
+        try {
+          const response = await fetch("/api/stream", { cache: "no-store" });
+          if (!response.ok) {
+            throw new Error(`Stream info request failed with ${response.status}`);
+          }
+          const payload = await response.json();
+          streamCapabilities =
+            payload && typeof payload === "object" ? payload : null;
+        } catch (error) {
+          console.error("Stream info error", error);
+          streamCapabilities = null;
+          return null;
+        }
+        return streamCapabilities;
       }
 
       async function waitForIceGatheringComplete(peerConnection, timeout = 4000) {
@@ -1356,13 +1417,35 @@
         }
         clearReconnectTimer();
         reconnectTimer = setTimeout(() => {
-          startStream("Reconnecting…").catch((error) =>
+          startStream({ message: "Reconnecting…", refreshCapabilities: true }).catch((error) =>
             console.error("Reconnect attempt failed", error),
           );
         }, delay);
       }
 
-      async function startStream(message = "Connecting to camera…") {
+      async function startStream(messageOrOptions = "Connecting to camera…", maybeOptions) {
+        let message = "Connecting to camera…";
+        let options = {};
+        if (
+          messageOrOptions &&
+          typeof messageOrOptions === "object" &&
+          !Array.isArray(messageOrOptions)
+        ) {
+          options = messageOrOptions;
+          if (typeof options.message === "string" && options.message.trim()) {
+            message = options.message.trim();
+          }
+        } else {
+          if (typeof messageOrOptions === "string" && messageOrOptions.trim()) {
+            message = messageOrOptions.trim();
+          }
+          if (maybeOptions && typeof maybeOptions === "object") {
+            options = maybeOptions;
+          }
+        }
+
+        const refreshCapabilities = options.refreshCapabilities === true;
+
         shouldStream = true;
         clearReconnectTimer();
         activeStreamMode = null;
@@ -1379,7 +1462,27 @@
           streamVideo.srcObject = null;
         }
 
-        if (webrtcSupported) {
+        if (refreshCapabilities || !streamCapabilities) {
+          await refreshStreamCapabilities();
+        }
+
+        if (!isStreamingServiceAvailable()) {
+          const issue =
+            streamCapabilities &&
+            typeof streamCapabilities.error === "string" &&
+            streamCapabilities.error.trim()
+              ? streamCapabilities.error.trim()
+              : "Streaming unavailable";
+          setStatus(issue, "error");
+          toggleButton.textContent = "Start stream";
+          toggleButton.setAttribute("aria-pressed", "false");
+          shouldStream = false;
+          return;
+        }
+
+        const canUseWebRTC = webrtcSupported && isServerWebRTCReady();
+
+        if (canUseWebRTC) {
           try {
             await startWebRTCStream();
             return;
@@ -1388,6 +1491,11 @@
             console.error("WebRTC stream error", error);
             setStatus(`WebRTC failed: ${summary}`, "error");
             reportWebRTCFailure(error);
+          }
+        } else if (webrtcSupported) {
+          const capabilityError = getWebRTCErrorMessage();
+          if (capabilityError) {
+            setStatus(`Streaming issue: ${capabilityError}`, "error");
           }
         }
 
@@ -1587,7 +1695,7 @@
       if (reconnectButton instanceof HTMLButtonElement) {
         reconnectButton.addEventListener("click", () => {
           const message = shouldStream ? "Reconnecting…" : "Connecting to camera…";
-          startStream(message).catch((error) =>
+          startStream({ message, refreshCapabilities: true }).catch((error) =>
             console.error("Reconnect button error", error),
           );
         });
@@ -1598,7 +1706,7 @@
           if (shouldStream) {
             stopStream();
           } else {
-            startStream().catch((error) =>
+            startStream({ refreshCapabilities: true }).catch((error) =>
               console.error("Stream toggle error", error),
             );
           }
@@ -1628,7 +1736,9 @@
 
       refreshIlluminationState({ showLoading: true });
       scheduleBatteryUpdates();
-      startStream().catch((error) => console.error("Initial stream error", error));
+      startStream({ refreshCapabilities: true }).catch((error) =>
+        console.error("Initial stream error", error),
+      );
     </script>
   </body>
 </html>

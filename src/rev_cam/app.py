@@ -591,6 +591,12 @@ def create_app(
             },
         }
 
+    @app.get("/api/stream")
+    async def get_stream_status() -> dict[str, object | None]:
+        """Return the current streaming capabilities."""
+
+        return _build_stream_info()
+
     @app.post("/api/stream/settings")
     async def update_stream_settings(payload: StreamSettingsPayload) -> dict[str, object | None]:
         nonlocal streamer, webrtc_manager
