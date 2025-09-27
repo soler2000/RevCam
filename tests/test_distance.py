@@ -105,6 +105,51 @@ def test_distance_monitor_reports_unavailable_when_sensor_missing() -> None:
     assert monitor.last_error == "sensor offline"
 
 
+def test_distance_monitor_prefers_long_range_mode() -> None:
+    class _ConfigurableSensor:
+        def __init__(self) -> None:
+            self.distance_mode = None
+            self.timing_budget = None
+            self.started = False
+
+        def start_ranging(self) -> None:
+            self.started = True
+
+    sensor = _ConfigurableSensor()
+    monitor = DistanceMonitor(sensor_factory=lambda: sensor, update_interval=0.0)
+
+    monitor.read()
+
+    assert sensor.distance_mode in (2, "long")
+    assert sensor.started is True
+
+
+def test_distance_monitor_falls_back_when_long_mode_unavailable() -> None:
+    class _LimitedSensor:
+        def __init__(self) -> None:
+            self._distance_mode = None
+
+        @property
+        def distance_mode(self):  # type: ignore[override]
+            return self._distance_mode
+
+        @distance_mode.setter
+        def distance_mode(self, value):  # type: ignore[override]
+            if value in (2, "long"):
+                raise ValueError("unsupported mode")
+            self._distance_mode = value
+
+        def start_ranging(self) -> None:
+            pass
+
+    sensor = _LimitedSensor()
+    monitor = DistanceMonitor(sensor_factory=lambda: sensor, update_interval=0.0)
+
+    monitor.read()
+
+    assert sensor.distance_mode in (1, "short")
+
+
 def test_distance_monitor_applies_calibration() -> None:
     sensor = _SequenceSensor([100.0])
     calibration = DistanceCalibration(offset_m=-0.1, scale=0.01)
