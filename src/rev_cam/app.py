@@ -183,7 +183,11 @@ def create_app(
 
     pipeline = FramePipeline(lambda: config_manager.get_orientation())
     pipeline.add_overlay(
-        create_battery_overlay(battery_monitor, config_manager.get_battery_limits)
+        create_battery_overlay(
+            battery_monitor,
+            config_manager.get_battery_limits,
+            wifi_manager.get_status,
+        )
     )
     pipeline.add_overlay(
         create_distance_overlay(
