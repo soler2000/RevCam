@@ -188,6 +188,35 @@ def test_battery_monitor_reports_address_hint_on_init_failure(
     assert monitor.last_error == reading.error
 
 
+def test_battery_monitor_close_releases_sensor_and_i2c() -> None:
+    class _ClosableSensor(_StubSensor):
+        def __init__(self) -> None:
+            super().__init__(bus_voltage=4.0, current=100.0)
+            self.deinit_called = False
+
+        def deinit(self) -> None:
+            self.deinit_called = True
+
+    class _StubI2C:
+        def __init__(self) -> None:
+            self.deinit_called = False
+
+        def deinit(self) -> None:
+            self.deinit_called = True
+
+    sensor = _ClosableSensor()
+    monitor = BatteryMonitor(sensor_factory=lambda: sensor)
+    monitor.read()
+    stub_i2c = _StubI2C()
+    monitor._i2c_resource = stub_i2c  # type: ignore[attr-defined]
+
+    monitor.close()
+
+    assert sensor.deinit_called is True
+    assert stub_i2c.deinit_called is True
+    assert monitor.last_error is None
+
+
 def test_battery_limits_validation() -> None:
     with pytest.raises(ValueError):
         BatteryLimits(warning_percent=-1.0, shutdown_percent=5.0)

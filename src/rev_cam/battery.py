@@ -132,6 +132,7 @@ class BatteryMonitor:
         self.capacity_mah = capacity_mah
         self._sensor_factory = sensor_factory
         self._sensor: object | None = None
+        self._i2c_resource: object | None = None
         self._last_error: str | None = None
         self._i2c_bus = i2c_bus
         self._i2c_address = i2c_address
@@ -190,9 +191,12 @@ class BatteryMonitor:
             except Exception as exc:  # pragma: no cover - hardware specific
                 raise RuntimeError("Unable to access I2C bus") from exc
 
+        self._capture_i2c_resource(i2c)
+
         try:
             return INA219(i2c, addr=self._i2c_address)  # type: ignore[call-arg]
         except Exception as exc:  # pragma: no cover - hardware specific
+            self._release_i2c_resource()
             raise RuntimeError(
                 (
                     "Failed to initialise INA219 "
@@ -221,6 +225,53 @@ class BatteryMonitor:
         self._sensor = sensor
         self._last_error = None
         return sensor
+
+    def close(self) -> None:
+        """Release the underlying sensor and any associated I2C resources."""
+
+        sensor = self._sensor
+        self._sensor = None
+        self._last_error = None
+        self._release_sensor(sensor)
+
+    def _capture_i2c_resource(self, resource: object) -> None:
+        if resource is self._i2c_resource:
+            return
+        self._release_i2c_resource()
+        self._i2c_resource = resource
+
+    def _release_i2c_resource(self) -> None:
+        resource = self._i2c_resource
+        self._i2c_resource = None
+        if resource is None:
+            return
+        for method_name in ("deinit", "close"):
+            method = getattr(resource, method_name, None)
+            if callable(method):
+                try:
+                    method()
+                except Exception:  # pragma: no cover - defensive guard
+                    pass
+                return
+        unlock = getattr(resource, "unlock", None)
+        if callable(unlock):
+            try:
+                unlock()
+            except Exception:  # pragma: no cover - defensive guard
+                pass
+
+    def _release_sensor(self, sensor: object | None) -> None:
+        if sensor is None:
+            return
+        for method_name in ("deinit", "close", "shutdown"):
+            method = getattr(sensor, method_name, None)
+            if callable(method):
+                try:
+                    method()
+                except Exception:  # pragma: no cover - defensive guard
+                    pass
+                break
+        self._release_i2c_resource()
 
     def _estimate_percentage(self, voltage: float) -> float:
         curve: Sequence[tuple[float, float]] = self._LIPO_VOLTAGE_CURVE
@@ -330,6 +381,7 @@ class BatteryMonitor:
         try:
             bus_voltage = float(getattr(sensor, "bus_voltage"))
         except Exception as exc:
+            self._release_sensor(sensor)
             self._sensor = None
             self._last_error = f"Failed to read battery voltage: {exc}"
             self._reset_smoothing()

@@ -155,3 +155,32 @@ def test_distance_overlay_handles_non_numpy_frames() -> None:
 
     assert result == frame
 
+
+def test_distance_monitor_close_releases_sensor_and_i2c() -> None:
+    class _ClosableSensor:
+        def __init__(self) -> None:
+            self.distance = 100.0
+            self.deinit_called = False
+
+        def deinit(self) -> None:
+            self.deinit_called = True
+
+    class _StubI2C:
+        def __init__(self) -> None:
+            self.deinit_called = False
+
+        def deinit(self) -> None:
+            self.deinit_called = True
+
+    sensor = _ClosableSensor()
+    monitor = DistanceMonitor(sensor_factory=lambda: sensor, update_interval=0.0)
+    monitor.read()
+    stub_i2c = _StubI2C()
+    monitor._i2c_resource = stub_i2c  # type: ignore[attr-defined]
+
+    monitor.close()
+
+    assert sensor.deinit_called is True
+    assert stub_i2c.deinit_called is True
+    assert monitor.last_error is None
+

@@ -141,6 +141,7 @@ class DistanceMonitor:
 
         self._sensor_factory = sensor_factory
         self._sensor: object | None = None
+        self._i2c_resource: object | None = None
         self._i2c_bus = i2c_bus
         self._i2c_address = i2c_address
         self._alpha = smoothing_alpha
@@ -195,9 +196,12 @@ class DistanceMonitor:
             except Exception as exc:  # pragma: no cover - hardware dependency
                 raise RuntimeError("Unable to access I2C bus") from exc
 
+        self._capture_i2c_resource(i2c)
+
         try:  # pragma: no cover - hardware dependency
             sensor = adafruit_vl53l1x.VL53L1X(i2c, address=self._i2c_address)
         except Exception as exc:  # pragma: no cover - hardware dependency
+            self._release_i2c_resource()
             raise RuntimeError(
                 (
                     "Failed to initialise VL53L1X "
@@ -207,6 +211,45 @@ class DistanceMonitor:
 
         self._configure_sensor(sensor)
         return sensor
+
+    def _capture_i2c_resource(self, resource: object) -> None:
+        if resource is self._i2c_resource:
+            return
+        self._release_i2c_resource()
+        self._i2c_resource = resource
+
+    def _release_i2c_resource(self) -> None:
+        resource = self._i2c_resource
+        self._i2c_resource = None
+        if resource is None:
+            return
+        for method_name in ("deinit", "close"):
+            method = getattr(resource, method_name, None)
+            if callable(method):
+                try:
+                    method()
+                except Exception:  # pragma: no cover - defensive guard
+                    pass
+                return
+        unlock = getattr(resource, "unlock", None)
+        if callable(unlock):
+            try:
+                unlock()
+            except Exception:  # pragma: no cover - defensive guard
+                pass
+
+    def _release_sensor(self, sensor: object | None) -> None:
+        if sensor is None:
+            return
+        for method_name in ("deinit", "close", "shutdown"):
+            method = getattr(sensor, method_name, None)
+            if callable(method):
+                try:
+                    method()
+                except Exception:  # pragma: no cover - defensive guard
+                    pass
+                break
+        self._release_i2c_resource()
 
     def _configure_sensor(self, sensor: object) -> None:
         try:
@@ -255,6 +298,16 @@ class DistanceMonitor:
         self._sensor = sensor
         self._last_error = None
         return sensor
+
+    def close(self) -> None:
+        """Release the underlying sensor and any I2C resources."""
+
+        with self._lock:
+            sensor = self._sensor
+            self._sensor = None
+            self._last_reading = None
+            self._last_error = None
+        self._release_sensor(sensor)
 
     def _read_sensor_distance(self, sensor: object) -> float | None:
         value = getattr(sensor, "distance", None)
@@ -427,6 +480,7 @@ class DistanceMonitor:
             try:
                 measurement = self._read_sensor_distance(sensor)
             except Exception as exc:  # pragma: no cover - defensive guard
+                self._release_sensor(sensor)
                 self._sensor = None
                 message = f"Failed to read distance: {exc}"
                 reading = self._handle_invalid_sample(now, message)
