@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import sys
+import types
+
 import pytest
 
 pytest.importorskip("numpy")
@@ -156,12 +159,12 @@ def test_distance_overlay_handles_non_numpy_frames() -> None:
     assert result == frame
 
 
-def test_distance_monitor_close_releases_sensor_and_i2c() -> None:
+def test_distance_monitor_close_only_releases_supplied_sensor() -> None:
     class _StubI2CBus:
         def __init__(self) -> None:
             self.deinit_called = False
 
-        def deinit(self) -> None:
+        def deinit(self) -> None:  # pragma: no cover - should not be called
             self.deinit_called = True
 
     class _StubDevice:
@@ -169,7 +172,7 @@ def test_distance_monitor_close_releases_sensor_and_i2c() -> None:
             self.i2c = bus
             self.deinit_called = False
 
-        def deinit(self) -> None:
+        def deinit(self) -> None:  # pragma: no cover - should not be called
             self.deinit_called = True
 
     class _ClosableSensor:
@@ -190,7 +193,47 @@ def test_distance_monitor_close_releases_sensor_and_i2c() -> None:
     monitor.close()
 
     assert sensor.deinit_called is True
-    assert device.deinit_called is True
-    assert bus.deinit_called is True
+    assert device.deinit_called is False
+    assert bus.deinit_called is False
+    assert monitor.last_error is None
+
+
+def test_distance_monitor_close_releases_owned_bus(monkeypatch: pytest.MonkeyPatch) -> None:
+    created: dict[str, object] = {}
+
+    class _StubBus:
+        def __init__(self) -> None:
+            self.deinit_called = False
+
+        def deinit(self) -> None:
+            self.deinit_called = True
+
+    class _StubVL53:
+        def __init__(self, i2c: object, *, address: int = DistanceMonitor.DEFAULT_I2C_ADDRESS) -> None:
+            created["sensor"] = self
+            created["bus"] = i2c
+            created["address"] = address
+            self.distance = 100.0
+            self.deinit_called = False
+
+        def deinit(self) -> None:
+            self.deinit_called = True
+
+    bus = _StubBus()
+    monkeypatch.setitem(sys.modules, "adafruit_vl53l1x", types.SimpleNamespace(VL53L1X=_StubVL53))
+    monkeypatch.setitem(sys.modules, "board", types.SimpleNamespace(I2C=lambda: bus))
+
+    monitor = DistanceMonitor(update_interval=0.0)
+    reading = monitor.read()
+
+    assert reading.available is True
+
+    monitor.close()
+
+    sensor = created["sensor"]
+    assert isinstance(sensor, _StubVL53)
+    assert sensor.deinit_called is True
+    assert isinstance(created["bus"], _StubBus)
+    assert created["bus"].deinit_called is True
     assert monitor.last_error is None
 

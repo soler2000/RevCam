@@ -188,12 +188,12 @@ def test_battery_monitor_reports_address_hint_on_init_failure(
     assert monitor.last_error == reading.error
 
 
-def test_battery_monitor_close_releases_sensor_and_i2c() -> None:
+def test_battery_monitor_close_only_releases_supplied_sensor() -> None:
     class _StubI2CBus:
         def __init__(self) -> None:
             self.deinit_called = False
 
-        def deinit(self) -> None:
+        def deinit(self) -> None:  # pragma: no cover - should not be called
             self.deinit_called = True
 
     class _StubDevice:
@@ -201,7 +201,7 @@ def test_battery_monitor_close_releases_sensor_and_i2c() -> None:
             self.i2c = bus
             self.deinit_called = False
 
-        def deinit(self) -> None:
+        def deinit(self) -> None:  # pragma: no cover - should not be called
             self.deinit_called = True
 
     class _ClosableSensor(_StubSensor):
@@ -222,8 +222,50 @@ def test_battery_monitor_close_releases_sensor_and_i2c() -> None:
     monitor.close()
 
     assert sensor.deinit_called is True
-    assert device.deinit_called is True
-    assert bus.deinit_called is True
+    assert device.deinit_called is False
+    assert bus.deinit_called is False
+    assert monitor.last_error is None
+
+
+def test_battery_monitor_close_releases_owned_bus(monkeypatch: pytest.MonkeyPatch) -> None:
+    created: dict[str, object] = {}
+
+    class _StubBus:
+        def __init__(self) -> None:
+            self.deinit_called = False
+
+        def deinit(self) -> None:
+            self.deinit_called = True
+
+    class _StubINA219:
+        def __init__(self, bus: object, *, addr: int = BatteryMonitor.DEFAULT_I2C_ADDRESS) -> None:
+            created["sensor"] = self
+            created["bus"] = bus
+            created["addr"] = addr
+            self.bus_voltage = 4.0
+            self.shunt_voltage = 0.0
+            self.current = None
+            self.deinit_called = False
+
+        def deinit(self) -> None:
+            self.deinit_called = True
+
+    bus = _StubBus()
+    monkeypatch.setitem(sys.modules, "adafruit_ina219", types.SimpleNamespace(INA219=_StubINA219))
+    monkeypatch.setitem(sys.modules, "board", types.SimpleNamespace(I2C=lambda: bus))
+
+    monitor = BatteryMonitor()
+    reading = monitor.read()
+
+    assert reading.available is True
+
+    monitor.close()
+
+    sensor = created["sensor"]
+    assert isinstance(sensor, _StubINA219)
+    assert sensor.deinit_called is True
+    assert isinstance(created["bus"], _StubBus)
+    assert created["bus"].deinit_called is True
     assert monitor.last_error is None
 
 

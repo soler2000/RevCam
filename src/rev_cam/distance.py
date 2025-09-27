@@ -162,6 +162,7 @@ class DistanceMonitor:
         else:
             self._calibration = DistanceCalibration(calibration.offset_m, calibration.scale)
         self._owned_i2c_bus: object | None = None
+        self._owns_i2c_bus = False
 
     @property
     def last_error(self) -> str | None:
@@ -185,6 +186,8 @@ class DistanceMonitor:
                 i2c = ExtendedI2C(self._i2c_bus)
             except Exception as exc:  # pragma: no cover - hardware dependency
                 raise RuntimeError(f"Unable to access I2C bus {self._i2c_bus}: {exc}") from exc
+            self._owned_i2c_bus = i2c
+            self._owns_i2c_bus = True
         else:
             try:  # pragma: no cover - hardware dependency
                 import board  # type: ignore
@@ -195,8 +198,8 @@ class DistanceMonitor:
                 i2c = board.I2C()  # type: ignore[attr-defined]
             except Exception as exc:  # pragma: no cover - hardware dependency
                 raise RuntimeError("Unable to access I2C bus") from exc
-
-        self._owned_i2c_bus = i2c
+            self._owned_i2c_bus = i2c
+            self._owns_i2c_bus = True
         try:  # pragma: no cover - hardware dependency
             sensor = adafruit_vl53l1x.VL53L1X(i2c, address=self._i2c_address)
         except Exception as exc:  # pragma: no cover - hardware dependency
@@ -222,50 +225,32 @@ class DistanceMonitor:
                 except Exception:  # pragma: no cover - defensive guard
                     pass
                 break
-        self._release_i2c_device(getattr(sensor, "i2c_device", None))
-        self._release_i2c_device(getattr(sensor, "_i2c_device", None))
-        self._release_i2c_device(getattr(sensor, "device", None))
-        self._release_i2c_device(getattr(sensor, "_device", None))
-
-    def _release_i2c_device(self, device: object | None) -> None:
-        if device is None:
-            return
-        unlock = getattr(device, "unlock", None)
-        if callable(unlock):
-            try:
-                unlock()
-            except Exception:  # pragma: no cover - defensive guard
-                pass
-        for method_name in ("deinit", "close", "shutdown"):
-            method = getattr(device, method_name, None)
-            if callable(method):
+        for attr in ("i2c_device", "_i2c_device", "device", "_device"):
+            device = getattr(sensor, attr, None)
+            if device is None:
+                continue
+            unlock = getattr(device, "unlock", None)
+            if callable(unlock):
                 try:
-                    method()
+                    unlock()
                 except Exception:  # pragma: no cover - defensive guard
                     pass
-                break
-        for attr in ("i2c", "_i2c", "bus", "_bus"):
-            resource = getattr(device, attr, None)
-            if resource is not None:
-                self._close_i2c_resource(resource)
 
     def _release_owned_i2c_bus(self) -> None:
         bus = self._owned_i2c_bus
         self._owned_i2c_bus = None
-        self._close_i2c_resource(bus)
-
-    @staticmethod
-    def _close_i2c_resource(resource: object | None) -> None:
-        if resource is None:
+        owns_bus = self._owns_i2c_bus
+        self._owns_i2c_bus = False
+        if not owns_bus or bus is None:
             return
-        unlock = getattr(resource, "unlock", None)
+        unlock = getattr(bus, "unlock", None)
         if callable(unlock):
             try:
                 unlock()
             except Exception:  # pragma: no cover - defensive guard
                 pass
         for method_name in ("deinit", "close", "shutdown"):
-            method = getattr(resource, method_name, None)
+            method = getattr(bus, method_name, None)
             if callable(method):
                 try:
                     method()
