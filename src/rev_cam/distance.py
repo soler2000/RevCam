@@ -16,7 +16,6 @@ except ImportError:  # pragma: no cover - optional dependency
     _np = None
 
 from .overlay_text import (
-    apply_background as _apply_background,
     draw_text as _draw_text,
     measure_text as _measure_text,
 )
@@ -344,7 +343,8 @@ class DistanceMonitor:
 
     def _apply_calibration(self, distance_m: float) -> float:
         calibration = self._calibration
-        return distance_m * calibration.scale + calibration.offset_m
+        calibrated = distance_m * calibration.scale + calibration.offset_m
+        return max(0.0, calibrated)
 
     def get_calibration(self) -> DistanceCalibration:
         with self._lock:
@@ -474,17 +474,21 @@ _ZONE_LABELS = {
 }
 
 def create_distance_overlay(
-    monitor: DistanceMonitor, zonedist_provider: Callable[[], DistanceZones]
+    monitor: DistanceMonitor,
+    zonedist_provider: Callable[[], DistanceZones],
+    enabled_provider: Callable[[], bool] | None = None,
 ):
     """Return an overlay function that renders the current distance reading."""
 
     def _overlay(frame):
+        reading = monitor.read()
+        if enabled_provider is not None and not enabled_provider():
+            return frame
+
         if _np is None or not isinstance(frame, _np.ndarray):  # pragma: no cover - optional path
-            monitor.read()
             return frame
 
         zones = zonedist_provider()
-        reading = monitor.read()
         zone = zones.classify(reading.distance_m)
         return _render_distance_overlay(frame, reading, zone)
 
@@ -496,7 +500,7 @@ def _render_distance_overlay(frame, reading: DistanceReading, zone: str | None):
         return frame
 
     height, width = frame.shape[:2]
-    if height < 24 or width < 60:
+    if height < 48 or width < 80:
         return frame
 
     zone_key = zone or "unavailable"
@@ -504,40 +508,100 @@ def _render_distance_overlay(frame, reading: DistanceReading, zone: str | None):
     label = _ZONE_LABELS.get(zone_key, _ZONE_LABELS["unavailable"])
 
     if reading.distance_m is not None and math.isfinite(reading.distance_m):
-        distance_text = f"{reading.distance_m:.1f}M"
+        distance_text = f"{reading.distance_m:.1f} m"
     else:
         distance_text = "---"
 
-    lines = [distance_text, label]
+    main_scale = max(4, min(width, height) // 80)
+    secondary_scale = max(2, main_scale // 2)
+    line_spacing = max(4, secondary_scale)
 
-    scale = max(2, min(width, height) // 200)
-    padding = 4 * scale
-    line_spacing = 2 * scale
-    glyph_width = 5 * scale
-    glyph_height = 7 * scale
-    char_spacing = 1 * scale
+    line_specs: list[tuple[str, int, float]] = [
+        (distance_text, main_scale, 0.8),
+        (label, secondary_scale, 0.55),
+    ]
 
-    line_widths = [_measure_text(line, glyph_width, char_spacing) for line in lines]
-    box_width = max(line_widths) + padding * 2
-    box_height = glyph_height * len(lines) + padding * 2 + line_spacing * (len(lines) - 1)
+    measurements: list[tuple[int, int]] = []
+    for text, scale, _ in line_specs:
+        glyph_width = 5 * scale
+        char_spacing = 1 * scale
+        text_width = _measure_text(text, glyph_width, char_spacing)
+        text_height = 7 * scale
+        measurements.append((text_width, text_height))
 
-    x = padding * 2
-    y = padding * 2
-    if x + box_width > width:
-        x = max(0, width - box_width - padding)
-    if y + box_height > height:
-        y = max(0, height - box_height - padding)
+    block_width = max(width for width, _ in measurements)
+    block_height = sum(height for _, height in measurements) + line_spacing * (len(line_specs) - 1)
 
-    _apply_background(frame, x, y, box_width, box_height, colour)
+    bottom_margin = max(line_spacing * 2, main_scale * 2)
+    start_x = max(0, (width - block_width) // 2)
+    start_y = max(0, height - bottom_margin - block_height)
 
-    text_x = x + padding
-    text_y = y + padding
-    for line, line_width in zip(lines, line_widths):
-        offset_x = text_x
-        _draw_text(frame, line, offset_x, text_y, scale, colour)
-        text_y += glyph_height + line_spacing
+    cursor_y = start_y
+    for (text, scale, alpha), (line_width, line_height) in zip(line_specs, measurements):
+        offset_x = start_x + max(0, (block_width - line_width) // 2)
+        _blend_text(frame, text, offset_x, cursor_y, scale, colour, alpha)
+        cursor_y += line_height + line_spacing
 
     return frame
+
+
+def _blend_text(
+    frame,
+    text: str,
+    x: int,
+    y: int,
+    scale: int,
+    colour: tuple[int, int, int],
+    alpha: float = 0.7,
+) -> None:
+    if _np is None or not isinstance(frame, _np.ndarray):  # pragma: no cover - optional guard
+        return
+    if frame.ndim < 3:
+        return
+    alpha = float(alpha)
+    if alpha <= 0.0:
+        return
+    glyph_width = 5 * scale
+    char_spacing = 1 * scale
+    text_width = _measure_text(text, glyph_width, char_spacing)
+    text_height = 7 * scale
+    if text_width <= 0 or text_height <= 0:
+        return
+
+    channels = frame.shape[2] if frame.ndim >= 3 else 1
+    colour_array = _np.array(colour, dtype=_np.uint8)
+    if channels >= 3:
+        buffer = _np.zeros((text_height, text_width, channels), dtype=frame.dtype)
+        target = buffer if channels == 3 else buffer[..., :3]
+        draw_colour = tuple(int(c) for c in colour_array[:3])
+        _draw_text(target, text, 0, 0, scale, draw_colour)
+    else:
+        buffer = _np.zeros((text_height, text_width), dtype=frame.dtype)
+        draw_colour = int(colour_array[0]) if colour_array.size else 255
+        _draw_text(buffer, text, 0, 0, scale, draw_colour)
+
+    x0 = max(0, x)
+    y0 = max(0, y)
+    x1 = min(frame.shape[1], x + text_width)
+    y1 = min(frame.shape[0], y + text_height)
+    if x1 <= x0 or y1 <= y0:
+        return
+
+    frame_slice = frame[y0:y1, x0:x1].astype(_np.float32)
+    buffer_slice = buffer[y0 - y : y1 - y, x0 - x : x1 - x].astype(_np.float32)
+    if frame_slice.ndim == 2:
+        mask = buffer_slice > 0
+    else:
+        mask = _np.any(buffer_slice > 0, axis=2)
+    if not _np.any(mask):
+        return
+    alpha = min(1.0, max(0.0, alpha))
+    if frame_slice.ndim == 2:
+        blended = frame_slice[mask] * (1.0 - alpha) + buffer_slice[mask] * alpha
+    else:
+        blended = frame_slice[mask] * (1.0 - alpha) + buffer_slice[mask] * alpha
+    frame_slice[mask] = _np.clip(blended, 0, 255)
+    frame[y0:y1, x0:x1] = frame_slice.astype(frame.dtype)
 __all__ = [
     "DistanceCalibration",
     "DistanceMonitor",

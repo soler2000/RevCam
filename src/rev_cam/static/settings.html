@@ -188,6 +188,75 @@
       input[type="checkbox"]:active {
         transform: scale(0.92);
       }
+      .toggle-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-lg);
+        flex-wrap: wrap;
+      }
+      .toggle-text {
+        flex: 1;
+        min-width: 12rem;
+      }
+      .toggle-text h3 {
+        margin: 0;
+      }
+      .toggle-text p {
+        margin: var(--space-sm) 0 0;
+      }
+      .switch-control {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        cursor: pointer;
+      }
+      .switch-control input {
+        position: absolute;
+        opacity: 0;
+        width: 0;
+        height: 0;
+      }
+      .switch-track {
+        width: 2.75rem;
+        height: 1.5rem;
+        border-radius: var(--radius-pill);
+        background: var(--surface-soft);
+        box-shadow: inset 0 0 0 1px var(--border-subtle);
+        display: inline-flex;
+        align-items: center;
+        justify-content: flex-start;
+        padding: 0 0.3rem;
+        transition: background var(--transition), box-shadow var(--transition);
+      }
+      .switch-thumb {
+        width: 1.1rem;
+        height: 1.1rem;
+        border-radius: var(--radius-pill);
+        background: var(--text-muted);
+        transition: transform var(--transition), background var(--transition);
+        transform: translateX(0);
+      }
+      .switch-control input:checked + .switch-track {
+        background: var(--accent);
+        box-shadow: inset 0 0 0 1px var(--accent-active);
+      }
+      .switch-control input:checked + .switch-track .switch-thumb {
+        background: var(--text-on-accent);
+        transform: translateX(1.1rem);
+      }
+      .switch-control input:focus-visible + .switch-track {
+        outline: none;
+        box-shadow: inset 0 0 0 1px var(--accent), 0 0 0 4px var(--accent-soft);
+      }
+      .switch-control input:disabled + .switch-track {
+        opacity: 0.5;
+        cursor: not-allowed;
+        box-shadow: inset 0 0 0 1px var(--border-muted);
+      }
+      .switch-control input:disabled + .switch-track .switch-thumb {
+        background: var(--text-muted);
+      }
       input[type="range"] {
         width: 100%;
         margin-top: var(--space-xs);
@@ -1467,6 +1536,37 @@
             </div>
           </section>
 
+          <section class="card">
+            <div class="toggle-row">
+              <div class="toggle-text" id="distance-overlay-text">
+                <h3 id="distance-overlay-heading">Distance overlay</h3>
+                <p id="distance-overlay-description" class="muted helper-text">
+                  Display the live distance measurement on the camera feed.
+                </p>
+              </div>
+              <label
+                class="switch-control"
+                aria-labelledby="distance-overlay-heading"
+                aria-describedby="distance-overlay-description"
+              >
+                <input
+                  type="checkbox"
+                  id="distance-overlay-toggle"
+                  aria-describedby="distance-overlay-description"
+                />
+                <span class="switch-track" aria-hidden="true">
+                  <span class="switch-thumb"></span>
+                </span>
+              </label>
+            </div>
+            <p
+              id="distance-overlay-status"
+              class="muted helper-text status-text"
+              role="status"
+              aria-live="polite"
+            ></p>
+          </section>
+
           <form id="distance-calibration-form" class="card">
             <h2>Calibration</h2>
             <p class="muted helper-text">
@@ -2033,6 +2133,8 @@
       const distanceZone = document.getElementById("distance-zone");
       const distanceError = document.getElementById("distance-error");
       const distanceRefreshButton = document.getElementById("distance-refresh");
+      const distanceOverlayToggle = document.getElementById("distance-overlay-toggle");
+      const distanceOverlayStatus = document.getElementById("distance-overlay-status");
       const distanceZonesForm = document.getElementById("distance-zones-form");
       const distanceZonesStatus = document.getElementById("distance-zones-status");
       const distanceInputs = distanceZonesForm
@@ -2053,6 +2155,7 @@
         : null;
       let distanceLoading = false;
       let distanceCalibrationStatusTimer = null;
+      let distanceOverlayStatusTimer = null;
       if (distanceInputs) {
         for (const input of Object.values(distanceInputs)) {
           if (input instanceof HTMLInputElement) {
@@ -3240,6 +3343,28 @@
         }
       }
 
+      function setDistanceOverlayStatus(message, options = {}) {
+        if (!distanceOverlayStatus) {
+          return;
+        }
+        if (distanceOverlayStatusTimer) {
+          window.clearTimeout(distanceOverlayStatusTimer);
+          distanceOverlayStatusTimer = null;
+        }
+        distanceOverlayStatus.textContent = message || "";
+        if (message && options.persistent !== true) {
+          distanceOverlayStatusTimer = window.setTimeout(() => {
+            if (
+              distanceOverlayStatus &&
+              distanceOverlayStatus.textContent === message
+            ) {
+              distanceOverlayStatus.textContent = "";
+            }
+            distanceOverlayStatusTimer = null;
+          }, 4000);
+        }
+      }
+
       function formatCalibrationValue(value, fractionDigits) {
         if (typeof value !== "number" || !Number.isFinite(value)) {
           return "";
@@ -3316,6 +3441,19 @@
         distanceSummary.textContent = `${formatDistance(data.distance_m)} • ${label}`;
       }
 
+      function updateDistanceOverlayToggle(enabled, options = {}) {
+        if (!(distanceOverlayToggle instanceof HTMLInputElement)) {
+          return;
+        }
+        const shouldForce = options.forceUpdate === true;
+        if (!shouldForce && distanceOverlayToggle.dataset.userToggled === "true") {
+          return;
+        }
+        const desired = enabled === true;
+        distanceOverlayToggle.checked = desired;
+        distanceOverlayToggle.dataset.serverValue = desired ? "true" : "false";
+      }
+
       function applyDistanceData(data, options = {}) {
         if (distanceValue) {
           if (
@@ -3343,6 +3481,11 @@
         if (data && data.calibration) {
           const forceUpdate = options.updateCalibration === true || options.updateInputs === true;
           updateDistanceCalibrationInputs(data.calibration, forceUpdate);
+        }
+        if (distanceOverlayToggle) {
+          const enabled = data && data.overlay_enabled === true;
+          const forceUpdate = options.updateInputs === true || options.updateCalibration === true;
+          updateDistanceOverlayToggle(enabled, { forceUpdate });
         }
       }
 
@@ -3937,6 +4080,58 @@
       if (distanceRefreshButton) {
         distanceRefreshButton.addEventListener("click", () => {
           refreshDistanceReading(true).catch((err) => console.error(err));
+        });
+      }
+
+      if (distanceOverlayToggle instanceof HTMLInputElement) {
+        distanceOverlayToggle.dataset.serverValue = distanceOverlayToggle.checked
+          ? "true"
+          : "false";
+        distanceOverlayToggle.addEventListener("change", async () => {
+          if (!(distanceOverlayToggle instanceof HTMLInputElement)) {
+            return;
+          }
+          const previous = distanceOverlayToggle.dataset.serverValue === "true";
+          const desired = distanceOverlayToggle.checked;
+          distanceOverlayToggle.dataset.userToggled = "true";
+          distanceOverlayToggle.dataset.updating = "true";
+          distanceOverlayToggle.disabled = true;
+          setDistanceOverlayStatus("Saving…", { persistent: true });
+          try {
+            const response = await fetch("/api/distance/overlay", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ enabled: desired }),
+            });
+            if (!response.ok) {
+              let errorDetail = "Unable to update distance overlay.";
+              try {
+                const errorData = await response.json();
+                if (errorData && typeof errorData.detail === "string") {
+                  errorDetail = errorData.detail;
+                }
+              } catch (err) {
+                console.error(err);
+              }
+              throw new Error(errorDetail);
+            }
+            const result = await response.json();
+            const saved = result && result.overlay_enabled === true;
+            updateDistanceOverlayToggle(saved, { forceUpdate: true });
+            setDistanceOverlayStatus(saved ? "Overlay enabled" : "Overlay disabled");
+          } catch (error) {
+            console.error(error);
+            updateDistanceOverlayToggle(previous, { forceUpdate: true });
+            const message =
+              error && typeof error.message === "string" && error.message
+                ? error.message
+                : "Unable to update distance overlay.";
+            setDistanceOverlayStatus(message, { persistent: true });
+          } finally {
+            distanceOverlayToggle.disabled = false;
+            delete distanceOverlayToggle.dataset.userToggled;
+            delete distanceOverlayToggle.dataset.updating;
+          }
         });
       }
 
