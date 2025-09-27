@@ -16,6 +16,8 @@ except ImportError:  # pragma: no cover - optional dependency
     _np = None
 
 from .overlay_text import (
+    FONT_BASE_HEIGHT as _FONT_HEIGHT,
+    FONT_BASE_WIDTH as _FONT_WIDTH,
     draw_text as _draw_text,
     measure_text as _measure_text,
 )
@@ -523,10 +525,10 @@ def _render_distance_overlay(frame, reading: DistanceReading, zone: str | None):
 
     measurements: list[tuple[int, int]] = []
     for text, scale, _ in line_specs:
-        glyph_width = 5 * scale
+        glyph_width = _FONT_WIDTH * scale
         char_spacing = 1 * scale
         text_width = _measure_text(text, glyph_width, char_spacing)
-        text_height = 7 * scale
+        text_height = _FONT_HEIGHT * scale
         measurements.append((text_width, text_height))
 
     block_width = max(width for width, _ in measurements)
@@ -561,10 +563,10 @@ def _blend_text(
     alpha = float(alpha)
     if alpha <= 0.0:
         return
-    glyph_width = 5 * scale
+    glyph_width = _FONT_WIDTH * scale
     char_spacing = 1 * scale
     text_width = _measure_text(text, glyph_width, char_spacing)
-    text_height = 7 * scale
+    text_height = _FONT_HEIGHT * scale
     if text_width <= 0 or text_height <= 0:
         return
 

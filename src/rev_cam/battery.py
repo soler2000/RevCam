@@ -15,6 +15,8 @@ except ImportError:  # pragma: no cover - optional dependency
     _np = None
 
 from .overlay_text import (
+    FONT_BASE_HEIGHT as _FONT_HEIGHT,
+    FONT_BASE_WIDTH as _FONT_WIDTH,
     apply_background as _apply_background,
     draw_text as _draw_text,
     measure_text as _measure_text,
@@ -571,8 +573,8 @@ def _render_battery_overlay(frame, reading: BatteryReading, limits: BatteryLimit
     scale = max(2, min(width, height) // 200)
     padding = 4 * scale
     line_spacing = 2 * scale
-    glyph_width = 5 * scale
-    glyph_height = 7 * scale
+    glyph_width = _FONT_WIDTH * scale
+    glyph_height = _FONT_HEIGHT * scale
     char_spacing = 1 * scale
 
     line_widths = [_measure_text(line, glyph_width, char_spacing) for line in lines]
