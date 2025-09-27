@@ -1545,6 +1545,15 @@
                   <ul id="diagnostics-picamera-hints" class="diagnostics-list"></ul>
                 </div>
               </div>
+              <div>
+                <h3>WebRTC stack</h3>
+                <p id="diagnostics-webrtc-status" class="diagnostics-picamera-status"></p>
+                <ul id="diagnostics-webrtc-details" class="diagnostics-list" hidden></ul>
+                <div id="diagnostics-webrtc-hints-block" hidden>
+                  <h4>Hints</h4>
+                  <ul id="diagnostics-webrtc-hints" class="diagnostics-list"></ul>
+                </div>
+              </div>
             </div>
             <p
               id="diagnostics-error"
@@ -2404,6 +2413,12 @@
         "diagnostics-picamera-hints-block",
       );
       const diagnosticsPicameraHints = document.getElementById("diagnostics-picamera-hints");
+      const diagnosticsWebrtcStatus = document.getElementById("diagnostics-webrtc-status");
+      const diagnosticsWebrtcDetails = document.getElementById("diagnostics-webrtc-details");
+      const diagnosticsWebrtcHintsBlock = document.getElementById(
+        "diagnostics-webrtc-hints-block",
+      );
+      const diagnosticsWebrtcHints = document.getElementById("diagnostics-webrtc-hints");
       const diagnosticsError = document.getElementById("diagnostics-error");
       let diagnosticsLoading = false;
       let diagnosticsStatusTimer = null;
@@ -4044,6 +4059,39 @@
         );
         if (diagnosticsPicameraHintsBlock) {
           diagnosticsPicameraHintsBlock.hidden = hintsCount === 0;
+        }
+        const webrtc =
+          data && typeof data.webrtc === "object" && data.webrtc !== null ? data.webrtc : {};
+        if (diagnosticsWebrtcStatus) {
+          const statusText =
+            typeof webrtc.status === "string" ? webrtc.status.trim() : "";
+          const classes = diagnosticsWebrtcStatus.classList;
+          classes.remove("ok", "error");
+          let summary;
+          if (statusText.toLowerCase() === "ok") {
+            summary = "WebRTC stack: OK";
+            classes.add("ok");
+          } else if (statusText) {
+            summary = `WebRTC stack status: ${statusText}`;
+            classes.add("error");
+          } else {
+            summary = "WebRTC stack status unknown.";
+          }
+          diagnosticsWebrtcStatus.textContent = summary;
+        }
+        const webrtcDetailsCount = renderDiagnosticsList(
+          diagnosticsWebrtcDetails,
+          webrtc && Array.isArray(webrtc.details) ? webrtc.details : [],
+        );
+        if (diagnosticsWebrtcDetails) {
+          diagnosticsWebrtcDetails.hidden = webrtcDetailsCount === 0;
+        }
+        const webrtcHintsCount = renderDiagnosticsList(
+          diagnosticsWebrtcHints,
+          webrtc && Array.isArray(webrtc.hints) ? webrtc.hints : [],
+        );
+        if (diagnosticsWebrtcHintsBlock) {
+          diagnosticsWebrtcHintsBlock.hidden = webrtcHintsCount === 0;
         }
       }
 
