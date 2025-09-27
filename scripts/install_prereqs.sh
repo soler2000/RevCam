@@ -54,6 +54,18 @@ packages=(
     libjpeg-dev
     zlib1g-dev
     pkg-config
+    libavdevice-dev
+    libavfilter-dev
+    libavformat-dev
+    libavcodec-dev
+    libavutil-dev
+    libswresample-dev
+    libswscale-dev
+    libsrtp2-dev
+    libopus-dev
+    libvpx-dev
+    libffi-dev
+    libssl-dev
 )
 
 if [[ "$RUN_UPDATE" == true ]]; then

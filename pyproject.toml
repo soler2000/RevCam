@@ -18,6 +18,7 @@ dependencies = [
     "zeroconf>=0.39",
     "adafruit-blinka>=8",
     "adafruit-circuitpython-neopixel>=6.3",
+    "av>=10",
     "aiortc>=1.7"
 ]
 

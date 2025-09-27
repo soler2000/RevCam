@@ -224,6 +224,16 @@ then
     set +x
 fi
 
+if ! python_module_present "av"; then
+    echo "Installing missing runtime dependency: av"
+    pip_install_package "av>=10"
+fi
+
+if ! python_module_present "aiortc"; then
+    echo "Installing missing runtime dependency: aiortc"
+    pip_install_package "aiortc>=1.7"
+fi
+
 if ! "$VENV_DIR/bin/python" - <<'PY'
 import importlib
 import sys
