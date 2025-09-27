@@ -7,7 +7,7 @@ import logging
 import math
 import subprocess
 from dataclasses import dataclass
-from typing import Awaitable, Callable, Iterable, Sequence
+from typing import TYPE_CHECKING, Awaitable, Callable, Iterable, Sequence
 
 try:  # pragma: no cover - optional dependency on numpy for overlays
     import numpy as _np
@@ -17,12 +17,17 @@ except ImportError:  # pragma: no cover - optional dependency
 from .overlay_text import (
     FONT_BASE_HEIGHT as _FONT_HEIGHT,
     FONT_BASE_WIDTH as _FONT_WIDTH,
-    apply_background as _apply_background,
     draw_text as _draw_text,
     measure_text as _measure_text,
 )
 
+if TYPE_CHECKING:
+    from .wifi import WiFiStatus
+
 SensorFactory = Callable[[], object]
+
+
+logger = logging.getLogger(__name__)
 
 
 class _DriverUnavailableError(RuntimeError):
@@ -732,18 +737,10 @@ _BATTERY_COLOURS = {
     "unavailable": (142, 142, 147),
 }
 
-_BATTERY_LABELS = {
-    "charging": "CHARGING",
-    "normal": "BATTERY",
-    "warning": "LOW",
-    "critical": "CRITICAL",
-    "unknown": "UNKNOWN",
-    "unavailable": "UNAVAILABLE",
-}
-
-
 def create_battery_overlay(
-    monitor: BatteryMonitor, limits_provider: Callable[[], BatteryLimits]
+    monitor: BatteryMonitor,
+    limits_provider: Callable[[], BatteryLimits],
+    wifi_status_provider: Callable[[], "WiFiStatus | None"] | None = None,
 ):
     """Return an overlay function that renders the current battery status."""
 
@@ -757,12 +754,24 @@ def create_battery_overlay(
             limits = limits_provider()
         except Exception:  # pragma: no cover - defensive guard
             limits = DEFAULT_BATTERY_LIMITS
-        return _render_battery_overlay(frame, reading, limits)
+        wifi_status = None
+        if wifi_status_provider is not None:
+            try:
+                wifi_status = wifi_status_provider()
+            except Exception:  # pragma: no cover - best effort logging
+                logger.debug("Wi-Fi status provider failed", exc_info=True)
+                wifi_status = None
+        return _render_battery_overlay(frame, reading, limits, wifi_status)
 
     return _overlay
 
 
-def _render_battery_overlay(frame, reading: BatteryReading, limits: BatteryLimits):
+def _render_battery_overlay(
+    frame,
+    reading: BatteryReading,
+    limits: BatteryLimits,
+    wifi_status: "WiFiStatus | None" = None,
+):
     if _np is None or not isinstance(frame, _np.ndarray):  # pragma: no cover - optional guard
         return frame
 
@@ -772,44 +781,85 @@ def _render_battery_overlay(frame, reading: BatteryReading, limits: BatteryLimit
 
     status = _classify_reading(reading, limits)
     colour = _BATTERY_COLOURS.get(status, _BATTERY_COLOURS["unavailable"])
-    label = _BATTERY_LABELS.get(status, _BATTERY_LABELS["unavailable"])
+    percentage = reading.percentage if reading.available else None
+    if percentage is not None and not math.isfinite(percentage):
+        percentage = None
 
-    if reading.available and reading.percentage is not None and math.isfinite(reading.percentage):
-        main_text = f"{reading.percentage:.0f}%"
+    voltage = reading.voltage if reading.available else None
+    if voltage is not None and not math.isfinite(voltage):
+        voltage = None
+
+    wifi_level, wifi_text = _prepare_wifi_display(wifi_status)
+
+    if percentage is not None:
+        percentage_text = f"{percentage:.0f}%"
     else:
-        main_text = "---"
+        percentage_text = None
 
-    lines = [main_text, label]
+    if voltage is not None:
+        voltage_text = f"{voltage:.2f}V"
+    else:
+        voltage_text = "---"
 
-    if reading.voltage is not None and math.isfinite(reading.voltage):
-        lines.append(f"{reading.voltage:.2f}V")
+    if percentage_text:
+        battery_text = f"{percentage_text} {voltage_text}"
+    else:
+        battery_text = voltage_text
 
     scale = max(2, min(width, height) // 200)
-    padding = 4 * scale
-    line_spacing = 2 * scale
     glyph_width = _FONT_WIDTH * scale
     glyph_height = _FONT_HEIGHT * scale
     char_spacing = 1 * scale
+    padding = 4 * scale
+    text_gap = 2 * scale
 
-    line_widths = [_measure_text(line, glyph_width, char_spacing) for line in lines]
-    box_width = max(line_widths) + padding * 2
-    box_height = glyph_height * len(lines) + padding * 2 + line_spacing * (len(lines) - 1)
+    wifi_icon_width, wifi_icon_height = _wifi_icon_dimensions(scale)
+    battery_icon_width, battery_icon_height = _battery_icon_dimensions(scale)
 
-    margin = padding * 2
-    x = width - box_width - margin
-    y = margin
-    if x < padding:
-        x = padding
-    if y + box_height > height:
-        y = max(0, height - box_height - padding)
+    bar_height = max(
+        glyph_height + padding * 2,
+        wifi_icon_height + padding * 2,
+        battery_icon_height + padding * 2,
+    )
 
-    _apply_background(frame, x, y, box_width, box_height, colour)
+    _apply_top_bar(frame, bar_height)
 
-    text_x = x + padding
-    text_y = y + padding
-    for line in lines:
-        _draw_text(frame, line, text_x, text_y, scale, colour)
-        text_y += glyph_height + line_spacing
+    text_y = max(0, (bar_height - glyph_height) // 2)
+
+    wifi_icon_x = padding
+    wifi_icon_y = max(0, (bar_height - wifi_icon_height) // 2)
+    _draw_wifi_icon(frame, wifi_icon_x, wifi_icon_y, scale, wifi_level)
+
+    battery_text_width = _measure_text(battery_text, glyph_width, char_spacing)
+    if battery_text_width:
+        battery_total_width = battery_icon_width + text_gap + battery_text_width
+    else:
+        battery_total_width = battery_icon_width
+
+    battery_icon_x = max(padding, width - padding - battery_total_width)
+    battery_icon_y = max(0, (bar_height - battery_icon_height) // 2)
+    _draw_battery_icon(frame, battery_icon_x, battery_icon_y, scale, percentage, colour)
+
+    battery_text_x = battery_icon_x + battery_icon_width + (text_gap if battery_text_width else 0)
+
+    wifi_text_x = wifi_icon_x + wifi_icon_width + text_gap
+    wifi_text_width = _measure_text(wifi_text, glyph_width, char_spacing)
+    max_wifi_width = max(0, battery_icon_x - text_gap - wifi_text_x)
+    if wifi_text_width > max_wifi_width:
+        if max_wifi_width >= glyph_width:
+            wifi_text = "---"
+            wifi_text_width = _measure_text(wifi_text, glyph_width, char_spacing)
+        else:
+            wifi_text = ""
+            wifi_text_width = 0
+
+    text_colour = (255, 255, 255)
+    wifi_colour = text_colour
+
+    if wifi_text_width:
+        _draw_text(frame, wifi_text, wifi_text_x, text_y, scale, wifi_colour)
+    if battery_text_width:
+        _draw_text(frame, battery_text, battery_text_x, text_y, scale, text_colour)
 
     return frame
 
@@ -827,6 +877,209 @@ def _classify_reading(reading: BatteryReading, limits: BatteryLimits) -> str:
     if state == "normal":
         return "normal"
     return "unknown"
+
+
+def _prepare_wifi_display(status: "WiFiStatus | None") -> tuple[int, str]:
+    if status is None:
+        return 0, "---"
+
+    if getattr(status, "hotspot_active", False):
+        return 4, "HOTSPOT"
+
+    if getattr(status, "connected", False):
+        signal = getattr(status, "signal", None)
+        level = _signal_to_level(signal)
+        if level == 0:
+            level = 1
+        if isinstance(signal, (int, float)) and math.isfinite(signal):
+            value = max(0.0, min(100.0, float(signal)))
+            text = f"{value:.0f}%"
+        else:
+            text = "---"
+        return level, text
+
+    return 0, "NO WIFI"
+
+
+def _signal_to_level(signal: object) -> int:
+    try:
+        value = float(signal)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return 0
+    if not math.isfinite(value):
+        return 0
+    value = max(0.0, min(100.0, value))
+    if value >= 70.0:
+        return 4
+    if value >= 45.0:
+        return 3
+    if value >= 20.0:
+        return 2
+    if value > 5.0:
+        return 1
+    return 0
+
+
+def _apply_top_bar(frame, height: int) -> None:
+    if _np is None:
+        return
+    bar_height = max(0, min(height, frame.shape[0]))
+    if bar_height <= 0:
+        return
+    region = frame[:bar_height, :, :].astype(_np.float32)
+    blended = (region * 0.75).clip(0, 255).astype(frame.dtype)
+    frame[:bar_height, :, :] = blended
+    frame[bar_height - 1 : bar_height, :, :] = (60, 60, 60)
+
+
+def _wifi_icon_dimensions(scale: int) -> tuple[int, int]:
+    thickness = max(1, scale)
+    spacing = thickness
+    arcs = 3
+    base_radius = thickness * 2
+    max_radius = base_radius + arcs * (thickness + spacing)
+    width = int(math.ceil((max_radius + thickness) * 2))
+    height = int(math.ceil(max_radius + thickness))
+    return width, height
+
+
+def _draw_wifi_icon(frame, x: int, y: int, scale: int, level: int) -> None:
+    width, height = _wifi_icon_dimensions(scale)
+    thickness = max(1, scale)
+    spacing = thickness
+    arcs = 3
+    base_radius = thickness * 2
+    centre_x = x + width / 2.0
+    centre_y = y + height
+
+    palette = {
+        0: (190, 190, 190),  # muted grey when nothing is available
+        1: (60, 60, 220),  # red tint for extremely weak signal
+        2: (0, 165, 255),  # amber for middling reception
+        3: (60, 200, 60),  # green for good connection
+        4: (40, 220, 40),  # brighter green for excellent connection
+    }
+
+    active_colour = palette.get(max(0, min(4, level)), (255, 255, 255))
+    inactive_colour = (190, 190, 190)
+
+    x0 = max(0, x)
+    y0 = max(0, y)
+    x1 = min(frame.shape[1], x + width)
+    y1 = min(frame.shape[0], y + height)
+    if x0 >= x1 or y0 >= y1:
+        return
+
+    for py in range(y0, y1):
+        for px in range(x0, x1):
+            dx = (px + 0.5) - centre_x
+            dy = centre_y - (py + 0.5)
+            if dy < 0:
+                continue
+            distance = math.hypot(dx, dy)
+            for arc_index in range(arcs):
+                radius = base_radius + (arc_index + 1) * (thickness + spacing)
+                if radius - thickness <= distance <= radius + thickness:
+                    colour = active_colour if level >= arc_index + 2 else inactive_colour
+                    frame[py, px] = colour
+                    break
+
+    dot_radius = thickness + max(0, scale // 2)
+    dot_cx = int(round(centre_x))
+    dot_cy = min(frame.shape[0] - 1, int(round(centre_y - thickness)))
+    dot_colour = active_colour if level >= 1 else inactive_colour
+    _fill_circle(frame, dot_cx, dot_cy, dot_radius, dot_colour)
+
+
+def _battery_icon_dimensions(scale: int) -> tuple[int, int]:
+    body_width = 12 * scale
+    body_height = 6 * scale
+    cap_width = max(scale, int(round(1.5 * scale)))
+    icon_width = body_width + cap_width + scale
+    icon_height = body_height
+    return icon_width, icon_height
+
+
+def _draw_battery_icon(
+    frame,
+    x: int,
+    y: int,
+    scale: int,
+    percentage: float | None,
+    fill_colour: tuple[int, int, int],
+) -> None:
+    body_width = 12 * scale
+    body_height = 6 * scale
+    cap_width = max(scale, int(round(1.5 * scale)))
+    cap_gap = scale
+    thickness = max(1, scale)
+
+    icon_width = body_width + cap_gap + cap_width
+    icon_height = body_height
+
+    if x >= frame.shape[1] or y >= frame.shape[0]:
+        return
+
+    border_colour = (255, 255, 255)
+    empty_colour = (40, 40, 40)
+
+    _draw_rect_outline(frame, x, y, body_width, body_height, thickness, border_colour)
+
+    inner_x = x + thickness
+    inner_y = y + thickness
+    inner_width = max(0, body_width - thickness * 2)
+    inner_height = max(0, body_height - thickness * 2)
+    if inner_width and inner_height:
+        _fill_rect(frame, inner_x, inner_y, inner_width, inner_height, empty_colour)
+        if percentage is not None:
+            ratio = max(0.0, min(1.0, float(percentage) / 100.0))
+        else:
+            ratio = 0.0
+        fill_width = int(round(inner_width * ratio))
+        if fill_width > 0:
+            _fill_rect(frame, inner_x, inner_y, fill_width, inner_height, fill_colour)
+
+    cap_height = max(thickness * 2, body_height // 2)
+    cap_x = x + body_width + cap_gap
+    cap_y = y + (body_height - cap_height) // 2
+    _fill_rect(frame, cap_x, cap_y, cap_width, cap_height, border_colour)
+
+
+def _draw_rect_outline(
+    frame, x: int, y: int, width: int, height: int, thickness: int, colour: tuple[int, int, int]
+) -> None:
+    if thickness <= 0:
+        return
+    _fill_rect(frame, x, y, width, thickness, colour)
+    _fill_rect(frame, x, y + height - thickness, width, thickness, colour)
+    _fill_rect(frame, x, y, thickness, height, colour)
+    _fill_rect(frame, x + width - thickness, y, thickness, height, colour)
+
+
+def _fill_rect(frame, x: int, y: int, width: int, height: int, colour: tuple[int, int, int]) -> None:
+    x0 = max(0, x)
+    y0 = max(0, y)
+    x1 = min(frame.shape[1], x + width)
+    y1 = min(frame.shape[0], y + height)
+    if x1 <= x0 or y1 <= y0:
+        return
+    frame[y0:y1, x0:x1] = colour
+
+
+def _fill_circle(frame, cx: int, cy: int, radius: int, colour: tuple[int, int, int]) -> None:
+    if radius <= 0:
+        return
+    x0 = max(0, cx - radius)
+    y0 = max(0, cy - radius)
+    x1 = min(frame.shape[1], cx + radius + 1)
+    y1 = min(frame.shape[0], cy + radius + 1)
+    radius_sq = radius * radius
+    for py in range(y0, y1):
+        dy = py - cy
+        for px in range(x0, x1):
+            dx = px - cx
+            if dx * dx + dy * dy <= radius_sq:
+                frame[py, px] = colour
 
 
 def _pairwise(values: Sequence[tuple[float, float]]) -> Iterable[tuple[tuple[float, float], tuple[float, float]]]:
