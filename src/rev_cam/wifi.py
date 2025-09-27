@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import logging
+from collections import deque
 from dataclasses import dataclass
 import math
 import subprocess
+import threading
 import time
-from typing import Iterable, Sequence
+from typing import Deque, Iterable, Sequence
 
 from .mdns import MDNSAdvertiser
 
@@ -88,6 +90,29 @@ class WiFiStatus:
             "error": self.error,
             "detail": self.detail,
         }
+
+
+@dataclass(slots=True)
+class WiFiLogEntry:
+    """Represents a Wi-Fi operation event for troubleshooting."""
+
+    timestamp: float
+    event: str
+    message: str
+    status: dict[str, object | None] | None = None
+    metadata: dict[str, object | None] | None = None
+
+    def to_dict(self) -> dict[str, object | None]:
+        payload: dict[str, object | None] = {
+            "timestamp": self.timestamp,
+            "event": self.event,
+            "message": self.message,
+        }
+        if self.status is not None:
+            payload["status"] = self.status
+        if self.metadata:
+            payload["metadata"] = self.metadata
+        return payload
 
 
 class WiFiBackend:
@@ -338,6 +363,16 @@ class NMCLIBackend(WiFiBackend):
         return list(self._scan_output(rescan=True))
 
     def connect(self, ssid: str, password: str | None) -> WiFiStatus:
+        """Connect to a Wi-Fi network, preferring saved profiles when available."""
+
+        if not password:
+            try:
+                saved_profiles = self._parse_saved_profiles()
+            except WiFiError:
+                saved_profiles = set()
+            if ssid in saved_profiles:
+                return self.activate_profile(ssid)
+
         interface = self._get_interface()
         args = ["nmcli", "device", "wifi", "connect", ssid]
         if password:
@@ -436,6 +471,8 @@ class WiFiManager:
                     "mDNS advertising disabled: %s", exc
                 )
                 self._mdns = None
+        self._log: Deque[WiFiLogEntry] = deque(maxlen=200)
+        self._log_lock = threading.Lock()
         try:
             initial_status = self._backend.get_status()
         except WiFiError:
@@ -471,27 +508,100 @@ class WiFiManager:
         if not isinstance(ssid, str) or not ssid.strip():
             raise WiFiError("SSID must be a non-empty string")
         cleaned_ssid = ssid.strip()
+        if password is None:
+            cleaned_password: str | None = None
+        elif isinstance(password, str):
+            cleaned_password = password if password.strip() else None
+        else:
+            raise WiFiError("Password must be a string or null")
+        attempt_metadata: dict[str, object | None] = {
+            "target": cleaned_ssid,
+            "development_mode": development_mode,
+        }
+        if rollback_timeout is not None:
+            attempt_metadata["requested_rollback"] = max(0.0, rollback_timeout)
+        attempt_metadata["password_provided"] = cleaned_password is not None
+        self._record_log(
+            "connect_attempt",
+            f"Attempting to connect to {cleaned_ssid}.",
+            metadata=attempt_metadata,
+        )
         previous_status = self._fetch_status()
         previous_profile = previous_status.profile if previous_status.connected else None
-        status = self._backend.connect(cleaned_ssid, password)
+        try:
+            status = self._backend.connect(cleaned_ssid, cleaned_password)
+        except WiFiError as exc:
+            message = str(exc).strip() or "Connection failed"
+            self._record_log(
+                "connect_error",
+                f"Connection to {cleaned_ssid} failed: {message}.",
+                metadata=attempt_metadata,
+            )
+            raise
         self._update_mdns(status)
-        if not development_mode:
-            return status
-        timeout = self._rollback_timeout if rollback_timeout is None else max(0.0, rollback_timeout)
-        if timeout <= 0:
-            return status
+        effective_timeout = None
+        if development_mode:
+            base_timeout = (
+                self._rollback_timeout if rollback_timeout is None else max(0.0, rollback_timeout)
+            )
+            effective_timeout = base_timeout
+        result_metadata = dict(attempt_metadata)
+        if effective_timeout is not None:
+            result_metadata["effective_rollback"] = effective_timeout
+        monitor_required = False
         if status.connected and (status.ssid == cleaned_ssid or status.profile == cleaned_ssid):
+            message = f"Connected to {status.ssid or cleaned_ssid}."
+            self._record_log("connect_success", message, status=status, metadata=result_metadata)
+            if not development_mode:
+                return status
+            timeout = effective_timeout
+            if timeout is None or timeout <= 0:
+                return status
+            monitor_required = False
+        else:
+            detail = status.detail or "Connection did not report as active."
+            message = f"Connection to {cleaned_ssid} pending: {detail}"
+            self._record_log("connect_status", message, status=status, metadata=result_metadata)
+            if not development_mode:
+                return status
+            timeout = (
+                effective_timeout
+                if effective_timeout is not None
+                else self._rollback_timeout
+                if rollback_timeout is None
+                else max(0.0, rollback_timeout)
+            )
+            monitor_required = True
+        if timeout <= 0 or not monitor_required:
             return status
+        self._record_log(
+            "connect_monitor",
+            f"Monitoring connection to {cleaned_ssid} for up to {int(math.ceil(timeout))}s before rollback.",
+            status=status,
+            metadata=result_metadata,
+        )
         if not previous_profile:
             detail = status.detail or ""
             status.detail = (
                 f"{detail + ' ' if detail else ''}Development rollback skipped; previous network unknown."
+            )
+            self._record_log(
+                "connect_no_previous_profile",
+                status.detail,
+                status=status,
+                metadata=result_metadata,
             )
             return status
         deadline = time.monotonic() + timeout
         current = status
         while time.monotonic() < deadline:
             if current.connected and (current.ssid == cleaned_ssid or current.profile == cleaned_ssid):
+                self._record_log(
+                    "connect_confirmed",
+                    f"Confirmed connection to {cleaned_ssid} before rollback deadline.",
+                    status=current,
+                    metadata=result_metadata,
+                )
                 return current
             time.sleep(self._poll_interval)
             current = self._fetch_status()
@@ -500,6 +610,14 @@ class WiFiManager:
         restored.detail = (
             f"Connection to {cleaned_ssid} did not establish within {int(math.ceil(timeout))}s; "
             f"restored {previous_status.ssid or previous_profile}."
+        )
+        rollback_metadata = dict(result_metadata)
+        rollback_metadata["restored_profile"] = previous_profile
+        self._record_log(
+            "connect_rollback",
+            restored.detail,
+            status=restored,
+            metadata=rollback_metadata,
         )
         return restored
 
@@ -517,6 +635,18 @@ class WiFiManager:
         if password is not None and password.strip() and len(password.strip()) < 8:
             raise WiFiError("Hotspot password must be at least 8 characters")
         cleaned_password = password.strip() if isinstance(password, str) and password.strip() else None
+        attempt_metadata: dict[str, object | None] = {
+            "target": cleaned_ssid,
+            "development_mode": development_mode,
+            "password_provided": cleaned_password is not None,
+        }
+        if rollback_timeout is not None:
+            attempt_metadata["requested_rollback"] = max(0.0, rollback_timeout)
+        self._record_log(
+            "hotspot_enable_attempt",
+            f"Enabling hotspot {cleaned_ssid}.",
+            metadata=attempt_metadata,
+        )
         try:
             previous_status = self._fetch_status()
         except WiFiError:
@@ -534,23 +664,80 @@ class WiFiManager:
                     "Unable to enable hotspot: not authorized to control networking. "
                     "Ensure RevCam has permission to manage NetworkManager."
                 ) from exc
+            error_message = f"Unable to enable hotspot {cleaned_ssid}: {message}."
+            self._record_log(
+                "hotspot_enable_error",
+                error_message,
+                metadata=attempt_metadata,
+            )
             raise WiFiError(f"Unable to enable hotspot: {message}") from exc
         self._hotspot_profile = status.profile or self._hotspot_profile
         self._update_mdns(status)
-        if not development_mode:
-            return status
-        default_timeout = self._hotspot_rollback_timeout
-        timeout = default_timeout if rollback_timeout is None else max(0.0, rollback_timeout)
-        if timeout <= 0:
-            return status
+        effective_timeout = None
+        if development_mode:
+            base_timeout = (
+                self._hotspot_rollback_timeout
+                if rollback_timeout is None
+                else max(0.0, rollback_timeout)
+            )
+            effective_timeout = base_timeout
+        result_metadata = dict(attempt_metadata)
+        if effective_timeout is not None:
+            result_metadata["effective_rollback"] = effective_timeout
+        monitor_required = False
         if status.hotspot_active:
+            message = f"Hotspot {status.ssid or cleaned_ssid} enabled."
+            self._record_log(
+                "hotspot_enabled",
+                message,
+                status=status,
+                metadata=result_metadata,
+            )
+            if not development_mode:
+                return status
+            timeout = effective_timeout
+            if timeout is None or timeout <= 0:
+                return status
+            monitor_required = False
+        else:
+            detail = status.detail or "Hotspot activation pending."
+            message = f"Hotspot {cleaned_ssid} pending: {detail}"
+            self._record_log(
+                "hotspot_status",
+                message,
+                status=status,
+                metadata=result_metadata,
+            )
+            if not development_mode:
+                return status
+            timeout = (
+                effective_timeout
+                if effective_timeout is not None
+                else self._hotspot_rollback_timeout
+                if rollback_timeout is None
+                else max(0.0, rollback_timeout)
+            )
+            monitor_required = True
+        if timeout <= 0 or not monitor_required:
             return status
+        self._record_log(
+            "hotspot_monitor",
+            f"Monitoring hotspot {cleaned_ssid} for up to {int(math.ceil(timeout))}s before rollback.",
+            status=status,
+            metadata=result_metadata,
+        )
         deadline = time.monotonic() + timeout
         current = status
         while time.monotonic() < deadline:
             if current.hotspot_active:
                 self._hotspot_profile = current.profile or self._hotspot_profile
                 self._update_mdns(current)
+                self._record_log(
+                    "hotspot_confirmed",
+                    f"Hotspot {cleaned_ssid} became active before rollback deadline.",
+                    status=current,
+                    metadata=result_metadata,
+                )
                 return current
             time.sleep(self._poll_interval)
             current = self._fetch_status()
@@ -568,19 +755,53 @@ class WiFiManager:
                 self._hotspot_profile = previous_profile
             elif not restored.hotspot_active:
                 self._hotspot_profile = None
+            rollback_metadata = dict(result_metadata)
+            rollback_metadata["restored_profile"] = previous_profile
+            self._record_log(
+                "hotspot_rollback",
+                restored.detail,
+                status=restored,
+                metadata=rollback_metadata,
+            )
             return restored
         current.detail = (
             f"Hotspot {cleaned_ssid} did not become active within {int(math.ceil(timeout))}s and "
             "no previous connection was available to restore."
         )
         self._update_mdns(current)
+        self._record_log(
+            "hotspot_timeout",
+            current.detail,
+            status=current,
+            metadata=result_metadata,
+        )
         return current
 
     def disable_hotspot(self) -> WiFiStatus:
-        status = self._backend.stop_hotspot(self._hotspot_profile)
+        metadata = {
+            "target": self._hotspot_profile,
+        }
+        self._record_log("hotspot_disable_attempt", "Disabling hotspot.", metadata=metadata)
+        try:
+            status = self._backend.stop_hotspot(self._hotspot_profile)
+        except WiFiError as exc:
+            message = str(exc).strip() or "Unable to disable hotspot"
+            self._record_log(
+                "hotspot_disable_error",
+                f"Hotspot disable failed: {message}.",
+                metadata=metadata,
+            )
+            raise
         self._update_mdns(status)
         if not status.hotspot_active:
             self._hotspot_profile = None
+        detail = status.detail or "Hotspot disabled."
+        self._record_log(
+            "hotspot_disabled",
+            detail,
+            status=status,
+            metadata=metadata,
+        )
         return status
 
     def close(self) -> None:
@@ -598,6 +819,59 @@ class WiFiManager:
         self._update_mdns(status)
         return status
 
+    def get_connection_log(self, limit: int | None = None) -> list[dict[str, object | None]]:
+        """Return recent Wi-Fi connection and hotspot events."""
+
+        with self._log_lock:
+            entries = list(self._log)
+        if limit is not None:
+            try:
+                limit_value = max(1, int(limit))
+            except (TypeError, ValueError):
+                limit_value = 1
+            if len(entries) > limit_value:
+                entries = entries[-limit_value:]
+        return [entry.to_dict() for entry in reversed(entries)]
+
+    def _record_log(
+        self,
+        event: str,
+        message: str,
+        *,
+        status: WiFiStatus | None = None,
+        metadata: dict[str, object | None] | None = None,
+    ) -> None:
+        """Store a troubleshooting entry and mirror it to the logger."""
+
+        status_payload: dict[str, object | None] | None
+        if isinstance(status, WiFiStatus):
+            status_payload = status.to_dict()
+        else:
+            status_payload = None
+        metadata_payload: dict[str, object | None] | None
+        if metadata:
+            metadata_payload = {
+                key: value
+                for key, value in metadata.items()
+                if value is not None
+            }
+        else:
+            metadata_payload = None
+        entry = WiFiLogEntry(
+            timestamp=time.time(),
+            event=event,
+            message=message,
+            status=status_payload,
+            metadata=metadata_payload,
+        )
+        with self._log_lock:
+            self._log.append(entry)
+        logger = logging.getLogger(__name__)
+        if metadata_payload:
+            logger.info("Wi-Fi event %s: %s | metadata=%s", event, message, metadata_payload)
+        else:
+            logger.info("Wi-Fi event %s: %s", event, message)
+
     def _update_mdns(self, status: WiFiStatus) -> None:
         if self._mdns is None:
             return
@@ -614,4 +888,5 @@ __all__ = [
     "WiFiBackend",
     "NMCLIBackend",
     "WiFiManager",
+    "WiFiLogEntry",
 ]

@@ -812,6 +812,65 @@
         flex-wrap: wrap;
         gap: var(--space-sm);
       }
+      #wifi-log-section {
+        margin-top: var(--stack-gap-lg);
+        padding: var(--stack-gap-lg);
+        border-radius: var(--radius-lg);
+        background: var(--surface-soft);
+        border: 1px solid var(--border-subtle);
+        display: flex;
+        flex-direction: column;
+        gap: var(--stack-gap);
+      }
+      #wifi-log-section h3 {
+        margin-bottom: 0;
+      }
+      #wifi-log-empty {
+        margin: 0;
+        font-size: 0.9rem;
+        color: var(--text-muted);
+      }
+      #wifi-log-empty.error {
+        color: var(--danger);
+      }
+      #wifi-log {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-sm);
+        max-height: 18rem;
+        overflow-y: auto;
+      }
+      #wifi-log li {
+        padding: var(--space-md) var(--space-lg);
+        border-radius: var(--radius-md);
+        background: var(--surface-panel);
+        border: 1px solid var(--border-subtle);
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-xs);
+      }
+      #wifi-log li time {
+        font-size: 0.8rem;
+        color: var(--text-muted);
+        letter-spacing: 0.01em;
+      }
+      #wifi-log li .log-event {
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--accent);
+      }
+      #wifi-log li .log-message {
+        font-size: 0.95rem;
+        line-height: 1.5;
+      }
+      #wifi-log li .log-extra {
+        font-size: 0.8rem;
+        color: var(--text-muted);
+      }
       .battery-card {
         display: flex;
         flex-wrap: wrap;
@@ -1757,6 +1816,11 @@
                 <button type="button" id="wifi-disable-hotspot" class="secondary-button">Disable hotspot</button>
               </div>
             </section>
+            <section id="wifi-log-section">
+              <h3>Recent Wi-Fi activity</h3>
+              <p id="wifi-log-empty" class="muted">No Wi-Fi events recorded yet.</p>
+              <ol id="wifi-log"></ol>
+            </section>
           </section>
         </section>
 
@@ -2093,6 +2157,8 @@
       const wifiHotspotPassword = document.getElementById("wifi-hotspot-password");
       const wifiEnableHotspot = document.getElementById("wifi-enable-hotspot");
       const wifiDisableHotspot = document.getElementById("wifi-disable-hotspot");
+      const wifiLogList = document.getElementById("wifi-log");
+      const wifiLogEmpty = document.getElementById("wifi-log-empty");
       const wifiConnectSsidInput = wifiConnectForm
         ? wifiConnectForm.querySelector('input[name="ssid"]')
         : null;
@@ -2104,6 +2170,9 @@
         : null;
       const HOTSPOT_HOSTNAME = "motion.local";
       const HOTSPOT_DEV_ROLLBACK_DEFAULT = 120;
+      const WIFI_LOG_DEFAULT_EMPTY_MESSAGE = wifiLogEmpty
+        ? wifiLogEmpty.textContent || "No Wi-Fi events recorded yet."
+        : "No Wi-Fi events recorded yet.";
 
       function formatLedPatternName(name) {
         if (typeof name !== "string" || !name) {
@@ -4343,6 +4412,164 @@
         return pieces.join(" ");
       }
 
+      function formatLogTimestamp(timestamp) {
+        if (typeof timestamp !== "number" || !Number.isFinite(timestamp)) {
+          return { display: "", iso: "" };
+        }
+        const date = new Date(timestamp * 1000);
+        if (Number.isNaN(date.getTime())) {
+          return { display: "", iso: "" };
+        }
+        return {
+          display: date.toLocaleString(),
+          iso: date.toISOString(),
+        };
+      }
+
+      function summariseLogStatus(status) {
+        if (!status || typeof status !== "object") {
+          return "";
+        }
+        const parts = [];
+        if (Object.prototype.hasOwnProperty.call(status, "connected")) {
+          parts.push(status.connected ? "Connected" : "Disconnected");
+        }
+        if (status.hotspot_active) {
+          parts.push("Hotspot active");
+        }
+        const name =
+          (typeof status.ssid === "string" && status.ssid.trim()) ||
+          (typeof status.profile === "string" && status.profile.trim()) ||
+          "";
+        if (name) {
+          parts.push(`Network: ${name}`);
+        }
+        if (typeof status.ip_address === "string" && status.ip_address.trim()) {
+          parts.push(`IP: ${status.ip_address.trim()}`);
+        }
+        if (typeof status.mode === "string" && status.mode.trim()) {
+          parts.push(`Mode: ${status.mode.trim()}`);
+        }
+        return parts.join(" • ");
+      }
+
+      function formatLogMetadata(metadata) {
+        if (!metadata || typeof metadata !== "object") {
+          return "";
+        }
+        const labels = {
+          target: "Target",
+          development_mode: "Development mode",
+          requested_rollback: "Requested rollback (s)",
+          effective_rollback: "Rollback window (s)",
+          password_provided: "Password provided",
+          restored_profile: "Restored profile",
+        };
+        const parts = [];
+        for (const [key, value] of Object.entries(metadata)) {
+          if (value === null || value === undefined || value === "") {
+            continue;
+          }
+          const label = labels[key] || key.replace(/_/g, " ");
+          let display = value;
+          if (typeof value === "boolean") {
+            display = value ? "Yes" : "No";
+          } else if (typeof value === "number" && Number.isFinite(value)) {
+            display = Math.round(value * 100) / 100;
+          }
+          parts.push(`${label}: ${display}`);
+        }
+        return parts.join(" • ");
+      }
+
+      function setWifiLogEmpty(message, isError = false) {
+        if (!wifiLogEmpty) {
+          return;
+        }
+        wifiLogEmpty.hidden = false;
+        wifiLogEmpty.textContent = message || WIFI_LOG_DEFAULT_EMPTY_MESSAGE;
+        if (isError) {
+          wifiLogEmpty.classList.add("error");
+        } else {
+          wifiLogEmpty.classList.remove("error");
+        }
+      }
+
+      function renderWifiLog(entries) {
+        if (!wifiLogList) {
+          return;
+        }
+        wifiLogList.innerHTML = "";
+        if (!Array.isArray(entries) || entries.length === 0) {
+          setWifiLogEmpty(WIFI_LOG_DEFAULT_EMPTY_MESSAGE, false);
+          return;
+        }
+        if (wifiLogEmpty) {
+          wifiLogEmpty.hidden = true;
+          wifiLogEmpty.classList.remove("error");
+        }
+        for (const entry of entries) {
+          const item = document.createElement("li");
+          const header = document.createElement("div");
+          header.style.display = "flex";
+          header.style.flexWrap = "wrap";
+          header.style.justifyContent = "space-between";
+          header.style.gap = "0.25rem";
+          const timestamp = formatLogTimestamp(entry && entry.timestamp);
+          if (timestamp.display) {
+            const timeEl = document.createElement("time");
+            timeEl.textContent = timestamp.display;
+            if (timestamp.iso) {
+              timeEl.dateTime = timestamp.iso;
+            }
+            header.appendChild(timeEl);
+          }
+          const eventEl = document.createElement("span");
+          eventEl.className = "log-event";
+          eventEl.textContent = entry && entry.event ? String(entry.event) : "event";
+          header.appendChild(eventEl);
+          item.appendChild(header);
+          const messageEl = document.createElement("div");
+          messageEl.className = "log-message";
+          messageEl.textContent = entry && entry.message ? String(entry.message) : "";
+          item.appendChild(messageEl);
+          const metadataText = formatLogMetadata(entry && entry.metadata);
+          if (metadataText) {
+            const metaEl = document.createElement("div");
+            metaEl.className = "log-extra";
+            metaEl.textContent = metadataText;
+            item.appendChild(metaEl);
+          }
+          const statusText = summariseLogStatus(entry && entry.status);
+          if (statusText) {
+            const statusEl = document.createElement("div");
+            statusEl.className = "log-extra";
+            statusEl.textContent = statusText;
+            item.appendChild(statusEl);
+          }
+          wifiLogList.appendChild(item);
+        }
+      }
+
+      async function refreshWifiLog() {
+        if (!wifiLogList) {
+          return;
+        }
+        try {
+          const response = await fetch("/api/wifi/log?limit=50", { cache: "no-store" });
+          if (!response.ok) {
+            throw new Error("Unable to load Wi-Fi log.");
+          }
+          const data = await response.json();
+          const entries = Array.isArray(data.entries) ? data.entries : [];
+          renderWifiLog(entries);
+        } catch (err) {
+          console.error(err);
+          renderWifiLog([]);
+          setWifiLogEmpty("Unable to load Wi-Fi log.", true);
+        }
+      }
+
       function setWifiFeedback(message, isError = false) {
         if (!wifiFeedback) {
           return;
@@ -4436,9 +4663,17 @@
               wifiConnectSelected.textContent = `Selected network: ${ssid}`;
               if (wifiConnectPasswordInput) {
                 wifiConnectPasswordInput.value = "";
-                wifiConnectPasswordInput.placeholder = network.security
-                  ? `Security: ${network.security}`
-                  : "Password (if required)";
+                if (network.known) {
+                  wifiConnectPasswordInput.placeholder = "Saved network – leave blank to use stored password.";
+                  wifiConnectPasswordInput.dataset.knownNetwork = "true";
+                  wifiConnectPasswordInput.title = "Leave blank to reuse the saved credentials.";
+                } else {
+                  wifiConnectPasswordInput.placeholder = network.security
+                    ? `Security: ${network.security}`
+                    : "Password (if required)";
+                  delete wifiConnectPasswordInput.dataset.knownNetwork;
+                  wifiConnectPasswordInput.title = "Enter the network password if required.";
+                }
               }
               if (wifiRollbackInput && typeof wifiRollbackInput.value === "string" && !wifiRollbackInput.value) {
                 wifiRollbackInput.value = "30";
@@ -4470,12 +4705,13 @@
         if (!wifiSummary) {
           return null;
         }
+        let status = null;
         try {
           const response = await fetch("/api/wifi/status");
           if (!response.ok) {
             throw new Error("Unable to fetch Wi-Fi status");
           }
-          const status = await response.json();
+          status = await response.json();
           wifiSummary.textContent = summariseWifiStatus(status);
           if (wifiHotspotStatus) {
             if (status.hotspot_active) {
@@ -4495,15 +4731,16 @@
           } else if (!wifiFeedback || !wifiFeedback.textContent) {
             setWifiFeedback("", false);
           }
-          return status;
         } catch (err) {
           console.error(err);
           if (wifiSummary) {
             const message = err instanceof Error ? err.message : "Wi-Fi status unavailable.";
             wifiSummary.textContent = message;
           }
-          return null;
+        } finally {
+          await refreshWifiLog();
         }
+        return status;
       }
 
       async function scanWifiNetworks() {

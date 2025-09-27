@@ -1,5 +1,9 @@
+import asyncio
 import logging
+import threading
 import types
+
+import pytest
 
 from rev_cam import mdns
 
@@ -56,3 +60,50 @@ def test_mdns_permission_error_disables_advertising(monkeypatch, caplog) -> None
 
     assert len(_FailingZeroconf.instances) == 1
     assert _FailingZeroconf.instances[0].register_calls == 1
+
+
+def test_mdns_zeroconf_constructed_off_event_loop(monkeypatch) -> None:
+    created_threads: list[int] = []
+    register_threads: list[int] = []
+    unregister_threads: list[int] = []
+    close_threads: list[int] = []
+    main_thread = threading.get_ident()
+
+    class _ThreadRecordingZeroconf:
+        def __init__(self, interfaces=None) -> None:  # noqa: D401 - simple stub
+            created_threads.append(threading.get_ident())
+
+        def register_service(self, info, allow_name_change=False) -> None:  # noqa: D401
+            del info, allow_name_change
+            register_threads.append(threading.get_ident())
+
+        def unregister_service(self, info) -> None:  # noqa: D401 - simple stub
+            del info
+            unregister_threads.append(threading.get_ident())
+
+        def close(self) -> None:  # noqa: D401 - simple stub
+            close_threads.append(threading.get_ident())
+
+    monkeypatch.setattr(mdns, "Zeroconf", _ThreadRecordingZeroconf)
+    monkeypatch.setattr(mdns, "ServiceInfo", _FakeServiceInfo)
+    monkeypatch.setattr(mdns, "InterfaceChoice", types.SimpleNamespace(All="all"))
+
+    advertiser = mdns.MDNSAdvertiser(hostname="test.local")
+
+    async def _invoke() -> None:
+        advertiser.advertise("192.168.1.2")
+        advertiser.advertise("192.168.1.3")
+        advertiser.close()
+
+    asyncio.run(_invoke())
+
+    assert created_threads, "Zeroconf constructor was not called"
+    # Ensure the Zeroconf instance was created on a different thread while the
+    # event loop was running, preventing EventLoopBlocked errors.
+    assert created_threads[0] != main_thread
+    assert register_threads, "register_service was not called"
+    assert unregister_threads, "unregister_service was not called"
+    assert close_threads, "close was not called"
+    assert register_threads[0] != main_thread
+    assert unregister_threads[0] != main_thread
+    assert close_threads[0] != main_thread

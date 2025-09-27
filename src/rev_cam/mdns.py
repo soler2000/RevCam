@@ -1,12 +1,14 @@
 """Simple mDNS advertiser used to expose RevCam services."""
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import logging
 import shutil
 import subprocess
 import threading
 import time
+from typing import Callable, TypeVar, cast
 
 try:  # pragma: no cover - import guard for optional dependency failures
     from zeroconf import InterfaceChoice, ServiceInfo, Zeroconf
@@ -20,6 +22,9 @@ else:
 
 
 logger = logging.getLogger(__name__)
+
+
+_T = TypeVar("_T")
 
 
 class _BaseAdvertiser:
@@ -60,8 +65,44 @@ class _ZeroconfAdvertiser(_BaseAdvertiser):
     # ------------------------------ helpers -----------------------------
     def _ensure_zeroconf(self) -> Zeroconf:
         if self._zeroconf is None:
-            self._zeroconf = Zeroconf(interfaces=InterfaceChoice.All)
+            self._zeroconf = self._create_zeroconf()
         return self._zeroconf
+
+    def _create_zeroconf(self) -> Zeroconf:
+        return self._run_blocking(lambda: Zeroconf(interfaces=InterfaceChoice.All))
+
+    @staticmethod
+    def _event_loop_running() -> bool:
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return False
+        return True
+
+    def _run_blocking(self, func: Callable[[], _T]) -> _T:
+        if not self._event_loop_running():
+            return func()
+
+        outcome: object | None = None
+        error: BaseException | None = None
+        finished = threading.Event()
+
+        def _invoke() -> None:
+            nonlocal outcome, error
+            try:
+                outcome = func()
+            except BaseException as exc:  # pragma: no cover - defensive guard
+                error = exc
+            finally:
+                finished.set()
+
+        thread = threading.Thread(target=_invoke, daemon=True)
+        thread.start()
+        finished.wait()
+
+        if error is not None:
+            raise error
+        return cast(_T, outcome)
 
     def _build_service_info(self, ip: ipaddress._BaseAddress) -> ServiceInfo:
         service_name = f"{self._service_name}.{self._service_type}"
@@ -98,13 +139,15 @@ class _ZeroconfAdvertiser(_BaseAdvertiser):
             return
         if self._info is not None:
             try:
-                zeroconf.unregister_service(self._info)
+                self._run_blocking(lambda: zeroconf.unregister_service(self._info))
             except Exception as exc:  # pragma: no cover - best effort cleanup
                 logger.debug("Ignoring mDNS unregister failure: %s", exc)
             self._info = None
         info = self._build_service_info(parsed_ip)
         try:
-            zeroconf.register_service(info, allow_name_change=False)
+            self._run_blocking(
+                lambda: zeroconf.register_service(info, allow_name_change=False)
+            )
         except Exception as exc:  # pragma: no cover - zeroconf runtime issues
             message = (str(exc) or exc.__class__.__name__).strip()
             lowered = message.lower()
@@ -131,7 +174,7 @@ class _ZeroconfAdvertiser(_BaseAdvertiser):
                 self._current_ip = None
                 if self._zeroconf is not None:
                     try:
-                        self._zeroconf.close()
+                        self._run_blocking(self._zeroconf.close)
                     except Exception:  # pragma: no cover - best effort cleanup
                         logger.debug(
                             "Ignoring Zeroconf close failure after permission error",
@@ -152,7 +195,7 @@ class _ZeroconfAdvertiser(_BaseAdvertiser):
         zeroconf = self._zeroconf
         if zeroconf is not None:
             try:
-                zeroconf.unregister_service(self._info)
+                self._run_blocking(lambda: zeroconf.unregister_service(self._info))
             except Exception as exc:  # pragma: no cover - best effort cleanup
                 logger.debug("Ignoring mDNS unregister failure: %s", exc)
         self._info = None
@@ -162,7 +205,7 @@ class _ZeroconfAdvertiser(_BaseAdvertiser):
         self.clear()
         if self._zeroconf is not None:
             try:
-                self._zeroconf.close()
+                self._run_blocking(self._zeroconf.close)
             finally:
                 self._zeroconf = None
 
