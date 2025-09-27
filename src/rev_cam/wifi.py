@@ -391,25 +391,114 @@ class NMCLIBackend(WiFiBackend):
     def start_hotspot(self, ssid: str, password: str | None) -> WiFiStatus:
         interface = self._get_interface()
         connection_name = "RevCam Hotspot"
-        args = [
-            "nmcli",
-            "device",
-            "wifi",
-            "hotspot",
-            "ifname",
-            interface,
-            "con-name",
-            connection_name,
-            "ssid",
-            ssid,
-        ]
         password_provided = bool(password)
         if password_provided:
-            args.extend(["password", password])
-        self._run(args)
-        if not password_provided:
+            args = [
+                "nmcli",
+                "device",
+                "wifi",
+                "hotspot",
+                "ifname",
+                interface,
+                "con-name",
+                connection_name,
+                "ssid",
+                ssid,
+                "password",
+                password,
+            ]
+            self._run(args)
+        else:
+            # Reconfigure the hotspot connection explicitly when no password is
+            # requested so NetworkManager does not retain an old passphrase.
+            connection_exists = True
             try:
-                self._run(
+                self._run(["nmcli", "connection", "show", connection_name])
+            except WiFiError:
+                connection_exists = False
+            if not connection_exists:
+                try:
+                    self._run(
+                        [
+                            "nmcli",
+                            "connection",
+                            "add",
+                            "type",
+                            "wifi",
+                            "ifname",
+                            interface,
+                            "con-name",
+                            connection_name,
+                            "autoconnect",
+                            "yes",
+                            "ssid",
+                            ssid,
+                        ]
+                    )
+                except WiFiError as exc:
+                    raise WiFiError(
+                        f"Unable to prepare hotspot connection: {exc}"
+                    ) from exc
+            else:
+                try:
+                    self._run(
+                        [
+                            "nmcli",
+                            "connection",
+                            "modify",
+                            connection_name,
+                            "connection.interface-name",
+                            interface,
+                        ]
+                    )
+                    self._run(
+                        [
+                            "nmcli",
+                            "connection",
+                            "modify",
+                            connection_name,
+                            "wifi.ssid",
+                            ssid,
+                        ]
+                    )
+                except WiFiError as exc:
+                    raise WiFiError(
+                        f"Unable to refresh hotspot configuration: {exc}"
+                    ) from exc
+            try:
+                base_configuration = [
+                    [
+                        "nmcli",
+                        "connection",
+                        "modify",
+                        connection_name,
+                        "wifi.mode",
+                        "ap",
+                    ],
+                    [
+                        "nmcli",
+                        "connection",
+                        "modify",
+                        connection_name,
+                        "ipv4.method",
+                        "shared",
+                    ],
+                    [
+                        "nmcli",
+                        "connection",
+                        "modify",
+                        connection_name,
+                        "ipv6.method",
+                        "ignore",
+                    ],
+                    [
+                        "nmcli",
+                        "connection",
+                        "modify",
+                        connection_name,
+                        "connection.autoconnect",
+                        "yes",
+                    ],
                     [
                         "nmcli",
                         "connection",
@@ -417,16 +506,38 @@ class NMCLIBackend(WiFiBackend):
                         connection_name,
                         "wifi-sec.key-mgmt",
                         "none",
-                    ]
-                )
-                # Remove any previously configured passphrase to ensure the network stays open.
-                self._run([
-                    "nmcli",
-                    "connection",
-                    "modify",
-                    connection_name,
-                    "-wifi-sec.psk",
-                ])
+                    ],
+                ]
+                for command in base_configuration:
+                    self._run(command)
+                # Remove any previously configured passphrases or keys so the
+                # hotspot broadcasts as an open network.
+                for property_name in (
+                    "wifi-sec.psk",
+                    "wifi-sec.wep-key0",
+                    "wifi-sec.wep-key1",
+                    "wifi-sec.wep-key2",
+                    "wifi-sec.wep-key3",
+                ):
+                    try:
+                        self._run(
+                            [
+                                "nmcli",
+                                "connection",
+                                "modify",
+                                connection_name,
+                                f"-{property_name}",
+                            ]
+                        )
+                    except WiFiError:
+                        # Older NetworkManager versions may not expose all key
+                        # slots; ignore missing properties.
+                        pass
+                try:
+                    self._run(["nmcli", "connection", "down", connection_name])
+                except WiFiError:
+                    # Connection might not be active yet; ignore and proceed.
+                    pass
                 self._run(["nmcli", "connection", "up", connection_name])
             except WiFiError as exc:
                 raise WiFiError(f"Unable to configure open hotspot: {exc}") from exc
