@@ -338,6 +338,16 @@ class NMCLIBackend(WiFiBackend):
         return list(self._scan_output(rescan=True))
 
     def connect(self, ssid: str, password: str | None) -> WiFiStatus:
+        """Connect to a Wi-Fi network, preferring saved profiles when available."""
+
+        if not password:
+            try:
+                saved_profiles = self._parse_saved_profiles()
+            except WiFiError:
+                saved_profiles = set()
+            if ssid in saved_profiles:
+                return self.activate_profile(ssid)
+
         interface = self._get_interface()
         args = ["nmcli", "device", "wifi", "connect", ssid]
         if password:
@@ -471,9 +481,15 @@ class WiFiManager:
         if not isinstance(ssid, str) or not ssid.strip():
             raise WiFiError("SSID must be a non-empty string")
         cleaned_ssid = ssid.strip()
+        if password is None:
+            cleaned_password: str | None = None
+        elif isinstance(password, str):
+            cleaned_password = password if password.strip() else None
+        else:
+            raise WiFiError("Password must be a string or null")
         previous_status = self._fetch_status()
         previous_profile = previous_status.profile if previous_status.connected else None
-        status = self._backend.connect(cleaned_ssid, password)
+        status = self._backend.connect(cleaned_ssid, cleaned_password)
         self._update_mdns(status)
         if not development_mode:
             return status

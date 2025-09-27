@@ -4436,9 +4436,17 @@
               wifiConnectSelected.textContent = `Selected network: ${ssid}`;
               if (wifiConnectPasswordInput) {
                 wifiConnectPasswordInput.value = "";
-                wifiConnectPasswordInput.placeholder = network.security
-                  ? `Security: ${network.security}`
-                  : "Password (if required)";
+                if (network.known) {
+                  wifiConnectPasswordInput.placeholder = "Saved network – leave blank to use stored password.";
+                  wifiConnectPasswordInput.dataset.knownNetwork = "true";
+                  wifiConnectPasswordInput.title = "Leave blank to reuse the saved credentials.";
+                } else {
+                  wifiConnectPasswordInput.placeholder = network.security
+                    ? `Security: ${network.security}`
+                    : "Password (if required)";
+                  delete wifiConnectPasswordInput.dataset.knownNetwork;
+                  wifiConnectPasswordInput.title = "Enter the network password if required.";
+                }
               }
               if (wifiRollbackInput && typeof wifiRollbackInput.value === "string" && !wifiRollbackInput.value) {
                 wifiRollbackInput.value = "30";
