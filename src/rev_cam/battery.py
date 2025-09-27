@@ -951,8 +951,17 @@ def _draw_wifi_icon(frame, x: int, y: int, scale: int, level: int) -> None:
     base_radius = thickness * 2
     centre_x = x + width / 2.0
     centre_y = y + height
-    active_colour = (255, 255, 255)
-    inactive_colour = (90, 90, 90)
+
+    palette = {
+        0: (190, 190, 190),  # muted grey when nothing is available
+        1: (60, 60, 220),  # red tint for extremely weak signal
+        2: (0, 165, 255),  # amber for middling reception
+        3: (60, 200, 60),  # green for good connection
+        4: (40, 220, 40),  # brighter green for excellent connection
+    }
+
+    active_colour = palette.get(max(0, min(4, level)), (255, 255, 255))
+    inactive_colour = (190, 190, 190)
 
     x0 = max(0, x)
     y0 = max(0, y)
