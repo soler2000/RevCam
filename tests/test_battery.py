@@ -188,6 +188,129 @@ def test_battery_monitor_reports_address_hint_on_init_failure(
     assert monitor.last_error == reading.error
 
 
+def test_battery_monitor_falls_back_to_pi_ina219(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _StubPiIna219:
+        def __init__(self, shunt_ohms: float, *, busnum: int | None = None, address: int) -> None:
+            self._shunt_ohms = shunt_ohms
+            self._busnum = busnum
+            self._address = address
+
+        def configure(self) -> None:
+            pass
+
+        def voltage(self) -> float:
+            return 3.95
+
+        def shunt_voltage(self) -> float:
+            return 0.05
+
+        def current(self) -> float:
+            return 120.0
+
+    class _StubRangeError(Exception):
+        pass
+
+    monkeypatch.delitem(sys.modules, "adafruit_ina219", raising=False)
+    monkeypatch.delitem(sys.modules, "adafruit_extended_bus", raising=False)
+    monkeypatch.delitem(sys.modules, "board", raising=False)
+
+    module = types.ModuleType("ina219")
+    module.INA219 = _StubPiIna219  # type: ignore[attr-defined]
+    module.DeviceRangeError = _StubRangeError  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "ina219", module)
+
+    monitor = BatteryMonitor()
+
+    reading = monitor.read()
+
+    assert reading.available is True
+    assert reading.voltage == pytest.approx(4.0, abs=1e-6)
+    assert reading.percentage is not None
+    assert reading.current_ma == pytest.approx(120.0)
+    assert reading.error is None
+
+
+def test_battery_monitor_close_only_releases_supplied_sensor() -> None:
+    class _StubI2CBus:
+        def __init__(self) -> None:
+            self.deinit_called = False
+
+        def deinit(self) -> None:  # pragma: no cover - should not be called
+            self.deinit_called = True
+
+    class _StubDevice:
+        def __init__(self, bus: _StubI2CBus) -> None:
+            self.i2c = bus
+            self.deinit_called = False
+
+        def deinit(self) -> None:  # pragma: no cover - should not be called
+            self.deinit_called = True
+
+    class _ClosableSensor(_StubSensor):
+        def __init__(self, device: _StubDevice) -> None:
+            super().__init__(bus_voltage=4.0, current=100.0)
+            self.deinit_called = False
+            self.i2c_device = device
+
+        def deinit(self) -> None:
+            self.deinit_called = True
+
+    bus = _StubI2CBus()
+    device = _StubDevice(bus)
+    sensor = _ClosableSensor(device)
+    monitor = BatteryMonitor(sensor_factory=lambda: sensor)
+    monitor.read()
+
+    monitor.close()
+
+    assert sensor.deinit_called is True
+    assert device.deinit_called is False
+    assert bus.deinit_called is False
+    assert monitor.last_error is None
+
+
+def test_battery_monitor_close_releases_owned_bus(monkeypatch: pytest.MonkeyPatch) -> None:
+    created: dict[str, object] = {}
+
+    class _StubBus:
+        def __init__(self) -> None:
+            self.deinit_called = False
+
+        def deinit(self) -> None:
+            self.deinit_called = True
+
+    class _StubINA219:
+        def __init__(self, bus: object, *, addr: int = BatteryMonitor.DEFAULT_I2C_ADDRESS) -> None:
+            created["sensor"] = self
+            created["bus"] = bus
+            created["addr"] = addr
+            self.bus_voltage = 4.0
+            self.shunt_voltage = 0.0
+            self.current = None
+            self.deinit_called = False
+
+        def deinit(self) -> None:
+            self.deinit_called = True
+
+    bus = _StubBus()
+    monkeypatch.setitem(sys.modules, "adafruit_ina219", types.SimpleNamespace(INA219=_StubINA219))
+    monkeypatch.setitem(sys.modules, "board", types.SimpleNamespace(I2C=lambda: bus))
+
+    monitor = BatteryMonitor()
+    reading = monitor.read()
+
+    assert reading.available is True
+
+    monitor.close()
+
+    sensor = created["sensor"]
+    assert isinstance(sensor, _StubINA219)
+    assert sensor.deinit_called is True
+    assert isinstance(created["bus"], _StubBus)
+    assert created["bus"].deinit_called is True
+    assert monitor.last_error is None
+
+
 def test_battery_limits_validation() -> None:
     with pytest.raises(ValueError):
         BatteryLimits(warning_percent=-1.0, shutdown_percent=5.0)

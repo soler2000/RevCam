@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import math
 import time
 from collections import deque
@@ -23,6 +24,10 @@ from .overlay_text import (
 )
 
 SensorFactory = Callable[[], object]
+
+
+class _DriverUnavailableError(RuntimeError):
+    """Raised when no supported VL53L1X driver can be loaded."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,6 +159,7 @@ class DistanceMonitor:
         self._spike_candidate: float | None = None
         self._spike_rejects: int = 0
         self._last_error: str | None = None
+        self._last_logged_error: str | None = None
         self._last_reading: DistanceReading | None = None
         self._last_timestamp: float = 0.0
         self._lock = Lock()
@@ -161,6 +167,9 @@ class DistanceMonitor:
             self._calibration = DistanceCalibration()
         else:
             self._calibration = DistanceCalibration(calibration.offset_m, calibration.scale)
+        self._owned_i2c_bus: object | None = None
+        self._owns_i2c_bus = False
+        self._logger = logging.getLogger(f"{__name__}.{type(self).__name__}")
 
     @property
     def last_error(self) -> str | None:
@@ -170,13 +179,13 @@ class DistanceMonitor:
         try:  # pragma: no cover - hardware dependency
             import adafruit_vl53l1x  # type: ignore
         except Exception as exc:  # pragma: no cover - hardware dependency
-            raise RuntimeError("VL53L1X driver unavailable") from exc
+            raise _DriverUnavailableError("VL53L1X driver unavailable") from exc
 
         if self._i2c_bus is not None:
             try:  # pragma: no cover - optional dependency
                 from adafruit_extended_bus import ExtendedI2C  # type: ignore
             except Exception as exc:  # pragma: no cover - optional dependency
-                raise RuntimeError(
+                raise _DriverUnavailableError(
                     "Extended I2C support unavailable; install adafruit-circuitpython-extended-bus"
                 ) from exc
 
@@ -184,20 +193,24 @@ class DistanceMonitor:
                 i2c = ExtendedI2C(self._i2c_bus)
             except Exception as exc:  # pragma: no cover - hardware dependency
                 raise RuntimeError(f"Unable to access I2C bus {self._i2c_bus}: {exc}") from exc
+            self._owned_i2c_bus = i2c
+            self._owns_i2c_bus = True
         else:
             try:  # pragma: no cover - hardware dependency
                 import board  # type: ignore
             except Exception as exc:  # pragma: no cover - hardware dependency
-                raise RuntimeError("VL53L1X driver unavailable") from exc
+                raise _DriverUnavailableError("VL53L1X driver unavailable") from exc
 
             try:  # pragma: no cover - hardware dependency
                 i2c = board.I2C()  # type: ignore[attr-defined]
             except Exception as exc:  # pragma: no cover - hardware dependency
                 raise RuntimeError("Unable to access I2C bus") from exc
-
+            self._owned_i2c_bus = i2c
+            self._owns_i2c_bus = True
         try:  # pragma: no cover - hardware dependency
             sensor = adafruit_vl53l1x.VL53L1X(i2c, address=self._i2c_address)
         except Exception as exc:  # pragma: no cover - hardware dependency
+            self._release_owned_i2c_bus()
             raise RuntimeError(
                 (
                     "Failed to initialise VL53L1X "
@@ -207,6 +220,50 @@ class DistanceMonitor:
 
         self._configure_sensor(sensor)
         return sensor
+
+    def _release_sensor(self, sensor: object | None) -> None:
+        if sensor is None:
+            return
+        for method_name in ("deinit", "close", "shutdown"):
+            method = getattr(sensor, method_name, None)
+            if callable(method):
+                try:
+                    method()
+                except Exception:  # pragma: no cover - defensive guard
+                    pass
+                break
+        for attr in ("i2c_device", "_i2c_device", "device", "_device"):
+            device = getattr(sensor, attr, None)
+            if device is None:
+                continue
+            unlock = getattr(device, "unlock", None)
+            if callable(unlock):
+                try:
+                    unlock()
+                except Exception:  # pragma: no cover - defensive guard
+                    pass
+
+    def _release_owned_i2c_bus(self) -> None:
+        bus = self._owned_i2c_bus
+        self._owned_i2c_bus = None
+        owns_bus = self._owns_i2c_bus
+        self._owns_i2c_bus = False
+        if not owns_bus or bus is None:
+            return
+        unlock = getattr(bus, "unlock", None)
+        if callable(unlock):
+            try:
+                unlock()
+            except Exception:  # pragma: no cover - defensive guard
+                pass
+        for method_name in ("deinit", "close", "shutdown"):
+            method = getattr(bus, method_name, None)
+            if callable(method):
+                try:
+                    method()
+                except Exception:  # pragma: no cover - defensive guard
+                    pass
+                break
 
     def _configure_sensor(self, sensor: object) -> None:
         try:
@@ -239,22 +296,53 @@ class DistanceMonitor:
         if factory is None:
             try:
                 sensor = self._create_default_sensor()
+            except _DriverUnavailableError as exc:
+                self._record_error(str(exc), level=logging.WARNING)
+                self._sensor = None
+                return None
             except RuntimeError as exc:
-                self._last_error = str(exc)
+                self._record_error(str(exc), exc_info=True)
                 self._sensor = None
                 return None
         else:
             try:
                 sensor = factory()
             except Exception as exc:
-                self._last_error = str(exc)
+                self._record_error(str(exc), exc_info=True)
                 self._sensor = None
                 return None
             self._configure_sensor(sensor)
 
         self._sensor = sensor
-        self._last_error = None
+        self._clear_error_state()
         return sensor
+
+    def close(self) -> None:
+        """Release the underlying sensor and any I2C resources."""
+
+        with self._lock:
+            sensor = self._sensor
+            self._sensor = None
+            self._last_reading = None
+            self._clear_error_state()
+        self._release_sensor(sensor)
+        self._release_owned_i2c_bus()
+
+    def _clear_error_state(self) -> None:
+        self._last_error = None
+        self._last_logged_error = None
+
+    def _record_error(
+        self, message: str, *, level: int = logging.ERROR, exc_info: bool = False
+    ) -> str:
+        detail = str(message).strip()
+        if not detail:
+            detail = "Distance monitor error"
+        self._last_error = detail
+        if detail != self._last_logged_error:
+            self._logger.log(level, detail, exc_info=exc_info)
+            self._last_logged_error = detail
+        return detail
 
     def _read_sensor_distance(self, sensor: object) -> float | None:
         value = getattr(sensor, "distance", None)
@@ -378,7 +466,15 @@ class DistanceMonitor:
                 self._last_timestamp = 0.0
             return self._calibration
 
-    def _handle_invalid_sample(self, now: float, message: str) -> DistanceReading:
+    def _handle_invalid_sample(
+        self,
+        now: float,
+        message: str,
+        *,
+        level: int = logging.WARNING,
+        exc_info: bool = False,
+    ) -> DistanceReading:
+        detail = self._record_error(message, level=level, exc_info=exc_info)
         last = self._last_reading
         if last and last.available and last.distance_m is not None:
             reading = DistanceReading(
@@ -386,7 +482,7 @@ class DistanceMonitor:
                 distance_m=last.distance_m,
                 raw_distance_m=None,
                 timestamp=now,
-                error=message,
+                error=detail,
             )
         else:
             reading = DistanceReading(
@@ -394,9 +490,8 @@ class DistanceMonitor:
                 distance_m=None,
                 raw_distance_m=None,
                 timestamp=now,
-                error=message,
+                error=detail,
             )
-        self._last_error = message
         self._last_reading = reading
         return reading
 
@@ -424,39 +519,43 @@ class DistanceMonitor:
                 self._last_timestamp = now
                 return reading
 
-            try:
-                measurement = self._read_sensor_distance(sensor)
-            except Exception as exc:  # pragma: no cover - defensive guard
-                self._sensor = None
-                message = f"Failed to read distance: {exc}"
-                reading = self._handle_invalid_sample(now, message)
-                self._last_timestamp = now
-                return reading
-
-            if measurement is None:
-                reading = self._handle_invalid_sample(now, "Distance measurement unavailable")
-                self._last_timestamp = now
-                return reading
-
-            filtered = self._filter_measurement(measurement)
-            if filtered is None:
-                reading = self._handle_invalid_sample(now, "Filtered invalid distance sample")
-                self._last_timestamp = now
-                return reading
-
-            calibrated = self._apply_calibration(filtered)
-            smoothed = self._apply_smoothing(calibrated)
-            reading = DistanceReading(
-                available=True,
-                distance_m=smoothed,
-                raw_distance_m=filtered,
-                timestamp=now,
-                error=None,
+        try:
+            measurement = self._read_sensor_distance(sensor)
+        except Exception as exc:  # pragma: no cover - defensive guard
+            self._release_sensor(sensor)
+            self._release_owned_i2c_bus()
+            self._sensor = None
+            message = f"Failed to read distance: {exc}"
+            reading = self._handle_invalid_sample(
+                now, message, level=logging.ERROR, exc_info=True
             )
-            self._last_error = None
-            self._last_reading = reading
             self._last_timestamp = now
             return reading
+
+        if measurement is None:
+            reading = self._handle_invalid_sample(now, "Distance measurement unavailable")
+            self._last_timestamp = now
+            return reading
+
+        filtered = self._filter_measurement(measurement)
+        if filtered is None:
+            reading = self._handle_invalid_sample(now, "Filtered invalid distance sample")
+            self._last_timestamp = now
+            return reading
+
+        calibrated = self._apply_calibration(filtered)
+        smoothed = self._apply_smoothing(calibrated)
+        reading = DistanceReading(
+            available=True,
+            distance_m=smoothed,
+            raw_distance_m=filtered,
+            timestamp=now,
+            error=None,
+        )
+        self._clear_error_state()
+        self._last_reading = reading
+        self._last_timestamp = now
+        return reading
 
 
 _ZONE_COLOURS = {
