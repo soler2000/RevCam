@@ -1206,6 +1206,11 @@
         display: grid;
         gap: var(--stack-gap);
       }
+      .distance-geometry-controls {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-xl);
+      }
       .distance-geometry-form label {
         display: flex;
         flex-direction: column;
@@ -1231,6 +1236,91 @@
         font-size: 1.4rem;
         font-weight: 600;
         letter-spacing: -0.01em;
+      }
+      .distance-display-controls {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-sm);
+        padding: var(--stack-gap);
+        border-radius: var(--radius-md);
+        background: var(--surface-soft);
+        border: 1px solid var(--border-subtle);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+      }
+      .distance-display-mode {
+        font-weight: 600;
+        letter-spacing: 0.02em;
+      }
+      .distance-display-mode[data-mode="projected"] {
+        color: var(--accent);
+      }
+      .material-toggle-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-lg);
+        flex-wrap: wrap;
+      }
+      .material-switch {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        cursor: pointer;
+        min-width: 3rem;
+      }
+      .material-switch input {
+        position: absolute;
+        opacity: 0;
+        width: 0;
+        height: 0;
+      }
+      .material-track {
+        position: relative;
+        width: 3rem;
+        height: 1.6rem;
+        border-radius: var(--radius-pill);
+        background: rgba(255, 255, 255, 0.08);
+        box-shadow: inset 0 0 0 1px var(--border-subtle);
+        transition: background var(--transition), box-shadow var(--transition);
+        display: inline-flex;
+        align-items: center;
+      }
+      .material-thumb {
+        position: absolute;
+        top: 50%;
+        left: 0.18rem;
+        transform: translate(0, -50%);
+        width: 1.25rem;
+        height: 1.25rem;
+        border-radius: 50%;
+        background: var(--text-primary);
+        box-shadow: 0 6px 14px rgba(10, 132, 255, 0.28);
+        transition: transform var(--transition), background var(--transition), width var(--transition);
+      }
+      .material-switch input:checked + .material-track {
+        background: var(--accent);
+        box-shadow: inset 0 0 0 1px var(--accent-active), 0 6px 16px rgba(10, 132, 255, 0.25);
+      }
+      .material-switch input:checked + .material-track .material-thumb {
+        transform: translate(1.55rem, -50%);
+        background: var(--text-on-accent);
+        box-shadow: 0 6px 16px rgba(10, 132, 255, 0.35);
+      }
+      .material-switch input:focus-visible + .material-track {
+        outline: none;
+        box-shadow: inset 0 0 0 1px var(--accent-active), 0 0 0 4px var(--accent-soft);
+      }
+      .material-switch input:active + .material-track .material-thumb {
+        width: 1.35rem;
+      }
+      .material-switch input:disabled + .material-track {
+        opacity: 0.5;
+        cursor: not-allowed;
+        box-shadow: inset 0 0 0 1px var(--border-muted);
+      }
+      .material-switch input:disabled + .material-track .material-thumb {
+        background: var(--text-muted);
+        box-shadow: none;
       }
       .zone-badge.clear {
         color: var(--success);
@@ -1670,38 +1760,80 @@
                   <em>h × tan&nbsp;θ</em>.
                 </figcaption>
               </figure>
-              <form id="distance-geometry-form" class="distance-geometry-form">
-                <label>
-                  Mount height (m)
-                  <input
-                    type="number"
-                    name="mount_height_m"
-                    min="0.1"
-                    max="5"
-                    step="0.01"
-                    inputmode="decimal"
-                  />
-                </label>
-                <label>
-                  Mount angle (° from vertical)
-                  <input
-                    type="number"
-                    name="mount_angle_deg"
-                    min="0"
-                    max="89"
-                    step="0.1"
-                    inputmode="decimal"
-                  />
-                </label>
-                <div class="distance-geometry-result">
-                  <span class="distance-geometry-result-label">Projected ground distance</span>
-                  <span class="distance-geometry-result-value" id="distance-projected-value">—</span>
+              <div class="distance-geometry-controls">
+                <form id="distance-geometry-form" class="distance-geometry-form">
+                  <label>
+                    Mount height (m)
+                    <input
+                      type="number"
+                      name="mount_height_m"
+                      min="0.1"
+                      max="5"
+                      step="0.01"
+                      inputmode="decimal"
+                    />
+                  </label>
+                  <label>
+                    Mount angle (° from vertical)
+                    <input
+                      type="number"
+                      name="mount_angle_deg"
+                      min="0"
+                      max="89"
+                      step="0.1"
+                      inputmode="decimal"
+                    />
+                  </label>
+                  <div class="distance-geometry-result">
+                    <span class="distance-geometry-result-label">Projected ground distance</span>
+                    <span class="distance-geometry-result-value" id="distance-projected-value">—</span>
+                  </div>
+                  <div class="form-actions">
+                    <button type="submit">Save geometry</button>
+                    <div id="distance-geometry-status" class="muted helper-text status-text"></div>
+                  </div>
+                </form>
+                <div class="distance-display-controls">
+                  <div
+                    class="distance-display-mode"
+                    id="distance-display-mode"
+                    data-mode="actual"
+                    role="status"
+                    aria-live="polite"
+                  >
+                    Display mode: Actual sensor distance
+                  </div>
+                  <div class="material-toggle-row">
+                    <div class="toggle-text" id="distance-display-text">
+                      <h3 id="distance-display-heading">Projected distance display</h3>
+                      <p id="distance-display-description" class="muted helper-text">
+                        Show the projected ground distance instead of the raw sensor measurement across the
+                        settings, overlap, and development views.
+                      </p>
+                    </div>
+                    <label
+                      class="material-switch"
+                      aria-labelledby="distance-display-heading"
+                      aria-describedby="distance-display-description"
+                    >
+                      <input
+                        type="checkbox"
+                        id="distance-display-toggle"
+                        aria-describedby="distance-display-description"
+                      />
+                      <span class="material-track" aria-hidden="true">
+                        <span class="material-thumb"></span>
+                      </span>
+                    </label>
+                  </div>
+                  <p
+                    id="distance-display-status"
+                    class="muted helper-text status-text"
+                    role="status"
+                    aria-live="polite"
+                  ></p>
                 </div>
-                <div class="form-actions">
-                  <button type="submit">Save geometry</button>
-                  <div id="distance-geometry-status" class="muted helper-text status-text"></div>
-                </div>
-              </form>
+              </div>
             </div>
           </section>
 
@@ -2383,6 +2515,9 @@
       const distanceRefreshButton = document.getElementById("distance-refresh");
       const distanceOverlayToggle = document.getElementById("distance-overlay-toggle");
       const distanceOverlayStatus = document.getElementById("distance-overlay-status");
+      const distanceDisplayToggle = document.getElementById("distance-display-toggle");
+      const distanceDisplayStatus = document.getElementById("distance-display-status");
+      const distanceDisplayMode = document.getElementById("distance-display-mode");
       const distanceGeometryForm = document.getElementById("distance-geometry-form");
       const distanceGeometryStatus = document.getElementById("distance-geometry-status");
       const distanceGeometrySubmit = distanceGeometryForm
@@ -2416,6 +2551,7 @@
       let distanceLoading = false;
       let distanceCalibrationStatusTimer = null;
       let distanceOverlayStatusTimer = null;
+      let distanceDisplayStatusTimer = null;
       let distanceGeometryStatusTimer = null;
       let distanceGeometrySaving = false;
       const developmentToggle = document.getElementById("development-toggle");
@@ -3688,6 +3824,28 @@
         }
       }
 
+      function setDistanceDisplayStatus(message, options = {}) {
+        if (!distanceDisplayStatus) {
+          return;
+        }
+        if (distanceDisplayStatusTimer) {
+          window.clearTimeout(distanceDisplayStatusTimer);
+          distanceDisplayStatusTimer = null;
+        }
+        distanceDisplayStatus.textContent = message || "";
+        if (message && options.persistent !== true) {
+          distanceDisplayStatusTimer = window.setTimeout(() => {
+            if (
+              distanceDisplayStatus &&
+              distanceDisplayStatus.textContent === message
+            ) {
+              distanceDisplayStatus.textContent = "";
+            }
+            distanceDisplayStatusTimer = null;
+          }, 4000);
+        }
+      }
+
       function setDistanceGeometryStatus(message, options = {}) {
         if (!distanceGeometryStatus) {
           return;
@@ -3716,6 +3874,50 @@
         }
         const text = value.toFixed(fractionDigits);
         return text.replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "");
+      }
+
+      function getDisplayDistance(data) {
+        if (!data || typeof data !== "object") {
+          return null;
+        }
+        if (
+          typeof data.display_distance_m === "number" &&
+          Number.isFinite(data.display_distance_m)
+        ) {
+          return data.display_distance_m;
+        }
+        if (typeof data.distance_m === "number" && Number.isFinite(data.distance_m)) {
+          return data.distance_m;
+        }
+        return null;
+      }
+
+      function getDistanceModeLabel(data) {
+        const projected = data && data.use_projected_distance === true;
+        return projected ? "Projected distance" : "Actual distance";
+      }
+
+      function updateDistanceDisplayModeIndicator(useProjected) {
+        if (!distanceDisplayMode) {
+          return;
+        }
+        const active = useProjected === true;
+        distanceDisplayMode.dataset.mode = active ? "projected" : "actual";
+        const label = active ? "Projected ground distance" : "Actual sensor distance";
+        distanceDisplayMode.textContent = `Display mode: ${label}`;
+      }
+
+      function updateDistanceDisplayToggle(enabled, options = {}) {
+        if (!(distanceDisplayToggle instanceof HTMLInputElement)) {
+          return;
+        }
+        const shouldForce = options.forceUpdate === true;
+        if (!shouldForce && distanceDisplayToggle.dataset.userToggled === "true") {
+          return;
+        }
+        const desired = enabled === true;
+        distanceDisplayToggle.checked = desired;
+        distanceDisplayToggle.dataset.serverValue = desired ? "true" : "false";
       }
 
       function updateDistanceCalibrationInputs(calibration, forceUpdate = false) {
@@ -3813,10 +4015,22 @@
           distanceSummary.textContent = fallback;
           return;
         }
+        const displayValue = getDisplayDistance(data);
         const zoneKey =
           typeof data.zone === "string" ? data.zone.toLowerCase() : "clear";
         const label = DISTANCE_ZONE_LABELS[zoneKey] || DISTANCE_ZONE_LABELS.clear;
-        distanceSummary.textContent = `${formatDistance(data.distance_m)} • ${label}`;
+        const parts = [];
+        if (displayValue !== null) {
+          parts.push(formatDistance(displayValue));
+        } else {
+          parts.push("—");
+        }
+        parts.push(label);
+        const modeLabel = getDistanceModeLabel(data);
+        if (modeLabel) {
+          parts.push(modeLabel);
+        }
+        distanceSummary.textContent = parts.join(" • ");
       }
 
       function updateDistanceOverlayToggle(enabled, options = {}) {
@@ -3833,14 +4047,11 @@
       }
 
       function applyDistanceData(data, options = {}) {
+        const displayValue = getDisplayDistance(data);
+        const useProjected = data && data.use_projected_distance === true;
         if (distanceValue) {
-          if (
-            data &&
-            data.available === true &&
-            typeof data.distance_m === "number" &&
-            Number.isFinite(data.distance_m)
-          ) {
-            distanceValue.textContent = formatDistance(data.distance_m);
+          if (displayValue !== null && Number.isFinite(displayValue)) {
+            distanceValue.textContent = formatDistance(displayValue);
           } else {
             distanceValue.textContent = "—";
           }
@@ -3870,6 +4081,13 @@
             ? data.projected_distance_m
             : null;
         updateProjectedDistanceDisplay(projected);
+        updateDistanceDisplayModeIndicator(useProjected);
+        updateDistanceDisplayToggle(useProjected, {
+          forceUpdate:
+            options.updateInputs === true ||
+            options.updateCalibration === true ||
+            options.updateGeometry === true,
+        });
         if (distanceOverlayToggle) {
           const enabled = data && data.overlay_enabled === true;
           const forceUpdate = options.updateInputs === true || options.updateCalibration === true;
@@ -3938,6 +4156,8 @@
           typeof data.distance_m === "number" && Number.isFinite(data.distance_m)
             ? data.distance_m
             : null;
+        const displayValue = getDisplayDistance(data);
+        const modeLabel = getDistanceModeLabel(data);
         const available = data && data.available === true;
         const zoneKey =
           data && typeof data.zone === "string" && data.zone.trim().length > 0
@@ -3951,6 +4171,8 @@
         const signature = JSON.stringify({
           raw: rawValue !== null ? Number(rawValue.toFixed(4)) : null,
           filtered: filteredValue !== null ? Number(filteredValue.toFixed(4)) : null,
+          display: displayValue !== null ? Number(displayValue.toFixed(4)) : null,
+          mode: modeLabel,
           available,
           zone: zoneKey,
           timestamp: timestampValue !== null ? Number(timestampValue.toFixed(3)) : null,
@@ -4004,6 +4226,11 @@
         }
         if (filteredValue !== null) {
           parts.push(`Filtered: ${formatDistance(filteredValue)}`);
+        }
+        if (modeLabel) {
+          const displayText =
+            displayValue !== null ? formatDistance(displayValue) : "unavailable";
+          parts.push(`${modeLabel}: ${displayText}`);
         }
         parts.push(available ? "Sensor available" : "Sensor unavailable");
         valuesElement.textContent = parts.join(" • ");
@@ -4858,6 +5085,61 @@
       if (developmentDistanceClear) {
         developmentDistanceClear.addEventListener("click", () => {
           clearDevelopmentDistanceLog();
+        });
+      }
+
+      if (distanceDisplayToggle instanceof HTMLInputElement) {
+        distanceDisplayToggle.dataset.serverValue = distanceDisplayToggle.checked
+          ? "true"
+          : "false";
+        distanceDisplayToggle.addEventListener("change", async () => {
+          if (!(distanceDisplayToggle instanceof HTMLInputElement)) {
+            return;
+          }
+          const previous = distanceDisplayToggle.dataset.serverValue === "true";
+          const desired = distanceDisplayToggle.checked;
+          distanceDisplayToggle.dataset.userToggled = "true";
+          distanceDisplayToggle.disabled = true;
+          setDistanceDisplayStatus("Updating display mode…", { persistent: true });
+          try {
+            const response = await fetch("/api/distance/display", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ use_projected_distance: desired }),
+            });
+            if (!response.ok) {
+              let errorDetail = "Unable to update display mode.";
+              try {
+                const errorData = await response.json();
+                if (errorData && typeof errorData.detail === "string") {
+                  errorDetail = errorData.detail;
+                }
+              } catch (err) {
+                console.error(err);
+              }
+              throw new Error(errorDetail);
+            }
+            const result = await response.json();
+            applyDistanceData(result);
+            const saved = result && result.use_projected_distance === true;
+            updateDistanceDisplayToggle(saved, { forceUpdate: true });
+            setDistanceDisplayStatus(
+              saved
+                ? "Showing projected ground distance"
+                : "Showing actual sensor distance",
+            );
+          } catch (error) {
+            console.error(error);
+            updateDistanceDisplayToggle(previous, { forceUpdate: true });
+            const message =
+              error && typeof error.message === "string" && error.message
+                ? error.message
+                : "Unable to update display mode.";
+            setDistanceDisplayStatus(message, { persistent: true });
+          } finally {
+            distanceDisplayToggle.disabled = false;
+            delete distanceDisplayToggle.dataset.userToggled;
+          }
         });
       }
 

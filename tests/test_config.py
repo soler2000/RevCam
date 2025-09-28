@@ -17,6 +17,7 @@ from rev_cam.config import (
     DEFAULT_CAMERA_CHOICE,
     DEFAULT_REVERSING_AIDS,
     DEFAULT_DISTANCE_MOUNTING,
+    DEFAULT_DISTANCE_USE_PROJECTED,
 )
 from rev_cam.distance import DistanceCalibration
 
@@ -93,6 +94,20 @@ def test_default_distance_mounting(tmp_path: Path) -> None:
     assert isinstance(mounting, DistanceMounting)
     assert mounting.mount_height_m == pytest.approx(DEFAULT_DISTANCE_MOUNTING.mount_height_m)
     assert mounting.mount_angle_deg == pytest.approx(DEFAULT_DISTANCE_MOUNTING.mount_angle_deg)
+
+
+def test_default_distance_display_mode(tmp_path: Path) -> None:
+    manager = ConfigManager(tmp_path / "config.json")
+    assert manager.get_distance_use_projected() is DEFAULT_DISTANCE_USE_PROJECTED
+
+
+def test_distance_display_mode_persistence(tmp_path: Path) -> None:
+    config_file = tmp_path / "config.json"
+    manager = ConfigManager(config_file)
+    updated = manager.set_distance_use_projected(True)
+    assert updated is True
+    reloaded = ConfigManager(config_file)
+    assert reloaded.get_distance_use_projected() is True
 
 
 def test_distance_calibration_persistence(tmp_path: Path) -> None:

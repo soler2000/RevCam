@@ -29,6 +29,7 @@ from .distance import (
 )
 
 DEFAULT_DISTANCE_OVERLAY_ENABLED = True
+DEFAULT_DISTANCE_USE_PROJECTED = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -527,6 +528,37 @@ def _parse_distance_overlay_enabled(value: Any, *, default: bool) -> bool:
     raise ValueError("Distance overlay flag must be a boolean value")
 
 
+def _parse_distance_use_projected(value: Any, *, default: bool) -> bool:
+    if value is None:
+        return default
+    candidate: Any
+    if isinstance(value, Mapping):
+        if "use_projected_distance" in value:
+            candidate = value.get("use_projected_distance", default)
+        else:
+            distance_payload = value.get("distance") if "distance" in value else None
+            display_payload = value.get("display") if "display" in value else None
+            if isinstance(display_payload, Mapping):
+                candidate = display_payload.get("use_projected", default)
+            elif isinstance(distance_payload, Mapping):
+                candidate = distance_payload.get("use_projected_distance", default)
+            else:
+                candidate = default
+    else:
+        candidate = value
+    if isinstance(candidate, bool):
+        return candidate
+    if isinstance(candidate, (int, float)):
+        return bool(candidate)
+    if isinstance(candidate, str):
+        normalised = candidate.strip().lower()
+        if normalised in {"1", "true", "yes", "on", "projected"}:
+            return True
+        if normalised in {"0", "false", "no", "off", "actual"}:
+            return False
+    raise ValueError("Distance display mode must be a boolean value")
+
+
 def _parse_battery_limits(value: Any, *, default: BatteryLimits) -> BatteryLimits:
     if value is None:
         return default
@@ -593,6 +625,7 @@ class ConfigManager:
             self._distance_calibration,
             self._distance_overlay_enabled,
             self._distance_mounting,
+            self._distance_use_projected,
             self._battery_limits,
             self._battery_capacity,
             self._stream_settings,
@@ -612,6 +645,7 @@ class ConfigManager:
         DistanceCalibration,
         bool,
         DistanceMounting,
+        bool,
         BatteryLimits,
         int,
         StreamSettings,
@@ -626,6 +660,7 @@ class ConfigManager:
                 DEFAULT_DISTANCE_CALIBRATION,
                 DEFAULT_DISTANCE_OVERLAY_ENABLED,
                 DEFAULT_DISTANCE_MOUNTING,
+                DEFAULT_DISTANCE_USE_PROJECTED,
                 DEFAULT_BATTERY_LIMITS,
                 DEFAULT_BATTERY_CAPACITY_MAH,
                 DEFAULT_STREAM_SETTINGS,
@@ -661,6 +696,9 @@ class ConfigManager:
             distance_mounting = _parse_distance_mounting(
                 distance_payload, default=DEFAULT_DISTANCE_MOUNTING
             )
+            distance_use_projected = _parse_distance_use_projected(
+                distance_payload, default=DEFAULT_DISTANCE_USE_PROJECTED
+            )
 
             battery_payload = payload.get("battery")
             battery_limits = _parse_battery_limits(
@@ -688,6 +726,7 @@ class ConfigManager:
                 distance_calibration,
                 distance_overlay_enabled,
                 distance_mounting,
+                distance_use_projected,
                 battery_limits,
                 battery_capacity,
                 stream_settings,
@@ -706,6 +745,7 @@ class ConfigManager:
                 "calibration": self._distance_calibration.to_dict(),
                 "overlay_enabled": self._distance_overlay_enabled,
                 "geometry": self._distance_mounting.to_dict(),
+                "use_projected_distance": self._distance_use_projected,
             },
             "battery": {
                 "limits": self._battery_limits.to_dict(),
@@ -804,6 +844,17 @@ class ConfigManager:
             self._save()
         return mounting
 
+    def get_distance_use_projected(self) -> bool:
+        with self._lock:
+            return self._distance_use_projected
+
+    def set_distance_use_projected(self, value: Any) -> bool:
+        use_projected = _parse_distance_use_projected(value, default=self._distance_use_projected)
+        with self._lock:
+            self._distance_use_projected = use_projected
+            self._save()
+        return use_projected
+
     def get_battery_limits(self) -> BatteryLimits:
         with self._lock:
             return self._battery_limits
@@ -866,4 +917,5 @@ __all__ = [
     "DEFAULT_REVERSING_AIDS",
     "DistanceMounting",
     "DEFAULT_DISTANCE_MOUNTING",
+    "DEFAULT_DISTANCE_USE_PROJECTED",
 ]

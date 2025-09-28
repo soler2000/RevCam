@@ -107,6 +107,8 @@ def test_distance_endpoint_returns_reading(client: TestClient) -> None:
     assert payload["distance_m"] == pytest.approx(1.25)
     assert payload["raw_distance_m"] == pytest.approx(1.25)
     assert payload["zone"] == "warning"
+    assert payload["display_distance_m"] == pytest.approx(1.25)
+    assert payload["use_projected_distance"] is False
     assert payload["zones"]["danger"] > 0
     assert payload["calibration"]["offset_m"] == pytest.approx(0.0)
     assert payload["calibration"]["scale"] == pytest.approx(1.0)
@@ -133,7 +135,8 @@ def test_distance_zone_update_returns_updated_values(client: TestClient) -> None
     assert payload["zones"]["caution"] == pytest.approx(4.0)
     assert payload["zones"]["warning"] == pytest.approx(2.5)
     assert payload["zones"]["danger"] == pytest.approx(1.0)
-    assert payload["zone"] == "danger"
+    assert payload["display_distance_m"] == pytest.approx(1.25)
+    assert payload["zone"] == "warning"
     assert payload["calibration"]["scale"] == pytest.approx(1.0)
 
 
@@ -160,6 +163,7 @@ def test_distance_calibration_update_persists(client: TestClient) -> None:
     assert payload["calibration"]["scale"] == pytest.approx(1.2)
     expected_distance = monitor.raw_value * 1.2 + 0.4
     assert payload["distance_m"] == pytest.approx(expected_distance)
+    assert payload["display_distance_m"] == pytest.approx(expected_distance)
     current_calibration = monitor.get_calibration()
     assert current_calibration.offset_m == pytest.approx(0.4)
     assert current_calibration.scale == pytest.approx(1.2)
@@ -192,6 +196,7 @@ def test_distance_calibration_zero_endpoint(client: TestClient) -> None:
     assert payload["calibration"]["offset_m"] == pytest.approx(-0.35, rel=1e-6)
     assert payload["calibration"]["scale"] == pytest.approx(1.0)
     assert payload["distance_m"] == pytest.approx(0.0, abs=1e-6)
+    assert payload["display_distance_m"] == pytest.approx(0.0, abs=1e-6)
     config_data = json.loads(Path(client.config_path).read_text())
     calibration = config_data["distance"]["calibration"]
     assert calibration["offset_m"] == pytest.approx(-0.35, rel=1e-6)
@@ -213,6 +218,31 @@ def test_distance_geometry_endpoint_returns_defaults(client: TestClient) -> None
         * math.tan(math.radians(DEFAULT_DISTANCE_MOUNTING.mount_angle_deg))
     )
     assert payload["projected_distance_m"] == pytest.approx(expected_projection)
+    assert payload["use_projected_distance"] is False
+
+
+def test_distance_display_mode_toggle(client: TestClient) -> None:
+    response = client.post(
+        "/api/distance/display",
+        json={"use_projected_distance": True},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["use_projected_distance"] is True
+    expected_projection = (
+        DEFAULT_DISTANCE_MOUNTING.mount_height_m
+        * math.tan(math.radians(DEFAULT_DISTANCE_MOUNTING.mount_angle_deg))
+    )
+    assert payload["projected_distance_m"] == pytest.approx(expected_projection)
+    assert payload["display_distance_m"] == pytest.approx(expected_projection)
+    assert payload["zone"] == "warning"
+    config_data = json.loads(Path(client.config_path).read_text())
+    assert config_data["distance"]["use_projected_distance"] is True
+    follow_up = client.get("/api/distance")
+    assert follow_up.status_code == 200
+    follow_payload = follow_up.json()
+    assert follow_payload["use_projected_distance"] is True
+    assert follow_payload["display_distance_m"] == pytest.approx(expected_projection)
 
 
 def test_distance_geometry_update_persists(client: TestClient) -> None:
