@@ -25,14 +25,55 @@ def create_reversing_aids_overlay(
 ) -> OverlayFn:
     """Return an overlay function that renders reversing aid guides."""
 
+    cached_overlay: _np.ndarray | None = None
+    cached_mask: _np.ndarray | None = None
+    cached_shape: tuple[int, ...] | None = None
+    cached_config: ReversingAidsConfig | None = None
+    frames_since_refresh = 0
+
     def _overlay(frame: object) -> object:
+        nonlocal cached_overlay, cached_mask, cached_shape, cached_config, frames_since_refresh
+
         if _np is None or not isinstance(frame, _np.ndarray):  # pragma: no cover - optional path
             return frame
 
         config = config_provider()
         if not config.enabled:
+            cached_overlay = None
+            cached_mask = None
+            cached_shape = None
+            cached_config = None
+            frames_since_refresh = 0
             return frame
-        return _render_reversing_aids(frame, config)
+
+        needs_refresh = False
+        if cached_overlay is None or cached_mask is None:
+            needs_refresh = True
+        elif frame.shape != cached_shape:
+            needs_refresh = True
+        elif cached_config != config:
+            needs_refresh = True
+        elif frames_since_refresh >= 10:
+            needs_refresh = True
+
+        if needs_refresh:
+            overlay = _np.zeros_like(frame)
+            overlay = _render_reversing_aids(overlay, config)
+            mask = _np.any(overlay != 0, axis=2) if overlay.ndim == 3 else overlay != 0
+
+            cached_overlay = overlay
+            cached_mask = mask
+            cached_shape = frame.shape
+            cached_config = config
+            frames_since_refresh = 0
+        else:
+            frames_since_refresh += 1
+
+        if cached_overlay is None or cached_mask is None:
+            return frame
+
+        frame[cached_mask] = cached_overlay[cached_mask]
+        return frame
 
     return _overlay
 
