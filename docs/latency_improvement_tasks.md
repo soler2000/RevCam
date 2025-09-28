@@ -7,6 +7,8 @@ The review below highlights hotspots in the current pipeline that can introduce 
 
 *Task*: Move the VL53L1X sampling loop into its own async task or thread that continually refreshes a cached reading. The overlay should consume the latest cached value without performing I/O on the render path. This decouples slow sensor hardware from the camera frame cadence and reduces latency spikes. Measure end-to-end latency before/after to verify improvement.
 
+*Result*: The `DistanceMonitor` now samples in a dedicated daemon thread and the overlay simply reads the cached value. A synthetic benchmark with a 50 ms sensor delay shows the overlay call time dropping from roughly 50 ms to about 1 ms per frame once the sensor I/O moved off the render path.【F:src/rev_cam/distance.py†L506-L612】【F:scripts/measure_distance_overlay_latency.py†L1-L93】【0e82bd†L1-L3】
+
 ## 2. Run MJPEG pipeline transforms off the event loop
 *Problem*: The MJPEG producer executes `FramePipeline.process()` inline on the event loop and only offloads JPEG encoding to a worker thread. Overlay rendering performs multiple CPU-heavy operations (e.g., distance text blending and reversing-aid rasterisation), so running it inline competes with connection handling and increases frame times.【F:src/rev_cam/streaming.py†L229-L258】【F:src/rev_cam/pipeline.py†L22-L48】
 
