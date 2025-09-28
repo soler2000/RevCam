@@ -641,7 +641,6 @@ def create_distance_overlay(
             reading,
             zone,
             display_distance=display_value,
-            projected_mode=use_projected and display_value is not None,
         )
 
     return _overlay
@@ -653,7 +652,6 @@ def _render_distance_overlay(
     zone: str | None,
     *,
     display_distance: float | None = None,
-    projected_mode: bool = False,
 ):
     if _np is None or not isinstance(frame, _np.ndarray):  # pragma: no cover - optional guard
         return frame
@@ -680,8 +678,6 @@ def _render_distance_overlay(
         (distance_text, main_scale, 0.8),
         (label, secondary_scale, 0.55),
     ]
-    if projected_mode:
-        line_specs.append(("PROJECTED", secondary_scale, 0.45))
 
     measurements: list[tuple[int, int]] = []
     for text, scale, _ in line_specs:
