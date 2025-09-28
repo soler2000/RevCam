@@ -6,9 +6,11 @@ import logging
 import math
 import os
 import string
+from datetime import datetime
 from pathlib import Path
+from typing import Any
 
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import Body, FastAPI, HTTPException, Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from pydantic import BaseModel, Field
@@ -33,6 +35,12 @@ from .led_matrix import LedRing
 from .reversing_aids import create_reversing_aids_overlay
 from .pipeline import FramePipeline
 from .streaming import MJPEGStreamer, WebRTCManager, encode_frame_to_jpeg
+from .surveillance import (
+    ClipFilters,
+    ModeManager,
+    ModeSwitchError,
+    SurveillanceManager,
+)
 from .version import APP_VERSION
 from .wifi import WiFiCredentialStore, WiFiError, WiFiManager
 
@@ -183,10 +191,20 @@ class LedSettingsPayload(BaseModel):
     illumination_intensity: float | int | None = None
 
 
+class ModePayload(BaseModel):
+    mode: str
+
+
+class ClipBulkPayload(BaseModel):
+    ids: list[int]
+
+
 def create_app(
     config_path: Path | str = Path("data/config.json"),
     *,
     wifi_manager: WiFiManager | None = None,
+    surveillance_manager: SurveillanceManager | None = None,
+    mode_manager: ModeManager | None = None,
 ) -> FastAPI:
     app = FastAPI(title="RevCam", version=APP_VERSION)
 
@@ -194,6 +212,9 @@ def create_app(
 
     config_path = Path(config_path)
     config_manager = ConfigManager(config_path)
+    surveillance_root = Path(os.environ.get("REVCAM_SURVEILLANCE_ROOT", "data/surveillance"))
+    surveillance_manager = surveillance_manager or SurveillanceManager(base_path=surveillance_root)
+    mode_manager = mode_manager or ModeManager()
 
     CALIBRATION_OFFSET_LIMIT = 5.0
     CALIBRATION_SCALE_MIN = 0.5
@@ -1268,6 +1289,107 @@ def create_app(
         if payload.stack:
             logger.debug("Client WebRTC error stack trace:\n%s", payload.stack)
         return {"status": "logged"}
+
+    @app.get("/api/mode")
+    def get_mode() -> dict[str, str]:
+        return {"mode": mode_manager.current_mode()}
+
+    @app.post("/api/mode")
+    def set_mode(payload: ModePayload) -> dict[str, str]:
+        try:
+            new_mode = mode_manager.set_mode(payload.mode)
+        except ModeSwitchError as exc:
+            raise HTTPException(status_code=423, detail=str(exc)) from exc
+        return {"mode": new_mode}
+
+    @app.get("/api/surv/settings")
+    def get_surveillance_settings() -> dict[str, Any]:
+        return surveillance_manager.load_settings().to_dict()
+
+    @app.put("/api/surv/settings")
+    def update_surveillance_settings(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+        try:
+            settings = surveillance_manager.save_settings(payload)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return settings.to_dict()
+
+    @app.get("/api/surv/clips")
+    def list_surveillance_clips(
+        from_ts: datetime | None = None,
+        to_ts: datetime | None = None,
+        page: int = 1,
+        page_size: int = 50,
+        sort: str = "-start_ts",
+    ) -> dict[str, Any]:
+        filters = ClipFilters(
+            from_ts=from_ts,
+            to_ts=to_ts,
+            page=page,
+            page_size=page_size,
+            sort=sort,
+        )
+        records, total = surveillance_manager.list_clips(filters)
+        return {
+            "items": [record.to_dict() for record in records],
+            "total": total,
+            "page": filters.page,
+            "page_size": filters.page_size,
+        }
+
+    @app.get("/api/surv/clips/{clip_id}")
+    def get_surveillance_clip(clip_id: int) -> dict[str, Any]:
+        return surveillance_manager.get_clip(clip_id).to_dict()
+
+    @app.get("/api/surv/clips/{clip_id}/stream")
+    def stream_surveillance_clip(clip_id: int) -> FileResponse:
+        record = surveillance_manager.get_clip(clip_id)
+        path = Path(record.path)
+        if not path.exists():
+            raise HTTPException(status_code=404, detail="Clip file missing")
+        return FileResponse(path, media_type="video/mp4", filename=path.name)
+
+    @app.get("/api/surv/clips/{clip_id}/thumb")
+    def get_surveillance_thumbnail(clip_id: int) -> FileResponse:
+        record = surveillance_manager.get_clip(clip_id)
+        if not record.thumb_path:
+            raise HTTPException(status_code=404, detail="Thumbnail unavailable")
+        thumb = Path(record.thumb_path)
+        if not thumb.exists():
+            raise HTTPException(status_code=404, detail="Thumbnail missing")
+        return FileResponse(thumb, media_type="image/jpeg", filename=thumb.name)
+
+    @app.post("/api/surv/clips/export")
+    def export_surveillance_clips(payload: ClipBulkPayload) -> dict[str, str]:
+        export_path = surveillance_manager.export_clips(payload.ids)
+        return {"zip_url": f"/api/surv/exports/{export_path.name}"}
+
+    @app.get("/api/surv/exports/{filename}")
+    def download_surveillance_export(filename: str) -> FileResponse:
+        base = surveillance_manager.exports_path.resolve()
+        target = (surveillance_manager.exports_path / filename).resolve()
+        try:
+            target.relative_to(base)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Invalid export filename") from exc
+        if not target.exists():
+            raise HTTPException(status_code=404, detail="Export not found")
+        return FileResponse(target, media_type="application/zip", filename=target.name)
+
+    @app.delete("/api/surv/clips")
+    def delete_surveillance_clips(payload: ClipBulkPayload) -> dict[str, int]:
+        removed = surveillance_manager.delete_clips(payload.ids)
+        return {"removed": removed}
+
+    @app.post("/api/surv/test-motion")
+    def trigger_surveillance_test_motion() -> dict[str, Any]:
+        record = surveillance_manager.create_test_clip()
+        return {"clip": record.to_dict()}
+
+    @app.post("/api/surv/purge")
+    def purge_surveillance_storage() -> dict[str, int]:
+        removed = surveillance_manager.apply_retention()
+        return {"purged": removed}
 
     return app
 
