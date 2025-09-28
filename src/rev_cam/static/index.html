@@ -262,6 +262,12 @@
         font-weight: 600;
         transition: color var(--transition), box-shadow var(--transition);
       }
+      .status-pill,
+      .battery-pill,
+      .illumination-pill {
+        flex: 1 1 clamp(16rem, 23vw, 22rem);
+        min-height: 3.25rem;
+      }
       .illumination-pill {
         display: inline-flex;
         flex-wrap: wrap;
@@ -632,7 +638,8 @@
           align-items: stretch;
         }
         .status-pill,
-        .battery-pill {
+        .battery-pill,
+        .illumination-pill {
           width: 100%;
         }
         #status,
