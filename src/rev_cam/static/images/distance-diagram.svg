@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 300" role="img" aria-labelledby="title desc">
+  <title id="title">Distance sensor mounting diagram</title>
+  <desc id="desc">Diagram showing a distance sensor mounted above the ground at height h and angled theta from vertical, forming a right triangle to the ground distance.</desc>
+  <defs>
+    <linearGradient id="groundGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#2d3142" />
+      <stop offset="100%" stop-color="#1f2230" />
+    </linearGradient>
+    <linearGradient id="skyGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#10131a" />
+      <stop offset="100%" stop-color="#181b26" />
+    </linearGradient>
+  </defs>
+  <rect width="480" height="300" fill="url(#skyGradient)" rx="16" ry="16" />
+  <rect y="232" width="480" height="68" fill="url(#groundGradient)" />
+  <g transform="translate(120,40)">
+    <path d="M0,192 L280,192" stroke="#5c637a" stroke-width="4" stroke-linecap="round" />
+    <path d="M0,0 L0,192" stroke="#5c637a" stroke-width="4" stroke-linecap="round" />
+    <path d="M0,0 L280,192" fill="rgba(88, 135, 255, 0.18)" stroke="#2f95ff" stroke-width="3" />
+    <circle cx="0" cy="0" r="10" fill="#0a84ff" />
+    <g transform="translate(-38,-20)">
+      <rect width="64" height="28" rx="6" ry="6" fill="#1f2636" stroke="#0a84ff" stroke-width="2" />
+      <text x="32" y="18" fill="#f5f7fb" font-family="Inter, sans-serif" font-size="14" text-anchor="middle">Sensor</text>
+    </g>
+    <path d="M-14,0 L-14,192" stroke="#8f9bb7" stroke-width="2" stroke-dasharray="6 6" />
+    <path d="M0,192 L0,204" stroke="#f5f7fb" stroke-width="2" />
+    <path d="M280,192 L280,204" stroke="#f5f7fb" stroke-width="2" />
+    <path d="M-12,192 L-24,204" stroke="#f5f7fb" stroke-width="2" />
+    <path d="M-12,0 L-24,12" stroke="#f5f7fb" stroke-width="2" />
+    <text x="-40" y="100" fill="#c8d1e5" font-family="Inter, sans-serif" font-size="16" transform="rotate(-90,-40,100)">h</text>
+    <text x="140" y="220" fill="#c8d1e5" font-family="Inter, sans-serif" font-size="16">Projected distance</text>
+    <path d="M32,32 A40 40 0 0 1 62,72" fill="none" stroke="#ff9f0a" stroke-width="3" />
+    <text x="70" y="76" fill="#ffb347" font-family="Inter, sans-serif" font-size="16">θ</text>
+    <text x="150" y="150" fill="#9fb7ff" font-family="Inter, sans-serif" font-size="16">Ground plane</text>
+  </g>
+</svg>

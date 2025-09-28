@@ -15,7 +15,13 @@ from pydantic import BaseModel, Field
 
 from .battery import BatteryMonitor, BatterySupervisor, create_battery_overlay
 from .camera import CAMERA_SOURCES, BaseCamera, CameraError, create_camera, identify_camera
-from .config import ConfigManager, Resolution, RESOLUTION_PRESETS, StreamSettings
+from .config import (
+    ConfigManager,
+    DistanceMounting,
+    Resolution,
+    RESOLUTION_PRESETS,
+    StreamSettings,
+)
 from .diagnostics import collect_diagnostics
 from .distance import DistanceCalibration, DistanceMonitor, create_distance_overlay
 from .led_matrix import LedRing
@@ -33,6 +39,12 @@ def _load_static(name: str) -> str:
     if not path.exists():  # pragma: no cover - sanity check
         raise FileNotFoundError(f"Static asset {name!r} missing")
     return path.read_text(encoding="utf-8")
+
+
+def _project_ground_distance(mounting: DistanceMounting) -> float | None:
+    angle_rad = math.radians(mounting.mount_angle_deg)
+    projection = mounting.mount_height_m * math.tan(angle_rad)
+    return projection if math.isfinite(projection) else None
 
 
 class OrientationPayload(BaseModel):
@@ -74,6 +86,11 @@ class DistanceZonesPayload(BaseModel):
 class DistanceCalibrationPayload(BaseModel):
     offset_m: float
     scale: float
+
+
+class DistanceGeometryPayload(BaseModel):
+    mount_height_m: float
+    mount_angle_deg: float
 
 
 class DistanceOverlayPayload(BaseModel):
@@ -681,6 +698,9 @@ def create_app(
         payload["zones"] = zones.to_dict()
         payload["calibration"] = config_manager.get_distance_calibration().to_dict()
         payload["overlay_enabled"] = config_manager.get_distance_overlay_enabled()
+        mounting = config_manager.get_distance_mounting()
+        payload["geometry"] = mounting.to_dict()
+        payload["projected_distance_m"] = _project_ground_distance(mounting)
         return payload
 
     @app.get("/api/distance/zones")
@@ -700,6 +720,9 @@ def create_app(
         response["zones"] = zones.to_dict()
         response["calibration"] = config_manager.get_distance_calibration().to_dict()
         response["overlay_enabled"] = config_manager.get_distance_overlay_enabled()
+        mounting = config_manager.get_distance_mounting()
+        response["geometry"] = mounting.to_dict()
+        response["projected_distance_m"] = _project_ground_distance(mounting)
         return response
 
     @app.get("/api/distance/calibration")
@@ -724,6 +747,36 @@ def create_app(
         response["zones"] = zones.to_dict()
         response["calibration"] = calibration.to_dict()
         response["overlay_enabled"] = config_manager.get_distance_overlay_enabled()
+        mounting = config_manager.get_distance_mounting()
+        response["geometry"] = mounting.to_dict()
+        response["projected_distance_m"] = _project_ground_distance(mounting)
+        return response
+
+    @app.get("/api/distance/geometry")
+    async def get_distance_geometry() -> dict[str, object | None]:
+        mounting = config_manager.get_distance_mounting()
+        return {
+            "geometry": mounting.to_dict(),
+            "projected_distance_m": _project_ground_distance(mounting),
+        }
+
+    @app.post("/api/distance/geometry")
+    async def update_distance_geometry(
+        payload: DistanceGeometryPayload,
+    ) -> dict[str, object | None]:
+        try:
+            mounting = config_manager.set_distance_mounting(payload.model_dump())
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        zones = config_manager.get_distance_zones()
+        reading = distance_monitor.read()
+        response = reading.to_dict()
+        response["zone"] = zones.classify(reading.distance_m)
+        response["zones"] = zones.to_dict()
+        response["calibration"] = config_manager.get_distance_calibration().to_dict()
+        response["overlay_enabled"] = config_manager.get_distance_overlay_enabled()
+        response["geometry"] = mounting.to_dict()
+        response["projected_distance_m"] = _project_ground_distance(mounting)
         return response
 
     @app.post("/api/distance/calibration/zero")
@@ -751,6 +804,9 @@ def create_app(
         response["zones"] = zones.to_dict()
         response["calibration"] = calibration.to_dict()
         response["overlay_enabled"] = config_manager.get_distance_overlay_enabled()
+        mounting = config_manager.get_distance_mounting()
+        response["geometry"] = mounting.to_dict()
+        response["projected_distance_m"] = _project_ground_distance(mounting)
         return response
 
     @app.post("/api/distance/overlay")

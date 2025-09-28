@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import types
 import json
+import math
 from pathlib import Path
 
 import pytest
@@ -15,6 +16,7 @@ from fastapi.testclient import TestClient
 
 from rev_cam import app as app_module
 from rev_cam.distance import DistanceCalibration, DistanceReading
+from rev_cam.config import DEFAULT_DISTANCE_MOUNTING
 
 
 @pytest.fixture
@@ -108,6 +110,17 @@ def test_distance_endpoint_returns_reading(client: TestClient) -> None:
     assert payload["zones"]["danger"] > 0
     assert payload["calibration"]["offset_m"] == pytest.approx(0.0)
     assert payload["calibration"]["scale"] == pytest.approx(1.0)
+    assert payload["geometry"]["mount_height_m"] == pytest.approx(
+        DEFAULT_DISTANCE_MOUNTING.mount_height_m
+    )
+    assert payload["geometry"]["mount_angle_deg"] == pytest.approx(
+        DEFAULT_DISTANCE_MOUNTING.mount_angle_deg
+    )
+    expected_projection = (
+        DEFAULT_DISTANCE_MOUNTING.mount_height_m
+        * math.tan(math.radians(DEFAULT_DISTANCE_MOUNTING.mount_angle_deg))
+    )
+    assert payload["projected_distance_m"] == pytest.approx(expected_projection)
 
 
 def test_distance_zone_update_returns_updated_values(client: TestClient) -> None:
@@ -183,3 +196,37 @@ def test_distance_calibration_zero_endpoint(client: TestClient) -> None:
     calibration = config_data["distance"]["calibration"]
     assert calibration["offset_m"] == pytest.approx(-0.35, rel=1e-6)
     assert calibration["scale"] == pytest.approx(1.0)
+
+
+def test_distance_geometry_endpoint_returns_defaults(client: TestClient) -> None:
+    response = client.get("/api/distance/geometry")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["geometry"]["mount_height_m"] == pytest.approx(
+        DEFAULT_DISTANCE_MOUNTING.mount_height_m
+    )
+    assert payload["geometry"]["mount_angle_deg"] == pytest.approx(
+        DEFAULT_DISTANCE_MOUNTING.mount_angle_deg
+    )
+    expected_projection = (
+        DEFAULT_DISTANCE_MOUNTING.mount_height_m
+        * math.tan(math.radians(DEFAULT_DISTANCE_MOUNTING.mount_angle_deg))
+    )
+    assert payload["projected_distance_m"] == pytest.approx(expected_projection)
+
+
+def test_distance_geometry_update_persists(client: TestClient) -> None:
+    response = client.post(
+        "/api/distance/geometry",
+        json={"mount_height_m": 1.9, "mount_angle_deg": 32.0},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["geometry"]["mount_height_m"] == pytest.approx(1.9)
+    assert payload["geometry"]["mount_angle_deg"] == pytest.approx(32.0)
+    expected_projection = 1.9 * math.tan(math.radians(32.0))
+    assert payload["projected_distance_m"] == pytest.approx(expected_projection)
+    config_data = json.loads(Path(client.config_path).read_text())
+    geometry = config_data["distance"]["geometry"]
+    assert geometry["mount_height_m"] == pytest.approx(1.9)
+    assert geometry["mount_angle_deg"] == pytest.approx(32.0)

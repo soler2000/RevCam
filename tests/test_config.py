@@ -7,6 +7,7 @@ from rev_cam.battery import BatteryLimits
 from rev_cam.config import (
     ConfigManager,
     DistanceZones,
+    DistanceMounting,
     Orientation,
     ReversingAidPoint,
     ReversingAidsConfig,
@@ -15,6 +16,7 @@ from rev_cam.config import (
     DEFAULT_BATTERY_CAPACITY_MAH,
     DEFAULT_CAMERA_CHOICE,
     DEFAULT_REVERSING_AIDS,
+    DEFAULT_DISTANCE_MOUNTING,
 )
 from rev_cam.distance import DistanceCalibration
 
@@ -85,6 +87,14 @@ def test_default_distance_calibration(tmp_path: Path) -> None:
     assert calibration.scale == pytest.approx(1.0)
 
 
+def test_default_distance_mounting(tmp_path: Path) -> None:
+    manager = ConfigManager(tmp_path / "config.json")
+    mounting = manager.get_distance_mounting()
+    assert isinstance(mounting, DistanceMounting)
+    assert mounting.mount_height_m == pytest.approx(DEFAULT_DISTANCE_MOUNTING.mount_height_m)
+    assert mounting.mount_angle_deg == pytest.approx(DEFAULT_DISTANCE_MOUNTING.mount_angle_deg)
+
+
 def test_distance_calibration_persistence(tmp_path: Path) -> None:
     config_file = tmp_path / "config.json"
     manager = ConfigManager(config_file)
@@ -98,6 +108,23 @@ def test_distance_calibration_validation(tmp_path: Path) -> None:
     manager = ConfigManager(tmp_path / "config.json")
     with pytest.raises(ValueError):
         manager.set_distance_calibration({"offset_m": "invalid", "scale": 1.0})
+
+
+def test_distance_mounting_persistence(tmp_path: Path) -> None:
+    config_file = tmp_path / "config.json"
+    manager = ConfigManager(config_file)
+    updated = manager.set_distance_mounting({"mount_height_m": 1.8, "mount_angle_deg": 35.0})
+    assert isinstance(updated, DistanceMounting)
+    reloaded = ConfigManager(config_file)
+    assert reloaded.get_distance_mounting() == updated
+
+
+def test_distance_mounting_validation(tmp_path: Path) -> None:
+    manager = ConfigManager(tmp_path / "config.json")
+    with pytest.raises(ValueError):
+        manager.set_distance_mounting({"mount_height_m": -1.0, "mount_angle_deg": 40.0})
+    with pytest.raises(ValueError):
+        manager.set_distance_mounting({"mount_height_m": 1.0, "mount_angle_deg": 120.0})
 
 
 def test_default_battery_limits(tmp_path: Path):

@@ -1176,6 +1176,62 @@
         letter-spacing: 0.08em;
         text-transform: uppercase;
       }
+      .distance-geometry-layout {
+        display: grid;
+        gap: var(--stack-gap-lg);
+        align-items: start;
+      }
+      @media (min-width: 900px) {
+        .distance-geometry-layout {
+          grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        }
+      }
+      .distance-geometry-figure {
+        margin: 0;
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-sm);
+        align-items: center;
+        text-align: center;
+      }
+      .distance-geometry-figure img {
+        max-width: 100%;
+        height: auto;
+        border-radius: var(--radius-md);
+        background: var(--surface-muted);
+        border: 1px solid var(--border-subtle);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+      }
+      .distance-geometry-form {
+        display: grid;
+        gap: var(--stack-gap);
+      }
+      .distance-geometry-form label {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-sm);
+        margin: 0;
+      }
+      .distance-geometry-result {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-xs);
+        padding: var(--stack-gap);
+        border-radius: var(--radius-md);
+        background: var(--surface-soft);
+        border: 1px solid var(--border-muted);
+      }
+      .distance-geometry-result-label {
+        font-size: 0.85rem;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--text-muted);
+      }
+      .distance-geometry-result-value {
+        font-size: 1.4rem;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+      }
       .zone-badge.clear {
         color: var(--success);
         background: var(--success-soft);
@@ -1594,6 +1650,59 @@
               role="status"
               aria-live="polite"
             ></p>
+          </section>
+
+          <section class="card distance-geometry-card">
+            <h2>Mounting geometry</h2>
+            <p class="muted helper-text">
+              Configure the sensor height and tilt to calculate the projected ground distance using
+              basic trigonometry.
+            </p>
+            <div class="distance-geometry-layout">
+              <figure class="distance-geometry-figure">
+                <img
+                  src="images/distance-diagram.svg"
+                  alt="Diagram showing the sensor mounted above the ground with labelled height and projected distance"
+                />
+                <figcaption class="muted helper-text">
+                  The distance sensor is mounted height <em>h</em> above the ground and angled
+                  <em>θ</em> from vertical, producing a ground distance of
+                  <em>h × tan&nbsp;θ</em>.
+                </figcaption>
+              </figure>
+              <form id="distance-geometry-form" class="distance-geometry-form">
+                <label>
+                  Mount height (m)
+                  <input
+                    type="number"
+                    name="mount_height_m"
+                    min="0.1"
+                    max="5"
+                    step="0.01"
+                    inputmode="decimal"
+                  />
+                </label>
+                <label>
+                  Mount angle (° from vertical)
+                  <input
+                    type="number"
+                    name="mount_angle_deg"
+                    min="0"
+                    max="89"
+                    step="0.1"
+                    inputmode="decimal"
+                  />
+                </label>
+                <div class="distance-geometry-result">
+                  <span class="distance-geometry-result-label">Projected ground distance</span>
+                  <span class="distance-geometry-result-value" id="distance-projected-value">—</span>
+                </div>
+                <div class="form-actions">
+                  <button type="submit">Save geometry</button>
+                  <div id="distance-geometry-status" class="muted helper-text status-text"></div>
+                </div>
+              </form>
+            </div>
           </section>
 
           <form id="distance-calibration-form" class="card">
@@ -2274,6 +2383,18 @@
       const distanceRefreshButton = document.getElementById("distance-refresh");
       const distanceOverlayToggle = document.getElementById("distance-overlay-toggle");
       const distanceOverlayStatus = document.getElementById("distance-overlay-status");
+      const distanceGeometryForm = document.getElementById("distance-geometry-form");
+      const distanceGeometryStatus = document.getElementById("distance-geometry-status");
+      const distanceGeometrySubmit = distanceGeometryForm
+        ? distanceGeometryForm.querySelector('button[type="submit"]')
+        : null;
+      const distanceProjectedValue = document.getElementById("distance-projected-value");
+      const distanceGeometryInputs = distanceGeometryForm
+        ? {
+            height: distanceGeometryForm.querySelector('input[name="mount_height_m"]'),
+            angle: distanceGeometryForm.querySelector('input[name="mount_angle_deg"]'),
+          }
+        : null;
       const distanceZonesForm = document.getElementById("distance-zones-form");
       const distanceZonesStatus = document.getElementById("distance-zones-status");
       const distanceInputs = distanceZonesForm
@@ -2295,6 +2416,8 @@
       let distanceLoading = false;
       let distanceCalibrationStatusTimer = null;
       let distanceOverlayStatusTimer = null;
+      let distanceGeometryStatusTimer = null;
+      let distanceGeometrySaving = false;
       const developmentToggle = document.getElementById("development-toggle");
       const developmentStatus = document.getElementById("development-status");
       const developmentDistanceCard = document.getElementById("development-distance-card");
@@ -2333,6 +2456,18 @@
               input.dataset.userEdited = "true";
               if (distanceCalibrationStatus) {
                 distanceCalibrationStatus.textContent = "";
+              }
+            });
+          }
+        }
+      }
+      if (distanceGeometryInputs) {
+        for (const input of Object.values(distanceGeometryInputs)) {
+          if (input instanceof HTMLInputElement) {
+            input.addEventListener("input", () => {
+              input.dataset.userEdited = "true";
+              if (distanceGeometryStatus) {
+                distanceGeometryStatus.textContent = "";
               }
             });
           }
@@ -3553,6 +3688,28 @@
         }
       }
 
+      function setDistanceGeometryStatus(message, options = {}) {
+        if (!distanceGeometryStatus) {
+          return;
+        }
+        if (distanceGeometryStatusTimer) {
+          window.clearTimeout(distanceGeometryStatusTimer);
+          distanceGeometryStatusTimer = null;
+        }
+        distanceGeometryStatus.textContent = message || "";
+        if (message && options.persistent !== true) {
+          distanceGeometryStatusTimer = window.setTimeout(() => {
+            if (
+              distanceGeometryStatus &&
+              distanceGeometryStatus.textContent === message
+            ) {
+              distanceGeometryStatus.textContent = "";
+            }
+            distanceGeometryStatusTimer = null;
+          }, 4000);
+        }
+      }
+
       function formatCalibrationValue(value, fractionDigits) {
         if (typeof value !== "number" || !Number.isFinite(value)) {
           return "";
@@ -3603,6 +3760,39 @@
             input.value = "";
           }
           delete input.dataset.userEdited;
+        }
+      }
+
+      function updateDistanceGeometryInputs(geometry, forceUpdate = false) {
+        if (!distanceGeometryInputs || typeof geometry !== "object" || geometry === null) {
+          return;
+        }
+        const heightInput = distanceGeometryInputs.height;
+        const angleInput = distanceGeometryInputs.angle;
+        if (
+          heightInput instanceof HTMLInputElement &&
+          (forceUpdate || heightInput.dataset.userEdited !== "true")
+        ) {
+          heightInput.value = formatCalibrationValue(geometry.mount_height_m, 2);
+          delete heightInput.dataset.userEdited;
+        }
+        if (
+          angleInput instanceof HTMLInputElement &&
+          (forceUpdate || angleInput.dataset.userEdited !== "true")
+        ) {
+          angleInput.value = formatCalibrationValue(geometry.mount_angle_deg, 1);
+          delete angleInput.dataset.userEdited;
+        }
+      }
+
+      function updateProjectedDistanceDisplay(value) {
+        if (!distanceProjectedValue) {
+          return;
+        }
+        if (typeof value === "number" && Number.isFinite(value)) {
+          distanceProjectedValue.textContent = formatDistancePrecise(value, 2);
+        } else {
+          distanceProjectedValue.textContent = "—";
         }
       }
 
@@ -3670,6 +3860,16 @@
           const forceUpdate = options.updateCalibration === true || options.updateInputs === true;
           updateDistanceCalibrationInputs(data.calibration, forceUpdate);
         }
+        if (data && data.geometry) {
+          const forceUpdate = options.updateGeometry === true;
+          updateDistanceGeometryInputs(data.geometry, forceUpdate);
+        }
+        const projected =
+          data && typeof data.projected_distance_m === "number" &&
+          Number.isFinite(data.projected_distance_m)
+            ? data.projected_distance_m
+            : null;
+        updateProjectedDistanceDisplay(projected);
         if (distanceOverlayToggle) {
           const enabled = data && data.overlay_enabled === true;
           const forceUpdate = options.updateInputs === true || options.updateCalibration === true;
@@ -4811,6 +5011,69 @@
             setDistanceCalibrationStatus(message, { persistent: true });
           } finally {
             distanceZeroButton.disabled = false;
+          }
+        });
+      }
+
+      if (distanceGeometryForm) {
+        distanceGeometryForm.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          if (!distanceGeometryInputs || distanceGeometrySaving) {
+            return;
+          }
+          const heightInput = distanceGeometryInputs.height;
+          const angleInput = distanceGeometryInputs.angle;
+          const height =
+            heightInput instanceof HTMLInputElement
+              ? Number.parseFloat(heightInput.value)
+              : Number.NaN;
+          const angle =
+            angleInput instanceof HTMLInputElement
+              ? Number.parseFloat(angleInput.value)
+              : Number.NaN;
+          if (!Number.isFinite(height) || height <= 0) {
+            setDistanceGeometryStatus("Enter a positive mount height.");
+            return;
+          }
+          if (!Number.isFinite(angle) || angle < 0 || angle >= 90) {
+            setDistanceGeometryStatus("Angle must be between 0° and 90°.");
+            return;
+          }
+          setDistanceGeometryStatus("Saving…", { persistent: true });
+          if (distanceGeometrySubmit instanceof HTMLButtonElement) {
+            distanceGeometrySubmit.disabled = true;
+          }
+          distanceGeometrySaving = true;
+          try {
+            const response = await fetch("/api/distance/geometry", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ mount_height_m: height, mount_angle_deg: angle }),
+            });
+            if (!response.ok) {
+              let detail = "Unable to save geometry.";
+              try {
+                const payload = await response.json();
+                if (payload && typeof payload.detail === "string") {
+                  detail = payload.detail;
+                }
+              } catch (err) {
+                console.error(err);
+              }
+              setDistanceGeometryStatus(detail, { persistent: true });
+              return;
+            }
+            const payload = await response.json();
+            applyDistanceData(payload, { updateGeometry: true });
+            setDistanceGeometryStatus("Geometry saved");
+          } catch (error) {
+            console.error(error);
+            setDistanceGeometryStatus("Unable to save geometry.", { persistent: true });
+          } finally {
+            distanceGeometrySaving = false;
+            if (distanceGeometrySubmit instanceof HTMLButtonElement) {
+              distanceGeometrySubmit.disabled = false;
+            }
           }
         });
       }
