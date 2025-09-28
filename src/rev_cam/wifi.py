@@ -755,10 +755,10 @@ class WiFiManager:
         else:
             raise WiFiError("Password must be a string or null")
         supplied_password = cleaned_password if password is not None else None
-        if cleaned_password is None:
-            stored_password = self._credentials.get_network_password(cleaned_ssid)
-            if stored_password:
-                cleaned_password = stored_password
+        stored_password = self._credentials.get_network_password(cleaned_ssid)
+        reuse_stored_password = bool(stored_password) and password is None
+        if cleaned_password is None and stored_password:
+            cleaned_password = stored_password
         attempt_metadata: dict[str, object | None] = {
             "target": cleaned_ssid,
             "development_mode": development_mode,
@@ -782,7 +782,24 @@ class WiFiManager:
                 f"Connection to {cleaned_ssid} failed: {message}.",
                 metadata=attempt_metadata,
             )
+            if reuse_stored_password:
+                fallback = self._auto_enable_hotspot_on_failure(
+                    cleaned_ssid,
+                    message,
+                    metadata=attempt_metadata,
+                )
+                if fallback is not None:
+                    return fallback
             raise
+        if reuse_stored_password and not status.connected:
+            failure_message = status.detail or "Connection failed"
+            fallback = self._auto_enable_hotspot_on_failure(
+                cleaned_ssid,
+                failure_message,
+                metadata=attempt_metadata,
+            )
+            if fallback is not None:
+                return fallback
         if supplied_password is not None:
             try:
                 self._credentials.set_network_password(cleaned_ssid, supplied_password)
@@ -1081,6 +1098,45 @@ class WiFiManager:
     def _apply_hotspot_password(self, status: WiFiStatus | None) -> WiFiStatus:
         if isinstance(status, WiFiStatus):
             status.hotspot_password = self._hotspot_password
+        return status
+
+    def _auto_enable_hotspot_on_failure(
+        self,
+        ssid: str,
+        failure_detail: str,
+        *,
+        metadata: dict[str, object | None] | None = None,
+    ) -> WiFiStatus | None:
+        reason = failure_detail.strip() if isinstance(failure_detail, str) else ""
+        reason = reason or "Unknown error"
+        hotspot_metadata = {"target": ssid, "reason": reason}
+        if metadata:
+            hotspot_metadata.update({key: value for key, value in metadata.items() if value is not None})
+        try:
+            status = self.enable_hotspot(None, self._hotspot_password)
+        except WiFiError as exc:
+            failure_message = str(exc).strip() or "Unable to enable hotspot"
+            hotspot_metadata["failure"] = failure_message
+            self._record_log(
+                "connect_auto_hotspot_error",
+                f"Unable to enable hotspot after {ssid} failure: {failure_message}.",
+                metadata=hotspot_metadata,
+            )
+            return None
+        appended_detail = (
+            "Hotspot enabled automatically after "
+            f"{ssid} connection failed ({reason})."
+        )
+        status.detail = (
+            f"{status.detail + ' ' if status.detail else ''}{appended_detail}"
+        ).strip()
+        hotspot_metadata["hotspot_profile"] = status.profile
+        self._record_log(
+            "connect_auto_hotspot",
+            appended_detail,
+            status=status,
+            metadata=hotspot_metadata,
+        )
         return status
 
     def get_connection_log(self, limit: int | None = None) -> list[dict[str, object | None]]:

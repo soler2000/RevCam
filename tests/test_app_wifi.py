@@ -480,3 +480,65 @@ def test_wifi_network_password_reused_from_store(tmp_path: Path) -> None:
     )
     reloaded.connect("Cafe", None)
     assert new_backend.connect_attempts[-1] == ("Cafe", "beanjuice123")
+
+
+def test_wifi_auto_hotspot_after_known_network_failure(tmp_path: Path) -> None:
+    credentials_path = tmp_path / "wifi_credentials.json"
+    credentials = WiFiCredentialStore(credentials_path)
+    credentials.set_network_password("Guest", "supersecret")
+    backend = FakeWiFiBackend()
+    backend.status = WiFiStatus(
+        connected=False,
+        ssid=None,
+        signal=None,
+        ip_address=None,
+        mode="station",
+        hotspot_active=False,
+        profile=None,
+        detail="Idle",
+    )
+    manager = WiFiManager(
+        backend=backend,
+        rollback_timeout=0.05,
+        poll_interval=0.005,
+        hotspot_rollback_timeout=0.05,
+        mdns_advertiser=FakeMDNSAdvertiser(),
+        credential_store=credentials,
+    )
+
+    status = manager.connect("Guest")
+
+    assert backend.hotspot_attempts
+    hotspot_ssid, hotspot_password = backend.hotspot_attempts[-1]
+    assert hotspot_ssid == "RevCam"
+    assert hotspot_password is None
+    assert status.hotspot_active is True
+    assert "Guest" in (status.detail or "")
+
+
+def test_wifi_no_auto_hotspot_for_manual_failure(tmp_path: Path) -> None:
+    backend = FakeWiFiBackend()
+    backend.status = WiFiStatus(
+        connected=False,
+        ssid=None,
+        signal=None,
+        ip_address=None,
+        mode="station",
+        hotspot_active=False,
+        profile=None,
+        detail="Idle",
+    )
+    manager = WiFiManager(
+        backend=backend,
+        rollback_timeout=0.05,
+        poll_interval=0.005,
+        hotspot_rollback_timeout=0.05,
+        mdns_advertiser=FakeMDNSAdvertiser(),
+        credential_store=WiFiCredentialStore(tmp_path / "wifi_credentials.json"),
+    )
+
+    status = manager.connect("Guest", "wrong-password")
+
+    assert backend.hotspot_attempts == []
+    assert status.hotspot_active is False
+    assert "hotspot" not in (status.detail or "").lower()
