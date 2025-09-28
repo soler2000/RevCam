@@ -197,7 +197,81 @@ def _collect_cpu_metrics() -> dict[str, object] | None:
         if cpu_count:
             metrics["usage_percent"] = _clamp_percentage((load_1m / cpu_count) * 100.0)
 
+    per_core_metrics = _collect_per_core_cpu_usage()
+    if per_core_metrics:
+        metrics["per_core"] = per_core_metrics
+
     return metrics or None
+
+
+def _collect_per_core_cpu_usage() -> list[dict[str, object]]:
+    """Return per-core CPU utilisation percentages if available."""
+
+    try:
+        with open("/proc/stat", "r", encoding="utf-8") as handle:
+            lines = handle.readlines()
+    except OSError:  # pragma: no cover - defensive guard for non-Linux platforms
+        return []
+
+    per_core: list[dict[str, object]] = []
+
+    for line in lines:
+        if not line.startswith("cpu"):
+            continue
+
+        parts = line.split()
+        if not parts:
+            continue
+
+        label = parts[0]
+        if label == "cpu":
+            # Skip the aggregated entry – load averages already summarise overall usage.
+            continue
+
+        numeric_parts: list[int] = []
+        for value in parts[1:]:
+            try:
+                numeric_parts.append(int(value))
+            except ValueError:
+                numeric_parts.append(0)
+
+        if len(numeric_parts) < 4:
+            continue
+
+        total_time = sum(numeric_parts[:8]) if len(numeric_parts) >= 8 else sum(numeric_parts)
+        if total_time <= 0:
+            continue
+
+        idle_time = numeric_parts[3]
+        if len(numeric_parts) > 4:
+            idle_time += numeric_parts[4]
+
+        busy_time = max(0, total_time - idle_time)
+        usage_percent = _clamp_percentage((busy_time / total_time) * 100.0)
+
+        entry: dict[str, object] = {"usage_percent": usage_percent, "label": label}
+
+        if label.startswith("cpu"):
+            suffix = label[3:]
+            if suffix:
+                try:
+                    index = int(suffix)
+                except ValueError:
+                    index = None
+                else:
+                    if index >= 0:
+                        entry["index"] = index
+
+        per_core.append(entry)
+
+    per_core.sort(
+        key=lambda item: (
+            item.get("index") if isinstance(item.get("index"), int) else float("inf"),
+            item.get("label") or "",
+        )
+    )
+
+    return per_core
 
 
 def _collect_memory_metrics() -> dict[str, object] | None:
@@ -384,6 +458,30 @@ def run(argv: Sequence[str] | None = None) -> int:
                 cpu_parts.append(f"{cpu_count} cores")
             cpu_summary = ", ".join(cpu_parts) if cpu_parts else "data unavailable"
             print(f" - CPU: {cpu_summary}")
+            per_core_metrics = cpu_metrics.get("per_core")
+            if isinstance(per_core_metrics, list):
+                per_core_parts: list[str] = []
+                for entry in per_core_metrics:
+                    if not isinstance(entry, dict):
+                        continue
+                    usage = entry.get("usage_percent")
+                    if not isinstance(usage, (int, float)):
+                        continue
+                    label: str | None = None
+                    core_index = entry.get("index")
+                    if isinstance(core_index, int) and core_index >= 0:
+                        label = f"core {core_index}"
+                    else:
+                        raw_label = entry.get("label")
+                        if isinstance(raw_label, str) and raw_label:
+                            label = raw_label
+                    if label:
+                        per_core_parts.append(f"{label} {usage:.1f}%")
+                    else:
+                        per_core_parts.append(f"{usage:.1f}%")
+                if per_core_parts:
+                    joined = ", ".join(per_core_parts)
+                    print(f"   Per-core usage: {joined}")
         memory_metrics = system_metrics.get("memory")
         if isinstance(memory_metrics, dict) and memory_metrics:
             memory_parts: list[str] = []

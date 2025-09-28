@@ -2432,6 +2432,10 @@
                     <dd id="diagnostics-system-cpu">—</dd>
                   </div>
                   <div>
+                    <dt>Per-core usage</dt>
+                    <dd id="diagnostics-system-per-core">—</dd>
+                  </div>
+                  <div>
                     <dt>Memory usage</dt>
                     <dd id="diagnostics-system-memory">—</dd>
                   </div>
@@ -2481,6 +2485,10 @@
               <div>
                 <dt>CPU usage</dt>
                 <dd id="development-system-cpu">Enable development features to collect system metrics.</dd>
+              </div>
+              <div>
+                <dt>Per-core usage</dt>
+                <dd id="development-system-per-core">Enable development features to collect system metrics.</dd>
               </div>
               <div>
                 <dt>Memory usage</dt>
@@ -2684,6 +2692,7 @@
       const developmentStatus = document.getElementById("development-status");
       const developmentSystemCard = document.getElementById("development-system-card");
       const developmentSystemCpu = document.getElementById("development-system-cpu");
+      const developmentSystemPerCore = document.getElementById("development-system-per-core");
       const developmentSystemMemory = document.getElementById("development-system-memory");
       const developmentDistanceCard = document.getElementById("development-distance-card");
       const developmentDistanceEmpty = document.getElementById("development-distance-empty");
@@ -2814,6 +2823,7 @@
       const diagnosticsResults = document.getElementById("diagnostics-results");
       const diagnosticsSummary = document.getElementById("diagnostics-summary");
       const diagnosticsSystemCpu = document.getElementById("diagnostics-system-cpu");
+      const diagnosticsSystemPerCore = document.getElementById("diagnostics-system-per-core");
       const diagnosticsSystemMemory = document.getElementById("diagnostics-system-memory");
       const diagnosticsConflicts = document.getElementById("diagnostics-conflicts");
       const diagnosticsNoConflicts = document.getElementById("diagnostics-no-conflicts");
@@ -4353,6 +4363,9 @@
         if (developmentSystemCpu) {
           developmentSystemCpu.textContent = text;
         }
+        if (developmentSystemPerCore) {
+          developmentSystemPerCore.textContent = text;
+        }
         if (developmentSystemMemory) {
           developmentSystemMemory.textContent = text;
         }
@@ -4739,6 +4752,41 @@
         return parts.length > 0 ? parts.join(" • ") : "Unavailable";
       }
 
+      function summarisePerCoreCpuMetrics(cpu) {
+        if (!cpu || typeof cpu !== "object") {
+          return "";
+        }
+        const perCore = Array.isArray(cpu.per_core) ? cpu.per_core : [];
+        const parts = [];
+        for (let index = 0; index < perCore.length; index += 1) {
+          const entry = perCore[index];
+          if (!entry || typeof entry !== "object") {
+            continue;
+          }
+          const usage =
+            typeof entry.usage_percent === "number" && Number.isFinite(entry.usage_percent)
+              ? formatPercentageValue(entry.usage_percent)
+              : "";
+          if (!usage) {
+            continue;
+          }
+          let label = "";
+          if (
+            typeof entry.index === "number" &&
+            Number.isInteger(entry.index) &&
+            entry.index >= 0
+          ) {
+            label = `Core ${entry.index}`;
+          } else if (typeof entry.label === "string" && entry.label.trim().length > 0) {
+            label = entry.label.trim();
+          } else {
+            label = `Core ${index}`;
+          }
+          parts.push(`${label}: ${usage}%`);
+        }
+        return parts.join(" • ");
+      }
+
       function summariseMemoryMetrics(memory) {
         if (!memory || typeof memory !== "object") {
           return "Unavailable";
@@ -4796,6 +4844,13 @@
         }
         if (developmentSystemCpu) {
           developmentSystemCpu.textContent = cpuSummary;
+        }
+        const perCoreSummary = summarisePerCoreCpuMetrics(cpu);
+        if (diagnosticsSystemPerCore) {
+          diagnosticsSystemPerCore.textContent = perCoreSummary || "Unavailable";
+        }
+        if (developmentSystemPerCore) {
+          developmentSystemPerCore.textContent = perCoreSummary || "Unavailable";
         }
         const memory =
           system && typeof system.memory === "object" && system.memory !== null ? system.memory : null;

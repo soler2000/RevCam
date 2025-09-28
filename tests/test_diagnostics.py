@@ -27,7 +27,15 @@ def test_collect_diagnostics(monkeypatch: pytest.MonkeyPatch) -> None:
         diagnostics,
         "collect_system_metrics",
         lambda: {
-            "cpu": {"usage_percent": 12.5, "count": 4, "load": {"1m": 0.5}},
+            "cpu": {
+                "usage_percent": 12.5,
+                "count": 4,
+                "load": {"1m": 0.5},
+                "per_core": [
+                    {"index": 0, "usage_percent": 10.0},
+                    {"index": 1, "usage_percent": 15.0},
+                ],
+            },
             "memory": {"used_percent": 42.0},
         },
     )
@@ -39,7 +47,15 @@ def test_collect_diagnostics(monkeypatch: pytest.MonkeyPatch) -> None:
     assert payload["picamera"] == {"status": "ok", "details": []}
     assert payload["webrtc"] == {"status": "ok", "details": []}
     assert payload["system"] == {
-        "cpu": {"usage_percent": 12.5, "count": 4, "load": {"1m": 0.5}},
+        "cpu": {
+            "usage_percent": 12.5,
+            "count": 4,
+            "load": {"1m": 0.5},
+            "per_core": [
+                {"index": 0, "usage_percent": 10.0},
+                {"index": 1, "usage_percent": 15.0},
+            ],
+        },
         "memory": {"used_percent": 42.0},
     }
 
@@ -60,7 +76,15 @@ def test_run_outputs_conflicts(capsys: pytest.CaptureFixture[str], monkeypatch: 
         diagnostics,
         "collect_system_metrics",
         lambda: {
-            "cpu": {"usage_percent": 65.0, "count": 4, "load": {"1m": 2.6}},
+            "cpu": {
+                "usage_percent": 65.0,
+                "count": 4,
+                "load": {"1m": 2.6},
+                "per_core": [
+                    {"index": 0, "usage_percent": 72.5},
+                    {"index": 1, "usage_percent": 58.0},
+                ],
+            },
             "memory": {
                 "used_percent": 71.0,
                 "used_bytes": 2147483648,
@@ -81,6 +105,7 @@ def test_run_outputs_conflicts(capsys: pytest.CaptureFixture[str], monkeypatch: 
     assert diagnostics.APP_VERSION in out
     assert "System resource usage:" in out
     assert "CPU:" in out
+    assert "Per-core usage:" in out
     assert "Memory:" in out
 
 
@@ -100,7 +125,15 @@ def test_run_json(monkeypatch: pytest.MonkeyPatch) -> None:
         diagnostics,
         "collect_system_metrics",
         lambda: {
-            "cpu": {"usage_percent": 33.3, "count": 4, "load": {"1m": 1.2}},
+            "cpu": {
+                "usage_percent": 33.3,
+                "count": 4,
+                "load": {"1m": 1.2},
+                "per_core": [
+                    {"index": 0, "usage_percent": 25.0},
+                    {"index": 1, "usage_percent": 41.5},
+                ],
+            },
             "memory": {
                 "used_percent": 55.5,
                 "used_bytes": 123456789,
@@ -127,7 +160,15 @@ def test_run_json(monkeypatch: pytest.MonkeyPatch) -> None:
     assert payload["picamera"] == {"status": "ok", "details": [], "numpy_version": "1.26.1"}
     assert payload["webrtc"] == {"status": "ok", "details": []}
     assert payload["system"] == {
-        "cpu": {"usage_percent": 33.3, "count": 4, "load": {"1m": 1.2}},
+        "cpu": {
+            "usage_percent": 33.3,
+            "count": 4,
+            "load": {"1m": 1.2},
+            "per_core": [
+                {"index": 0, "usage_percent": 25.0},
+                {"index": 1, "usage_percent": 41.5},
+            ],
+        },
         "memory": {
             "used_percent": 55.5,
             "used_bytes": 123456789,
