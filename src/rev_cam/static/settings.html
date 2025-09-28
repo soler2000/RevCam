@@ -1804,37 +1804,6 @@
             </div>
           </section>
 
-          <section class="card">
-            <div class="toggle-row">
-              <div class="toggle-text" id="distance-overlay-text">
-                <h3 id="distance-overlay-heading">Distance overlay</h3>
-                <p id="distance-overlay-description" class="muted helper-text">
-                  Display the live distance measurement on the camera feed.
-                </p>
-              </div>
-              <label
-                class="switch-control"
-                aria-labelledby="distance-overlay-heading"
-                aria-describedby="distance-overlay-description"
-              >
-                <input
-                  type="checkbox"
-                  id="distance-overlay-toggle"
-                  aria-describedby="distance-overlay-description"
-                />
-                <span class="switch-track" aria-hidden="true">
-                  <span class="switch-thumb"></span>
-                </span>
-              </label>
-            </div>
-            <p
-              id="distance-overlay-status"
-              class="muted helper-text status-text"
-              role="status"
-              aria-live="polite"
-            ></p>
-          </section>
-
           <section class="card distance-geometry-card">
             <h2>Mounting geometry</h2>
             <p class="muted helper-text">
@@ -2406,6 +2375,91 @@
             ></p>
           </section>
 
+          <section id="development-overlays-card" class="card" hidden>
+            <h3>Overlay controls</h3>
+            <p class="muted helper-text">
+              Enable or disable each overlay while testing latency. Turning off the master switch bypasses all
+              overlays for a direct video pipeline.
+            </p>
+            <div class="toggle-row">
+              <div class="toggle-text" id="overlay-master-text">
+                <h3 id="overlay-master-heading">Overlay pipeline</h3>
+                <p id="overlay-master-description" class="muted helper-text">
+                  Master switch that enables or bypasses every overlay.
+                </p>
+              </div>
+              <label
+                class="switch-control"
+                aria-labelledby="overlay-master-heading"
+                aria-describedby="overlay-master-description"
+              >
+                <input type="checkbox" id="overlay-master-toggle" aria-describedby="overlay-master-description" />
+                <span class="switch-track" aria-hidden="true">
+                  <span class="switch-thumb"></span>
+                </span>
+              </label>
+            </div>
+            <div class="toggle-row">
+              <div class="toggle-text" id="battery-overlay-text">
+                <h3 id="battery-overlay-heading">Battery overlay</h3>
+                <p id="battery-overlay-description" class="muted helper-text">
+                  Render pack status, charging state, and wireless connectivity on the stream.
+                </p>
+              </div>
+              <label
+                class="switch-control"
+                aria-labelledby="battery-overlay-heading"
+                aria-describedby="battery-overlay-description"
+              >
+                <input type="checkbox" id="battery-overlay-toggle" aria-describedby="battery-overlay-description" />
+                <span class="switch-track" aria-hidden="true">
+                  <span class="switch-thumb"></span>
+                </span>
+              </label>
+            </div>
+            <div class="toggle-row">
+              <div class="toggle-text" id="distance-overlay-text">
+                <h3 id="distance-overlay-heading">Distance overlay</h3>
+                <p id="distance-overlay-description" class="muted helper-text">
+                  Display live sensor readings and projected distance.
+                </p>
+              </div>
+              <label
+                class="switch-control"
+                aria-labelledby="distance-overlay-heading"
+                aria-describedby="distance-overlay-description"
+              >
+                <input type="checkbox" id="distance-overlay-toggle" aria-describedby="distance-overlay-description" />
+                <span class="switch-track" aria-hidden="true">
+                  <span class="switch-thumb"></span>
+                </span>
+              </label>
+            </div>
+            <div class="toggle-row">
+              <div class="toggle-text" id="reversing-overlay-text">
+                <h3 id="reversing-overlay-heading">Reversing aids overlay</h3>
+                <p id="reversing-overlay-description" class="muted helper-text">
+                  Show reversing guide lines and zones on the stream.
+                </p>
+              </div>
+              <label
+                class="switch-control"
+                aria-labelledby="reversing-overlay-heading"
+                aria-describedby="reversing-overlay-description"
+              >
+                <input
+                  type="checkbox"
+                  id="reversing-overlay-toggle"
+                  aria-describedby="reversing-overlay-description"
+                />
+                <span class="switch-track" aria-hidden="true">
+                  <span class="switch-thumb"></span>
+                </span>
+              </label>
+            </div>
+            <p id="overlay-status" class="muted helper-text status-text" role="status" aria-live="polite"></p>
+          </section>
+
           <section id="diagnostics-card" class="card" hidden>
             <h3>Camera and WebRTC diagnostics</h3>
             <p class="muted helper-text">
@@ -2647,8 +2701,12 @@
       const distanceProjectedReadingValue = document.getElementById("distance-projected-reading");
       const distanceError = document.getElementById("distance-error");
       const distanceRefreshButton = document.getElementById("distance-refresh");
+      const overlayCard = document.getElementById("development-overlays-card");
+      const overlayMasterToggle = document.getElementById("overlay-master-toggle");
+      const batteryOverlayToggle = document.getElementById("battery-overlay-toggle");
       const distanceOverlayToggle = document.getElementById("distance-overlay-toggle");
-      const distanceOverlayStatus = document.getElementById("distance-overlay-status");
+      const reversingOverlayToggle = document.getElementById("reversing-overlay-toggle");
+      const overlayStatus = document.getElementById("overlay-status");
       const distanceDisplayToggle = document.getElementById("distance-display-toggle");
       const distanceDisplayStatus = document.getElementById("distance-display-status");
       const distanceDisplayMode = document.getElementById("distance-display-mode");
@@ -2684,7 +2742,8 @@
         : null;
       let distanceLoading = false;
       let distanceCalibrationStatusTimer = null;
-      let distanceOverlayStatusTimer = null;
+      let overlayStatusTimer = null;
+      let overlayState = null;
       let distanceDisplayStatusTimer = null;
       let distanceGeometryStatusTimer = null;
       let distanceGeometrySaving = false;
@@ -3973,26 +4032,157 @@
         }
       }
 
-      function setDistanceOverlayStatus(message, options = {}) {
-        if (!distanceOverlayStatus) {
+      function setOverlayStatus(message, options = {}) {
+        if (!overlayStatus) {
           return;
         }
-        if (distanceOverlayStatusTimer) {
-          window.clearTimeout(distanceOverlayStatusTimer);
-          distanceOverlayStatusTimer = null;
+        if (overlayStatusTimer) {
+          window.clearTimeout(overlayStatusTimer);
+          overlayStatusTimer = null;
         }
-        distanceOverlayStatus.textContent = message || "";
+        overlayStatus.textContent = message || "";
         if (message && options.persistent !== true) {
-          distanceOverlayStatusTimer = window.setTimeout(() => {
-            if (
-              distanceOverlayStatus &&
-              distanceOverlayStatus.textContent === message
-            ) {
-              distanceOverlayStatus.textContent = "";
+          overlayStatusTimer = window.setTimeout(() => {
+            if (overlayStatus && overlayStatus.textContent === message) {
+              overlayStatus.textContent = "";
             }
-            distanceOverlayStatusTimer = null;
+            overlayStatusTimer = null;
           }, 4000);
         }
+      }
+
+      function describeOverlayEffectiveState(summary) {
+        if (!summary || !summary.effective) {
+          return "";
+        }
+        const effective = summary.effective;
+        if (effective.master !== true) {
+          return "All overlays bypassed for direct video pipeline.";
+        }
+        const disabled = [];
+        if (effective.battery !== true) {
+          disabled.push("Battery");
+        }
+        if (effective.distance !== true) {
+          disabled.push("Distance");
+        }
+        if (effective.reversing_aids !== true) {
+          const configured = Boolean(
+            summary.sources && summary.sources.reversing_aids_configured === true,
+          );
+          if (!configured && summary.settings && summary.settings.reversing_aids_enabled === true) {
+            disabled.push("Reversing aids (disabled in configuration)");
+          } else {
+            disabled.push("Reversing aids");
+          }
+        }
+        if (disabled.length === 0) {
+          return "All overlays active.";
+        }
+        if (disabled.length === 1) {
+          return `${disabled[0]} overlay inactive.`;
+        }
+        if (disabled.length === 2) {
+          return `${disabled[0]} and ${disabled[1]} overlays inactive.`;
+        }
+        const parts = disabled.slice(0, -1);
+        const last = disabled[disabled.length - 1];
+        return `${parts.join(", ")}, and ${last} overlays inactive.`;
+      }
+
+      function updateOverlayToggle(toggle, value, options = {}) {
+        if (!(toggle instanceof HTMLInputElement)) {
+          return;
+        }
+        if (options.forceUpdate === true || toggle.dataset.userToggled !== "true") {
+          const desired = value === true;
+          toggle.checked = desired;
+          toggle.dataset.serverValue = desired ? "true" : "false";
+        }
+      }
+
+      function updateOverlayControlsAvailability() {
+        const toggles = [
+          overlayMasterToggle,
+          batteryOverlayToggle,
+          distanceOverlayToggle,
+          reversingOverlayToggle,
+        ];
+        const masterUpdating =
+          overlayMasterToggle instanceof HTMLInputElement &&
+          overlayMasterToggle.dataset.updating === "true";
+        toggles.forEach((toggle) => {
+          if (!(toggle instanceof HTMLInputElement)) {
+            return;
+          }
+          const updating = toggle.dataset.updating === "true";
+          const disabled =
+            !developmentEnabled ||
+            updating ||
+            (masterUpdating && toggle !== overlayMasterToggle);
+          toggle.disabled = disabled;
+        });
+        if (overlayCard) {
+          overlayCard.hidden = !developmentEnabled;
+        }
+      }
+
+      function applyOverlayState(summary, options = {}) {
+        overlayState = summary || null;
+        const settings = summary && summary.settings ? summary.settings : null;
+        const forceUpdate = options.forceUpdate === true;
+        if (settings) {
+          updateOverlayToggle(overlayMasterToggle, settings.master_enabled, { forceUpdate });
+          updateOverlayToggle(batteryOverlayToggle, settings.battery_enabled, { forceUpdate });
+          updateOverlayToggle(distanceOverlayToggle, settings.distance_enabled, { forceUpdate });
+          updateOverlayToggle(reversingOverlayToggle, settings.reversing_aids_enabled, { forceUpdate });
+        }
+        updateOverlayControlsAvailability();
+        if (summary && summary.effective) {
+          const message = describeOverlayEffectiveState(summary);
+          if (message) {
+            setOverlayStatus(message, { persistent: true });
+          } else {
+            setOverlayStatus("", { persistent: true });
+          }
+        } else if (options.clear === true) {
+          setOverlayStatus("");
+        }
+      }
+
+      async function refreshOverlaySettings(options = {}) {
+        try {
+          const response = await fetch("/api/overlays", { cache: "no-store" });
+          if (!response.ok) {
+            throw new Error(`Overlays request failed with status ${response.status}`);
+          }
+          const payload = await response.json();
+          applyOverlayState(payload, { forceUpdate: options.forceUpdate === true });
+        } catch (error) {
+          console.error("Overlay settings fetch failed", error);
+          setOverlayStatus("Unable to load overlay settings.", { persistent: true });
+        }
+      }
+
+      async function updateOverlaySettingsRequest(changes) {
+        const response = await fetch("/api/overlays", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(changes),
+        });
+        if (!response.ok) {
+          let detail = "Unable to update overlay settings.";
+          try {
+            const payload = await response.json();
+            if (payload && typeof payload.detail === "string") {
+              detail = payload.detail;
+            }
+          } catch (err) {
+            console.error(err);
+          }
+          throw new Error(detail);
+        }
+        return response.json();
       }
 
       function setDistanceDisplayStatus(message, options = {}) {
@@ -4269,19 +4459,6 @@
         distanceSummary.textContent = parts.join(" • ");
       }
 
-      function updateDistanceOverlayToggle(enabled, options = {}) {
-        if (!(distanceOverlayToggle instanceof HTMLInputElement)) {
-          return;
-        }
-        const shouldForce = options.forceUpdate === true;
-        if (!shouldForce && distanceOverlayToggle.dataset.userToggled === "true") {
-          return;
-        }
-        const desired = enabled === true;
-        distanceOverlayToggle.checked = desired;
-        distanceOverlayToggle.dataset.serverValue = desired ? "true" : "false";
-      }
-
       function applyDistanceData(data, options = {}) {
         const displayValue = getDisplayDistance(data);
         const useProjected = data && data.use_projected_distance === true;
@@ -4331,10 +4508,10 @@
             options.updateCalibration === true ||
             options.updateGeometry === true,
         });
-        if (distanceOverlayToggle) {
-          const enabled = data && data.overlay_enabled === true;
-          const forceUpdate = options.updateInputs === true || options.updateCalibration === true;
-          updateDistanceOverlayToggle(enabled, { forceUpdate });
+        if (data && data.overlay_settings) {
+          const forceUpdate =
+            options.updateInputs === true || options.updateCalibration === true;
+          applyOverlayState(data.overlay_settings, { forceUpdate });
         }
         recordDevelopmentDistanceReading(data);
       }
@@ -4602,6 +4779,10 @@
         document.body.classList.toggle("development-enabled", developmentEnabled);
         if (!developmentEnabled) {
           diagnosticsLoading = false;
+        }
+        updateOverlayControlsAvailability();
+        if (overlayState) {
+          applyOverlayState(overlayState, { forceUpdate: true });
         }
         if (developmentSystemCard) {
           developmentSystemCard.hidden = !developmentEnabled;
@@ -5540,57 +5721,49 @@
         });
       }
 
-      if (distanceOverlayToggle instanceof HTMLInputElement) {
-        distanceOverlayToggle.dataset.serverValue = distanceOverlayToggle.checked
-          ? "true"
-          : "false";
-        distanceOverlayToggle.addEventListener("change", async () => {
-          if (!(distanceOverlayToggle instanceof HTMLInputElement)) {
+      function registerOverlayToggle(toggle, changeKey) {
+        if (!(toggle instanceof HTMLInputElement)) {
+          return;
+        }
+        toggle.addEventListener("change", async () => {
+          if (!(toggle instanceof HTMLInputElement)) {
             return;
           }
-          const previous = distanceOverlayToggle.dataset.serverValue === "true";
-          const desired = distanceOverlayToggle.checked;
-          distanceOverlayToggle.dataset.userToggled = "true";
-          distanceOverlayToggle.dataset.updating = "true";
-          distanceOverlayToggle.disabled = true;
-          setDistanceOverlayStatus("Saving…", { persistent: true });
+          const previous =
+            toggle.dataset.serverValue === "true"
+              ? true
+              : toggle.dataset.serverValue === "false"
+              ? false
+              : toggle.checked;
+          const desired = toggle.checked;
+          toggle.dataset.userToggled = "true";
+          toggle.dataset.updating = "true";
+          updateOverlayControlsAvailability();
+          setOverlayStatus("Saving overlay settings…", { persistent: true });
           try {
-            const response = await fetch("/api/distance/overlay", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ enabled: desired }),
-            });
-            if (!response.ok) {
-              let errorDetail = "Unable to update distance overlay.";
-              try {
-                const errorData = await response.json();
-                if (errorData && typeof errorData.detail === "string") {
-                  errorDetail = errorData.detail;
-                }
-              } catch (err) {
-                console.error(err);
-              }
-              throw new Error(errorDetail);
-            }
-            const result = await response.json();
-            const saved = result && result.overlay_enabled === true;
-            updateDistanceOverlayToggle(saved, { forceUpdate: true });
-            setDistanceOverlayStatus(saved ? "Overlay enabled" : "Overlay disabled");
+            const summary = await updateOverlaySettingsRequest({ [changeKey]: desired });
+            applyOverlayState(summary, { forceUpdate: true });
           } catch (error) {
             console.error(error);
-            updateDistanceOverlayToggle(previous, { forceUpdate: true });
+            toggle.checked = previous;
+            toggle.dataset.serverValue = previous ? "true" : "false";
             const message =
-              error && typeof error.message === "string" && error.message
+              error instanceof Error && error.message
                 ? error.message
-                : "Unable to update distance overlay.";
-            setDistanceOverlayStatus(message, { persistent: true });
+                : "Unable to update overlay settings.";
+            setOverlayStatus(message, { persistent: true });
           } finally {
-            distanceOverlayToggle.disabled = false;
-            delete distanceOverlayToggle.dataset.userToggled;
-            delete distanceOverlayToggle.dataset.updating;
+            delete toggle.dataset.userToggled;
+            delete toggle.dataset.updating;
+            updateOverlayControlsAvailability();
           }
         });
       }
+
+      registerOverlayToggle(overlayMasterToggle, "master_enabled");
+      registerOverlayToggle(batteryOverlayToggle, "battery_enabled");
+      registerOverlayToggle(distanceOverlayToggle, "distance_enabled");
+      registerOverlayToggle(reversingOverlayToggle, "reversing_aids_enabled");
 
       if (distanceCalibrationForm) {
         distanceCalibrationForm.addEventListener("submit", async (event) => {
@@ -6147,6 +6320,8 @@
       }
 
       initializeDevelopmentState();
+
+      refreshOverlaySettings({ forceUpdate: true }).catch((err) => console.error(err));
 
       if (availableTabs.length) {
         const initialTab = getTabFromHash(window.location.hash) || availableTabs[0];

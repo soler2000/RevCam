@@ -7,6 +7,7 @@ import math
 import os
 import string
 from pathlib import Path
+from typing import Callable
 
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.concurrency import run_in_threadpool
@@ -18,6 +19,7 @@ from .camera import CAMERA_SOURCES, BaseCamera, CameraError, create_camera, iden
 from .config import (
     ConfigManager,
     DistanceMounting,
+    OverlaySettings,
     Resolution,
     RESOLUTION_PRESETS,
     StreamSettings,
@@ -118,6 +120,13 @@ class DistanceOverlayPayload(BaseModel):
 
 class DistanceDisplayModePayload(BaseModel):
     use_projected_distance: bool
+
+
+class OverlaySettingsPayload(BaseModel):
+    master_enabled: bool | None = None
+    battery_enabled: bool | None = None
+    distance_enabled: bool | None = None
+    reversing_aids_enabled: bool | None = None
 
 
 class BatteryLimitsPayload(BaseModel):
@@ -237,24 +246,84 @@ def create_app(
         credentials_path = config_path.with_name("wifi_credentials.json")
         wifi_manager = WiFiManager(credential_store=WiFiCredentialStore(credentials_path))
 
+    def _overlay_settings() -> OverlaySettings:
+        return config_manager.get_overlay_settings()
+
+    def _wrap_overlay(enabled_provider: Callable[[], bool], overlay: Callable[[object], object]):
+        def _apply(frame: object) -> object:
+            if not enabled_provider():
+                return frame
+            return overlay(frame)
+
+        return _apply
+
+    def _master_enabled() -> bool:
+        settings = _overlay_settings()
+        return settings.master_enabled
+
+    def _battery_overlay_enabled() -> bool:
+        settings = _overlay_settings()
+        return settings.master_enabled and settings.battery_enabled
+
+    def _distance_overlay_enabled_flag() -> bool:
+        settings = _overlay_settings()
+        if not (settings.master_enabled and settings.distance_enabled):
+            return False
+        return config_manager.get_distance_overlay_enabled()
+
+    def _reversing_overlay_enabled() -> bool:
+        settings = _overlay_settings()
+        if not (settings.master_enabled and settings.reversing_aids_enabled):
+            return False
+        return config_manager.get_reversing_aids().enabled
+
     pipeline = FramePipeline(lambda: config_manager.get_orientation())
+    pipeline.set_overlays_enabled_provider(_master_enabled)
     pipeline.add_overlay(
-        create_battery_overlay(
-            battery_monitor,
-            config_manager.get_battery_limits,
-            wifi_manager.get_status,
+        _wrap_overlay(
+            _battery_overlay_enabled,
+            create_battery_overlay(
+                battery_monitor,
+                config_manager.get_battery_limits,
+                wifi_manager.get_status,
+            ),
         )
     )
     pipeline.add_overlay(
-        create_distance_overlay(
-            distance_monitor,
-            config_manager.get_distance_zones,
-            config_manager.get_distance_overlay_enabled,
-            geometry_provider=config_manager.get_distance_mounting,
-            display_mode_provider=config_manager.get_distance_use_projected,
+        _wrap_overlay(
+            _distance_overlay_enabled_flag,
+            create_distance_overlay(
+                distance_monitor,
+                config_manager.get_distance_zones,
+                config_manager.get_distance_overlay_enabled,
+                geometry_provider=config_manager.get_distance_mounting,
+                display_mode_provider=config_manager.get_distance_use_projected,
+            ),
         )
     )
-    pipeline.add_overlay(create_reversing_aids_overlay(config_manager.get_reversing_aids))
+    pipeline.add_overlay(
+        _wrap_overlay(
+            _reversing_overlay_enabled,
+            create_reversing_aids_overlay(config_manager.get_reversing_aids),
+        )
+    )
+
+    def _serialise_overlay_settings() -> dict[str, object]:
+        settings = config_manager.get_overlay_settings()
+        reversing_config = config_manager.get_reversing_aids()
+        master_enabled = settings.master_enabled
+        return {
+            "settings": settings.to_dict(),
+            "effective": {
+                "master": master_enabled,
+                "battery": master_enabled and settings.battery_enabled,
+                "distance": master_enabled and settings.distance_enabled,
+                "reversing_aids": master_enabled
+                and settings.reversing_aids_enabled
+                and reversing_config.enabled,
+            },
+            "sources": {"reversing_aids_configured": reversing_config.enabled},
+        }
     camera: BaseCamera | None = None
     streamer: MJPEGStreamer | None = None
     webrtc_manager: WebRTCManager | None = None
@@ -269,7 +338,6 @@ def create_app(
         *,
         zones=None,
         calibration=None,
-        overlay_enabled=None,
         mounting=None,
         use_projected=None,
     ) -> dict[str, object | None]:
@@ -278,8 +346,6 @@ def create_app(
             zones = config_manager.get_distance_zones()
         if calibration is None:
             calibration = config_manager.get_distance_calibration()
-        if overlay_enabled is None:
-            overlay_enabled = config_manager.get_distance_overlay_enabled()
         if mounting is None:
             mounting = config_manager.get_distance_mounting()
         if use_projected is None:
@@ -291,11 +357,13 @@ def create_app(
             use_projected,
         )
         zone_reference = display_distance if display_distance is not None else reading.distance_m
+        overlay_summary = _serialise_overlay_settings()
         payload.update(
             zone=zones.classify(zone_reference) if zones is not None else None,
             zones=zones.to_dict() if zones is not None else {},
             calibration=calibration.to_dict() if calibration is not None else {},
-            overlay_enabled=bool(overlay_enabled),
+            overlay_enabled=bool(overlay_summary["settings"]["distance_enabled"]),
+            overlay_settings=overlay_summary,
             geometry=mounting.to_dict() if mounting is not None else {},
             projected_distance_m=projection,
             use_projected_distance=bool(use_projected),
@@ -782,7 +850,6 @@ def create_app(
             reading,
             zones=zones,
             calibration=calibration,
-            overlay_enabled=overlay_enabled,
             mounting=mounting,
             use_projected=use_projected,
         )
@@ -807,7 +874,6 @@ def create_app(
             reading,
             zones=zones,
             calibration=calibration,
-            overlay_enabled=overlay_enabled,
             mounting=mounting,
             use_projected=use_projected,
         )
@@ -829,14 +895,12 @@ def create_app(
         distance_monitor.set_calibration(calibration=calibration)
         zones = config_manager.get_distance_zones()
         reading = distance_monitor.read()
-        overlay_enabled = config_manager.get_distance_overlay_enabled()
         mounting = config_manager.get_distance_mounting()
         use_projected = config_manager.get_distance_use_projected()
         return _distance_payload(
             reading,
             zones=zones,
             calibration=calibration,
-            overlay_enabled=overlay_enabled,
             mounting=mounting,
             use_projected=use_projected,
         )
@@ -861,13 +925,11 @@ def create_app(
         zones = config_manager.get_distance_zones()
         reading = distance_monitor.read()
         calibration = config_manager.get_distance_calibration()
-        overlay_enabled = config_manager.get_distance_overlay_enabled()
         use_projected = config_manager.get_distance_use_projected()
         return _distance_payload(
             reading,
             zones=zones,
             calibration=calibration,
-            overlay_enabled=overlay_enabled,
             mounting=mounting,
             use_projected=use_projected,
         )
@@ -892,14 +954,12 @@ def create_app(
         distance_monitor.set_calibration(calibration=calibration)
         zones = config_manager.get_distance_zones()
         refreshed = distance_monitor.read()
-        overlay_enabled = config_manager.get_distance_overlay_enabled()
         mounting = config_manager.get_distance_mounting()
         use_projected = config_manager.get_distance_use_projected()
         return _distance_payload(
             refreshed,
             zones=zones,
             calibration=calibration,
-            overlay_enabled=overlay_enabled,
             mounting=mounting,
             use_projected=use_projected,
         )
@@ -916,25 +976,42 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         zones = config_manager.get_distance_zones()
         calibration = config_manager.get_distance_calibration()
-        overlay_enabled = config_manager.get_distance_overlay_enabled()
         mounting = config_manager.get_distance_mounting()
         reading = distance_monitor.read()
         return _distance_payload(
             reading,
             zones=zones,
             calibration=calibration,
-            overlay_enabled=overlay_enabled,
             mounting=mounting,
             use_projected=use_projected,
         )
 
     @app.post("/api/distance/overlay")
-    async def update_distance_overlay(payload: DistanceOverlayPayload) -> dict[str, bool]:
+    async def update_distance_overlay(payload: DistanceOverlayPayload) -> dict[str, object]:
         try:
             enabled = config_manager.set_distance_overlay_enabled(payload.enabled)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return {"overlay_enabled": enabled}
+        return {
+            "overlay_enabled": enabled,
+            "overlay_settings": _serialise_overlay_settings(),
+        }
+
+    @app.get("/api/overlays")
+    async def get_overlay_settings_api() -> dict[str, object]:
+        return _serialise_overlay_settings()
+
+    @app.post("/api/overlays")
+    async def update_overlay_settings_api(
+        payload: OverlaySettingsPayload,
+    ) -> dict[str, object]:
+        data = payload.model_dump(exclude_none=True)
+        try:
+            if data:
+                config_manager.set_overlay_settings(data)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return _serialise_overlay_settings()
 
     @app.get("/api/reversing-aids")
     def get_reversing_aids() -> dict[str, object]:

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Iterable, List
+from typing import Any, Callable, Iterable, List, Optional
 
 try:  # pragma: no cover - optional dependency
     import numpy as _np
@@ -21,9 +21,13 @@ class FramePipeline:
 
     orientation_provider: Callable[[], Orientation]
     overlays: List[OverlayFn] = field(default_factory=list)
+    overlays_enabled_provider: Optional[Callable[[], bool]] = None
 
     def add_overlay(self, overlay: OverlayFn) -> None:
         self.overlays.append(overlay)
+
+    def set_overlays_enabled_provider(self, provider: Callable[[], bool] | None) -> None:
+        self.overlays_enabled_provider = provider
 
     def _apply_orientation(self, frame: FrameLike, orientation: Orientation) -> FrameLike:
         output = frame
@@ -37,6 +41,13 @@ class FramePipeline:
         return output
 
     def _apply_overlays(self, frame: FrameLike) -> FrameLike:
+        if self.overlays_enabled_provider is not None:
+            try:
+                overlays_enabled = self.overlays_enabled_provider()
+            except Exception:  # pragma: no cover - defensive guard
+                overlays_enabled = True
+            if not overlays_enabled:
+                return frame
         result = frame
         for overlay in self.overlays:
             result = overlay(result)

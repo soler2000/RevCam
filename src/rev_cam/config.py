@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import math
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, replace
 from pathlib import Path
 from threading import Lock
 from typing import Any, Dict, Iterable, Mapping, Sequence
@@ -30,6 +30,27 @@ from .distance import (
 
 DEFAULT_DISTANCE_OVERLAY_ENABLED = True
 DEFAULT_DISTANCE_USE_PROJECTED = False
+
+
+@dataclass(frozen=True, slots=True)
+class OverlaySettings:
+    """Stores high-level overlay toggles."""
+
+    master_enabled: bool = True
+    battery_enabled: bool = True
+    distance_enabled: bool = DEFAULT_DISTANCE_OVERLAY_ENABLED
+    reversing_aids_enabled: bool = True
+
+    def to_dict(self) -> dict[str, bool]:
+        return {
+            "master_enabled": bool(self.master_enabled),
+            "battery_enabled": bool(self.battery_enabled),
+            "distance_enabled": bool(self.distance_enabled),
+            "reversing_aids_enabled": bool(self.reversing_aids_enabled),
+        }
+
+
+DEFAULT_OVERLAY_SETTINGS = OverlaySettings()
 
 
 @dataclass(frozen=True, slots=True)
@@ -528,6 +549,65 @@ def _parse_distance_overlay_enabled(value: Any, *, default: bool) -> bool:
     raise ValueError("Distance overlay flag must be a boolean value")
 
 
+def _coerce_bool(value: Any, *, default: bool) -> bool:
+    if value is None:
+        return default
+    candidate = value
+    if isinstance(candidate, Mapping):
+        if "enabled" in candidate:
+            candidate = candidate.get("enabled")
+        elif "value" in candidate and len(candidate) == 1:
+            candidate = candidate.get("value")
+        else:
+            return default
+    if isinstance(candidate, bool):
+        return candidate
+    if isinstance(candidate, (int, float)):
+        return bool(candidate)
+    if isinstance(candidate, str):
+        normalised = candidate.strip().lower()
+        if normalised in {"1", "true", "yes", "on", "enable", "enabled"}:
+            return True
+        if normalised in {"0", "false", "no", "off", "disable", "disabled"}:
+            return False
+    raise ValueError("Overlay flag must be a boolean value")
+
+
+def _parse_overlay_settings(value: Any, *, default: OverlaySettings) -> OverlaySettings:
+    if value is None:
+        return OverlaySettings(
+            master_enabled=default.master_enabled,
+            battery_enabled=default.battery_enabled,
+            distance_enabled=default.distance_enabled,
+            reversing_aids_enabled=default.reversing_aids_enabled,
+        )
+    if isinstance(value, OverlaySettings):
+        return OverlaySettings(
+            master_enabled=value.master_enabled,
+            battery_enabled=value.battery_enabled,
+            distance_enabled=value.distance_enabled,
+            reversing_aids_enabled=value.reversing_aids_enabled,
+        )
+    if isinstance(value, Mapping):
+        payload = value.get("overlays") if "overlays" in value else value
+        if not isinstance(payload, Mapping):
+            raise ValueError("Overlay settings must be a mapping of flags")
+        master = _coerce_bool(payload.get("master_enabled"), default=default.master_enabled)
+        battery = _coerce_bool(payload.get("battery_enabled"), default=default.battery_enabled)
+        distance = _coerce_bool(payload.get("distance_enabled"), default=default.distance_enabled)
+        reversing = _coerce_bool(
+            payload.get("reversing_aids_enabled"),
+            default=default.reversing_aids_enabled,
+        )
+        return OverlaySettings(
+            master_enabled=master,
+            battery_enabled=battery,
+            distance_enabled=distance,
+            reversing_aids_enabled=reversing,
+        )
+    raise ValueError("Overlay settings must be provided as a mapping of flags")
+
+
 def _parse_distance_use_projected(value: Any, *, default: bool) -> bool:
     if value is None:
         return default
@@ -630,6 +710,7 @@ class ConfigManager:
             self._battery_capacity,
             self._stream_settings,
             self._reversing_aids,
+            self._overlay_settings,
         ) = self._load()
 
     def _ensure_parent(self) -> None:
@@ -650,6 +731,7 @@ class ConfigManager:
         int,
         StreamSettings,
         ReversingAidsConfig,
+        OverlaySettings,
     ]:
         if not self._path.exists():
             return (
@@ -665,6 +747,7 @@ class ConfigManager:
                 DEFAULT_BATTERY_CAPACITY_MAH,
                 DEFAULT_STREAM_SETTINGS,
                 DEFAULT_REVERSING_AIDS,
+                DEFAULT_OVERLAY_SETTINGS,
             )
         try:
             payload = json.loads(self._path.read_text())
@@ -718,6 +801,19 @@ class ConfigManager:
                 reversing_payload, default=DEFAULT_REVERSING_AIDS
             )
 
+            overlays_payload = payload.get("overlays")
+            overlays_default = OverlaySettings(
+                master_enabled=DEFAULT_OVERLAY_SETTINGS.master_enabled,
+                battery_enabled=DEFAULT_OVERLAY_SETTINGS.battery_enabled,
+                distance_enabled=distance_overlay_enabled,
+                reversing_aids_enabled=DEFAULT_OVERLAY_SETTINGS.reversing_aids_enabled,
+            )
+            overlays = _parse_overlay_settings(
+                overlays_payload,
+                default=overlays_default,
+            )
+            distance_overlay_enabled = overlays.distance_enabled
+
             return (
                 orientation,
                 camera,
@@ -731,6 +827,7 @@ class ConfigManager:
                 battery_capacity,
                 stream_settings,
                 reversing_aids,
+                overlays,
             )
         except (OSError, ValueError) as exc:
             raise RuntimeError(f"Failed to load configuration: {exc}") from exc
@@ -743,7 +840,7 @@ class ConfigManager:
             "distance": {
                 "zones": self._distance_zones.to_dict(),
                 "calibration": self._distance_calibration.to_dict(),
-                "overlay_enabled": self._distance_overlay_enabled,
+                "overlay_enabled": self._overlay_settings.distance_enabled,
                 "geometry": self._distance_mounting.to_dict(),
                 "use_projected_distance": self._distance_use_projected,
             },
@@ -753,6 +850,7 @@ class ConfigManager:
             },
             "stream": self._stream_settings.to_dict(),
             "reversing_aids": self._reversing_aids.to_dict(),
+            "overlays": self._overlay_settings.to_dict(),
         }
         self._path.write_text(json.dumps(payload, indent=2))
 
@@ -828,8 +926,21 @@ class ConfigManager:
         enabled = _parse_distance_overlay_enabled(value, default=self._distance_overlay_enabled)
         with self._lock:
             self._distance_overlay_enabled = enabled
+            self._overlay_settings = replace(self._overlay_settings, distance_enabled=enabled)
             self._save()
         return enabled
+
+    def get_overlay_settings(self) -> OverlaySettings:
+        with self._lock:
+            return self._overlay_settings
+
+    def set_overlay_settings(self, data: Mapping[str, Any] | OverlaySettings) -> OverlaySettings:
+        overlays = _parse_overlay_settings(data, default=self._overlay_settings)
+        with self._lock:
+            self._overlay_settings = overlays
+            self._distance_overlay_enabled = overlays.distance_enabled
+            self._save()
+        return overlays
 
     def get_distance_mounting(self) -> DistanceMounting:
         with self._lock:
