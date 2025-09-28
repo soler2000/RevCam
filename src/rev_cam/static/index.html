@@ -115,6 +115,7 @@
       .stream-wrapper {
         width: min(100%, max(320px, calc(100vh - 6rem)));
         max-width: min(1100px, max(360px, calc(100vh - 3rem)));
+        margin: 0;
       }
       .stream-display {
         display: block;
@@ -163,6 +164,17 @@
         cursor: not-allowed;
         box-shadow: none;
         transform: none;
+      }
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
       }
       .control-group {
         display: flex;
@@ -657,7 +669,7 @@
       </div>
     </header>
     <main>
-      <div class="stream-wrapper">
+      <figure class="stream-wrapper" aria-labelledby="stream-caption">
         <video
           id="stream-video"
           class="stream-display"
@@ -667,7 +679,8 @@
           hidden
         ></video>
         <img id="stream-fallback" class="stream-display" alt="Camera feed" hidden />
-      </div>
+        <figcaption id="stream-caption" class="sr-only">Live camera feed</figcaption>
+      </figure>
     </main>
     <div
       class="illumination-status-box"
