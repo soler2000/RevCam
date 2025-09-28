@@ -18,7 +18,7 @@
     <path d="M0,0 L0,192" stroke="#5c637a" stroke-width="4" stroke-linecap="round" />
     <path d="M0,0 L280,192" fill="rgba(88, 135, 255, 0.18)" stroke="#2f95ff" stroke-width="3" />
     <circle cx="0" cy="0" r="10" fill="#0a84ff" />
-    <g transform="translate(-38,-20)">
+    <g transform="translate(-38,-32)">
       <rect width="64" height="28" rx="6" ry="6" fill="#1f2636" stroke="#0a84ff" stroke-width="2" />
       <text x="32" y="18" fill="#f5f7fb" font-family="Inter, sans-serif" font-size="14" text-anchor="middle">Sensor</text>
     </g>
@@ -38,7 +38,7 @@
     >
       Projected ground distance
     </text>
-    <text x="88" y="50" fill="#ffb347" font-family="Inter, sans-serif" font-size="16">θ</text>
+    <text x="44" y="44" fill="#ffb347" font-family="Inter, sans-serif" font-size="16">θ</text>
     <text
       x="190"
       y="178"
