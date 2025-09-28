@@ -1424,6 +1424,26 @@
         margin: var(--stack-gap) 0 calc(var(--stack-gap) / 2);
         font-size: 0.95rem;
       }
+      .diagnostics-metrics {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: var(--space-sm) var(--stack-gap);
+        margin: calc(var(--stack-gap) / 2) 0 var(--stack-gap);
+        padding: 0;
+      }
+      .diagnostics-metrics div {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-xs);
+      }
+      .diagnostics-metrics dt {
+        font-size: 0.9rem;
+        color: var(--text-muted);
+      }
+      .diagnostics-metrics dd {
+        margin: 0;
+        font-size: 0.95rem;
+      }
       .diagnostics-list {
         margin: calc(var(--stack-gap) / 2) 0 var(--stack-gap) 1.25rem;
         padding: 0;
@@ -2368,6 +2388,19 @@
             <div id="diagnostics-results" class="diagnostics-results" hidden>
               <p id="diagnostics-summary" class="muted helper-text"></p>
               <div>
+                <h4>System resources</h4>
+                <dl class="diagnostics-metrics">
+                  <div>
+                    <dt>CPU usage</dt>
+                    <dd id="diagnostics-system-cpu">—</dd>
+                  </div>
+                  <div>
+                    <dt>Memory usage</dt>
+                    <dd id="diagnostics-system-memory">—</dd>
+                  </div>
+                </dl>
+              </div>
+              <div>
                 <h4>Camera conflicts</h4>
                 <p id="diagnostics-no-conflicts" class="diagnostics-empty">
                   No conflicting services detected.
@@ -2717,6 +2750,8 @@
       const diagnosticsStatus = document.getElementById("diagnostics-status");
       const diagnosticsResults = document.getElementById("diagnostics-results");
       const diagnosticsSummary = document.getElementById("diagnostics-summary");
+      const diagnosticsSystemCpu = document.getElementById("diagnostics-system-cpu");
+      const diagnosticsSystemMemory = document.getElementById("diagnostics-system-memory");
       const diagnosticsConflicts = document.getElementById("diagnostics-conflicts");
       const diagnosticsNoConflicts = document.getElementById("diagnostics-no-conflicts");
       const diagnosticsPicameraStatus = document.getElementById("diagnostics-picamera-status");
@@ -3145,6 +3180,30 @@
           text = text.slice(0, -2);
         }
         return text;
+      }
+
+      function formatLoadAverage(value) {
+        if (typeof value !== "number" || Number.isNaN(value)) {
+          return "";
+        }
+        const absolute = Math.abs(value);
+        const precision = absolute >= 100 ? 0 : absolute >= 10 ? 1 : 2;
+        return value.toFixed(precision);
+      }
+
+      function formatByteSize(value) {
+        if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+          return "";
+        }
+        const units = ["B", "KiB", "MiB", "GiB", "TiB", "PiB"];
+        let result = value;
+        let index = 0;
+        while (result >= 1024 && index < units.length - 1) {
+          result /= 1024;
+          index += 1;
+        }
+        const precision = result >= 100 ? 0 : result >= 10 ? 1 : 2;
+        return `${result.toFixed(precision)} ${units[index]}`;
       }
 
       function normalisedToPercent(value) {
@@ -4580,6 +4639,82 @@
             data && typeof data.version === "string" ? data.version.trim() : "";
           diagnosticsSummary.textContent = version ? `Application version ${version}` : "";
           diagnosticsSummary.hidden = version.length === 0;
+        }
+        const system =
+          data && typeof data.system === "object" && data.system !== null ? data.system : null;
+        if (diagnosticsSystemCpu) {
+          let summary = "Unavailable";
+          const cpu =
+            system && typeof system.cpu === "object" && system.cpu !== null ? system.cpu : null;
+          if (cpu) {
+            const parts = [];
+            const usagePercent =
+              typeof cpu.usage_percent === "number" && Number.isFinite(cpu.usage_percent)
+                ? formatPercentageValue(cpu.usage_percent)
+                : "";
+            if (usagePercent) {
+              parts.push(`${usagePercent}% avg`);
+            }
+            const load = cpu && typeof cpu.load === "object" && cpu.load !== null ? cpu.load : null;
+            const load1 =
+              load && typeof load["1m"] === "number" && Number.isFinite(load["1m"])
+                ? formatLoadAverage(load["1m"])
+                : "";
+            if (load1) {
+              parts.push(`${load1} load (1m)`);
+            }
+            const cpuCount =
+              typeof cpu.count === "number" && Number.isFinite(cpu.count) && cpu.count > 0
+                ? Math.round(cpu.count)
+                : null;
+            if (cpuCount !== null) {
+              parts.push(`${cpuCount} cores`);
+            }
+            if (parts.length > 0) {
+              summary = parts.join(" • ");
+            }
+          }
+          diagnosticsSystemCpu.textContent = summary;
+        }
+        if (diagnosticsSystemMemory) {
+          let summary = "Unavailable";
+          const memory =
+            system && typeof system.memory === "object" && system.memory !== null
+              ? system.memory
+              : null;
+          if (memory) {
+            const parts = [];
+            const usedPercent =
+              typeof memory.used_percent === "number" && Number.isFinite(memory.used_percent)
+                ? formatPercentageValue(memory.used_percent)
+                : "";
+            if (usedPercent) {
+              parts.push(`${usedPercent}% used`);
+            }
+            const usedBytes =
+              typeof memory.used_bytes === "number" && Number.isFinite(memory.used_bytes)
+                ? memory.used_bytes
+                : null;
+            const totalBytes =
+              typeof memory.total_bytes === "number" && Number.isFinite(memory.total_bytes)
+                ? memory.total_bytes
+                : null;
+            const availableBytes =
+              typeof memory.available_bytes === "number" && Number.isFinite(memory.available_bytes)
+                ? memory.available_bytes
+                : null;
+            if (usedBytes !== null && totalBytes !== null) {
+              parts.push(`${formatByteSize(usedBytes)} / ${formatByteSize(totalBytes)}`);
+            } else if (totalBytes !== null) {
+              parts.push(`total ${formatByteSize(totalBytes)}`);
+            } else if (availableBytes !== null) {
+              parts.push(`${formatByteSize(availableBytes)} free`);
+            }
+            if (parts.length > 0) {
+              summary = parts.join(" • ");
+            }
+          }
+          diagnosticsSystemMemory.textContent = summary;
         }
         const conflicts = data && Array.isArray(data.camera_conflicts)
           ? data.camera_conflicts

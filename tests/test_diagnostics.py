@@ -23,6 +23,14 @@ def test_collect_diagnostics(monkeypatch: pytest.MonkeyPatch) -> None:
         "diagnose_webrtc_stack",
         lambda: {"status": "ok", "details": []},
     )
+    monkeypatch.setattr(
+        diagnostics,
+        "collect_system_metrics",
+        lambda: {
+            "cpu": {"usage_percent": 12.5, "count": 4, "load": {"1m": 0.5}},
+            "memory": {"used_percent": 42.0},
+        },
+    )
 
     payload = diagnostics.collect_diagnostics()
 
@@ -30,6 +38,10 @@ def test_collect_diagnostics(monkeypatch: pytest.MonkeyPatch) -> None:
     assert payload["camera_conflicts"] == ["service"]
     assert payload["picamera"] == {"status": "ok", "details": []}
     assert payload["webrtc"] == {"status": "ok", "details": []}
+    assert payload["system"] == {
+        "cpu": {"usage_percent": 12.5, "count": 4, "load": {"1m": 0.5}},
+        "memory": {"used_percent": 42.0},
+    }
 
 
 def test_run_outputs_conflicts(capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
@@ -44,6 +56,18 @@ def test_run_outputs_conflicts(capsys: pytest.CaptureFixture[str], monkeypatch: 
         "diagnose_webrtc_stack",
         lambda: {"status": "error", "details": ["aiortc module not found."], "hints": ["install"]},
     )
+    monkeypatch.setattr(
+        diagnostics,
+        "collect_system_metrics",
+        lambda: {
+            "cpu": {"usage_percent": 65.0, "count": 4, "load": {"1m": 2.6}},
+            "memory": {
+                "used_percent": 71.0,
+                "used_bytes": 2147483648,
+                "total_bytes": 4294967296,
+            },
+        },
+    )
 
     exit_code = diagnostics.run([])
 
@@ -55,6 +79,9 @@ def test_run_outputs_conflicts(capsys: pytest.CaptureFixture[str], monkeypatch: 
     assert "WebRTC stack issues detected:" in out
     assert "aiortc module not found." in out
     assert diagnostics.APP_VERSION in out
+    assert "System resource usage:" in out
+    assert "CPU:" in out
+    assert "Memory:" in out
 
 
 def test_run_json(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -68,6 +95,18 @@ def test_run_json(monkeypatch: pytest.MonkeyPatch) -> None:
         diagnostics,
         "diagnose_webrtc_stack",
         lambda: {"status": "ok", "details": []},
+    )
+    monkeypatch.setattr(
+        diagnostics,
+        "collect_system_metrics",
+        lambda: {
+            "cpu": {"usage_percent": 33.3, "count": 4, "load": {"1m": 1.2}},
+            "memory": {
+                "used_percent": 55.5,
+                "used_bytes": 123456789,
+                "total_bytes": 987654321,
+            },
+        },
     )
 
     buffer: list[str] = []
@@ -87,6 +126,14 @@ def test_run_json(monkeypatch: pytest.MonkeyPatch) -> None:
     assert payload["version"] == diagnostics.APP_VERSION
     assert payload["picamera"] == {"status": "ok", "details": [], "numpy_version": "1.26.1"}
     assert payload["webrtc"] == {"status": "ok", "details": []}
+    assert payload["system"] == {
+        "cpu": {"usage_percent": 33.3, "count": 4, "load": {"1m": 1.2}},
+        "memory": {
+            "used_percent": 55.5,
+            "used_bytes": 123456789,
+            "total_bytes": 987654321,
+        },
+    }
 
 
 def test_diagnose_picamera_stack_numpy_mismatch(monkeypatch: pytest.MonkeyPatch) -> None:
