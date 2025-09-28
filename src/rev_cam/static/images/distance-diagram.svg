@@ -38,7 +38,7 @@
     >
       Projected ground distance
     </text>
-    <text x="44" y="44" fill="#ffb347" font-family="Inter, sans-serif" font-size="16">θ</text>
+    <text x="36" y="44" fill="#ffb347" font-family="Inter, sans-serif" font-size="16">θ</text>
     <text
       x="190"
       y="178"
