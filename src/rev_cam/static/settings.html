@@ -4,6 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>RevCam Settings</title>
+    <link rel="icon" type="image/svg+xml" href="images/favicon.svg" />
     <style>
       :root {
         color-scheme: dark;
@@ -2605,6 +2606,7 @@
               if (distanceGeometryStatus) {
                 distanceGeometryStatus.textContent = "";
               }
+              refreshProjectedDistanceFromGeometry();
             });
           }
         }
@@ -3987,6 +3989,56 @@
         }
       }
 
+      function computeProjectedDistanceFromGeometry(geometry) {
+        if (!geometry || typeof geometry !== "object") {
+          return null;
+        }
+        const heightValue =
+          typeof geometry.mount_height_m === "number"
+            ? geometry.mount_height_m
+            : Number.parseFloat(geometry.mount_height_m);
+        const angleValue =
+          typeof geometry.mount_angle_deg === "number"
+            ? geometry.mount_angle_deg
+            : Number.parseFloat(geometry.mount_angle_deg);
+        if (!Number.isFinite(heightValue) || !Number.isFinite(angleValue)) {
+          return null;
+        }
+        const angleRadians = (angleValue * Math.PI) / 180;
+        const tangent = Math.tan(angleRadians);
+        if (!Number.isFinite(tangent)) {
+          return null;
+        }
+        const projection = heightValue * tangent;
+        return Number.isFinite(projection) ? projection : null;
+      }
+
+      function getDistanceGeometryInputValues() {
+        if (!distanceGeometryInputs) {
+          return null;
+        }
+        const heightInput = distanceGeometryInputs.height;
+        const angleInput = distanceGeometryInputs.angle;
+        if (!(heightInput instanceof HTMLInputElement) || !(angleInput instanceof HTMLInputElement)) {
+          return null;
+        }
+        const height = Number.parseFloat(heightInput.value);
+        const angle = Number.parseFloat(angleInput.value);
+        if (!Number.isFinite(height) || !Number.isFinite(angle)) {
+          return null;
+        }
+        return { mount_height_m: height, mount_angle_deg: angle };
+      }
+
+      function refreshProjectedDistanceFromGeometry(sourceGeometry = null) {
+        let candidate = computeProjectedDistanceFromGeometry(sourceGeometry);
+        if (candidate === null) {
+          const inputGeometry = getDistanceGeometryInputValues();
+          candidate = computeProjectedDistanceFromGeometry(inputGeometry);
+        }
+        updateProjectedDistanceDisplay(candidate);
+      }
+
       function updateProjectedDistanceDisplay(value) {
         if (!distanceProjectedValue) {
           return;
@@ -4075,12 +4127,8 @@
           const forceUpdate = options.updateGeometry === true;
           updateDistanceGeometryInputs(data.geometry, forceUpdate);
         }
-        const projected =
-          data && typeof data.projected_distance_m === "number" &&
-          Number.isFinite(data.projected_distance_m)
-            ? data.projected_distance_m
-            : null;
-        updateProjectedDistanceDisplay(projected);
+        const geometryForDisplay = data && data.geometry ? data.geometry : null;
+        refreshProjectedDistanceFromGeometry(geometryForDisplay);
         updateDistanceDisplayModeIndicator(useProjected);
         updateDistanceDisplayToggle(useProjected, {
           forceUpdate:
