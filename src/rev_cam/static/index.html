@@ -1127,6 +1127,22 @@
         }
       }
 
+      function navigateToMode(mode) {
+        if (!mode) {
+          return;
+        }
+        const currentPath = window.location.pathname.replace(/\/+$/, "") || "/";
+        if (mode === "surveillance") {
+          if (currentPath !== "/surveillance") {
+            window.location.href = "/surveillance";
+          }
+        } else if (mode === "reversing") {
+          if (currentPath !== "/" && currentPath !== "/index.html") {
+            window.location.href = "/";
+          }
+        }
+      }
+
       async function changeMode(requested) {
         if (!modeToggle || !requested || modeSwitching || requested === activeMode) {
           return;
@@ -1155,6 +1171,7 @@
           activeMode = payload.mode;
           updateModeToggle(activeMode);
           setStatus(`Mode: ${formatModeLabel(activeMode)}`, "live");
+          navigateToMode(activeMode);
         } catch (error) {
           console.error(error);
           updateModeToggle(activeMode, { message: error.message || "Switch failed" });
