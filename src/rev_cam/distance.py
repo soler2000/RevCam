@@ -338,6 +338,7 @@ class DistanceMonitor:
     def close(self) -> None:
         """Release the underlying sensor and any I2C resources."""
 
+        sensors_to_release: list[object] = []
         thread: Thread | None
         with self._lock:
             thread = self._sampling_thread
@@ -345,11 +346,19 @@ class DistanceMonitor:
             self._stop_event.set()
             sensor = self._sensor
             self._sensor = None
+            if sensor is not None:
+                sensors_to_release.append(sensor)
             self._last_reading = None
             self._clear_error_state()
         if thread and thread.is_alive():
             thread.join(timeout=1.0)
-        self._release_sensor(sensor)
+        with self._lock:
+            sensor = self._sensor
+            self._sensor = None
+            if sensor is not None and all(sensor is not existing for existing in sensors_to_release):
+                sensors_to_release.append(sensor)
+        for sensor in sensors_to_release:
+            self._release_sensor(sensor)
         self._release_owned_i2c_bus()
 
     def _clear_error_state(self) -> None:

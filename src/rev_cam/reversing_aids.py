@@ -9,6 +9,11 @@ try:  # pragma: no cover - optional dependency on numpy for overlays
 except ImportError:  # pragma: no cover - optional dependency
     _np = None
 
+try:  # pragma: no cover - optional dependency on OpenCV for overlays
+    import cv2 as _cv2
+except ImportError:  # pragma: no cover - optional dependency
+    _cv2 = None
+
 from .config import ReversingAidsConfig, ReversingAidSegment
 
 OverlayFn = Callable[[object], object]
@@ -45,19 +50,58 @@ def _render_reversing_aids(frame: _np.ndarray, config: ReversingAidsConfig) -> _
     thickness = max(1, int(round(min(width, height) * 0.01)))
     colours = list(_SEGMENT_COLOURS)
 
+    overlay = _np.zeros_like(frame)
+    mask = _np.zeros(frame.shape[:2], dtype=_np.uint8)
+
     for index, segment in enumerate(config.left):
         colour = colours[min(index, len(colours) - 1)]
-        _draw_segment(frame, segment, width, height, thickness, colour)
+        _draw_segment(overlay, mask, segment, width, height, thickness, colour)
 
     for index, segment in enumerate(config.right):
         colour = colours[min(index, len(colours) - 1)]
-        _draw_segment(frame, segment, width, height, thickness, colour)
+        _draw_segment(overlay, mask, segment, width, height, thickness, colour)
+
+    filled_y, filled_x = mask.nonzero()
+    if not filled_y.size:
+        return frame
+
+    min_y = int(filled_y.min())
+    max_y = int(filled_y.max())
+    min_x = int(filled_x.min())
+    max_x = int(filled_x.max())
+
+    frame_region = frame[min_y : max_y + 1, min_x : max_x + 1]
+    overlay_region = overlay[min_y : max_y + 1, min_x : max_x + 1]
+    mask_region = mask[min_y : max_y + 1, min_x : max_x + 1]
+
+    coverage = mask_region > 0
+    if not _np.any(coverage):
+        return frame
+
+    if _np.all(mask_region[coverage] >= 255):
+        frame_region[coverage] = overlay_region[coverage]
+        return frame
+
+    alpha = (mask_region.astype(_np.float32) / 255.0)[..., None]
+    overlay_float = overlay_region.astype(_np.float32)
+    frame_float = frame_region.astype(_np.float32)
+    blended = overlay_float * alpha + frame_float * (1.0 - alpha)
+
+    if _np.issubdtype(frame.dtype, _np.integer):
+        info = _np.iinfo(frame.dtype)
+        blended = _np.clip(_np.rint(blended), info.min, info.max)
+    else:
+        info = _np.finfo(frame.dtype)
+        blended = _np.clip(blended, info.min, info.max)
+
+    _np.copyto(frame_region, blended.astype(frame.dtype, copy=False), where=coverage[..., None])
 
     return frame
 
 
 def _draw_segment(
-    frame: _np.ndarray,
+    overlay: _np.ndarray,
+    mask: _np.ndarray,
     segment: ReversingAidSegment,
     width: int,
     height: int,
@@ -69,11 +113,12 @@ def _draw_segment(
     end_x = int(round(segment.end.x * (width - 1)))
     end_y = int(round(segment.end.y * (height - 1)))
 
-    _draw_line(frame, start_x, start_y, end_x, end_y, thickness, colour)
+    _draw_line(overlay, mask, start_x, start_y, end_x, end_y, thickness, colour)
 
 
 def _draw_line(
-    frame: _np.ndarray,
+    overlay: _np.ndarray,
+    mask: _np.ndarray,
     x0: int,
     y0: int,
     x1: int,
@@ -81,43 +126,48 @@ def _draw_line(
     thickness: int,
     colour: tuple[int, int, int],
 ) -> None:
-    dx = abs(x1 - x0)
-    sx = 1 if x0 < x1 else -1
-    dy = -abs(y1 - y0)
-    sy = 1 if y0 < y1 else -1
-    err = dx + dy
+    height, width = overlay.shape[:2]
+    if height == 0 or width == 0:
+        return
 
-    radius = max(0, thickness // 2)
+    if _cv2 is not None:  # pragma: no cover - exercised only when OpenCV is installed
+        _cv2.line(overlay, (x0, y0), (x1, y1), colour, thickness=thickness, lineType=_cv2.LINE_AA)
+        _cv2.line(mask, (x0, y0), (x1, y1), 255, thickness=thickness, lineType=_cv2.LINE_AA)
+        return
 
-    while True:
-        _stamp_disc(frame, x0, y0, radius, colour)
-        if x0 == x1 and y0 == y1:
-            break
-        e2 = 2 * err
-        if e2 >= dy:
-            err += dy
-            x0 += sx
-        if e2 <= dx:
-            err += dx
-            y0 += sy
+    half_thickness = max(thickness / 2.0, 0.5)
+    padding = int(_np.ceil(half_thickness)) + 1
 
+    min_x = max(0, min(x0, x1) - padding)
+    max_x = min(width - 1, max(x0, x1) + padding)
+    min_y = max(0, min(y0, y1) - padding)
+    max_y = min(height - 1, max(y0, y1) + padding)
 
-def _stamp_disc(
-    frame: _np.ndarray,
-    cx: int,
-    cy: int,
-    radius: int,
-    colour: tuple[int, int, int],
-) -> None:
-    height, width = frame.shape[:2]
-    for y in range(cy - radius, cy + radius + 1):
-        if y < 0 or y >= height:
-            continue
-        for x in range(cx - radius, cx + radius + 1):
-            if x < 0 or x >= width:
-                continue
-            if radius == 0 or (x - cx) ** 2 + (y - cy) ** 2 <= radius**2:
-                frame[y, x] = colour
+    if min_x > max_x or min_y > max_y:
+        return
+
+    grid_y, grid_x = _np.mgrid[min_y : max_y + 1, min_x : max_x + 1]
+    dx = x1 - x0
+    dy = y1 - y0
+    seg_len_sq = dx * dx + dy * dy
+
+    if seg_len_sq == 0:
+        dist_sq = (grid_x - x0) ** 2 + (grid_y - y0) ** 2
+    else:
+        t = ((grid_x - x0) * dx + (grid_y - y0) * dy) / seg_len_sq
+        t = _np.clip(t, 0.0, 1.0)
+        nearest_x = x0 + t * dx
+        nearest_y = y0 + t * dy
+        dist_sq = (grid_x - nearest_x) ** 2 + (grid_y - nearest_y) ** 2
+
+    region_mask = dist_sq <= half_thickness**2
+    if not _np.any(region_mask):
+        return
+
+    overlay_region = overlay[min_y : max_y + 1, min_x : max_x + 1]
+    overlay_region[region_mask] = colour
+    mask_region = mask[min_y : max_y + 1, min_x : max_x + 1]
+    mask_region[region_mask] = 255
 
 
 __all__ = ["create_reversing_aids_overlay"]
