@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Iterable, List
+from typing import Any, Callable, Dict, Iterable, List, Tuple
 
 try:  # pragma: no cover - optional dependency
     import numpy as _np
@@ -21,6 +21,11 @@ class FramePipeline:
 
     orientation_provider: Callable[[], Orientation]
     overlays: List[OverlayFn] = field(default_factory=list)
+    _scratch_buffers: Dict[Tuple[Tuple[int, ...], str], Any] = field(
+        default_factory=dict,
+        init=False,
+        repr=False,
+    )
 
     def add_overlay(self, overlay: OverlayFn) -> None:
         self.overlays.append(overlay)
@@ -49,7 +54,26 @@ class FramePipeline:
 
     def _rotate(self, frame: FrameLike, k: int) -> FrameLike:
         if _np is not None and isinstance(frame, _np.ndarray):  # pragma: no cover - optional path
-            return _np.rot90(frame, k)
+            k = k % 4
+            if k == 0:
+                return frame
+            if frame.ndim < 2:
+                return frame
+
+            if k == 2:
+                view = _np.flip(_np.flip(frame, axis=0), axis=1)
+            else:
+                axes = list(range(frame.ndim))
+                axes[0], axes[1] = axes[1], axes[0]
+                view = frame.transpose(axes)
+                if k == 1:
+                    view = _np.flip(view, axis=1)
+                else:
+                    view = _np.flip(view, axis=0)
+
+            scratch = self._get_scratch_buffer(view.shape, frame.dtype)
+            _np.copyto(scratch, view, casting="unsafe")
+            return scratch
         data = frame
         for _ in range(k % 4):
             data = [list(row) for row in zip(*data)][::-1]
@@ -57,13 +81,32 @@ class FramePipeline:
 
     def _flip_horizontal(self, frame: FrameLike) -> FrameLike:
         if _np is not None and isinstance(frame, _np.ndarray):  # pragma: no cover - optional path
-            return _np.flip(frame, axis=1)
+            frame[...] = frame[:, ::-1, ...]
+            return frame
         return [list(reversed(row)) for row in frame]
 
     def _flip_vertical(self, frame: FrameLike) -> FrameLike:
         if _np is not None and isinstance(frame, _np.ndarray):  # pragma: no cover - optional path
-            return _np.flip(frame, axis=0)
+            frame[...] = frame[::-1, ...]
+            return frame
         return list(reversed(frame))
+
+    def _get_scratch_buffer(
+        self,
+        shape: Tuple[int, ...],
+        dtype: Any,
+    ) -> _np.ndarray:
+        if _np is None:
+            raise RuntimeError("Scratch buffers require numpy")
+
+        normalised_shape = tuple(int(dim) for dim in shape)
+        dtype_obj = _np.dtype(dtype)
+        key = (normalised_shape, dtype_obj.str)
+        scratch = self._scratch_buffers.get(key)
+        if scratch is None or scratch.shape != normalised_shape:
+            scratch = _np.empty(normalised_shape, dtype=dtype_obj)
+            self._scratch_buffers[key] = scratch
+        return scratch
 
 
 def compose_overlays(overlays: Iterable[OverlayFn]) -> OverlayFn:

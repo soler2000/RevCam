@@ -306,7 +306,12 @@ def diagnose_camera_conflicts() -> list[str]:
 class Picamera2Camera(BaseCamera):
     """Camera implementation using the Picamera2 stack."""
 
-    def __init__(self, resolution: tuple[int, int] | None = None) -> None:
+    def __init__(
+        self,
+        resolution: tuple[int, int] | None = None,
+        *,
+        fps: int | None = None,
+    ) -> None:
         try:
             from picamera2 import Picamera2
         except Exception as exc:  # pragma: no cover - hardware dependent
@@ -330,6 +335,11 @@ class Picamera2Camera(BaseCamera):
         _ensure_picamera_allocator(Picamera2)
 
         self._camera = None
+        self._frame_duration_limits: tuple[int, int] | None = None
+        target_fps = self._normalise_fps(fps)
+        if target_fps is not None:
+            frame_period = max(1, int(round(1_000_000 / float(target_fps))))
+            self._frame_duration_limits = (frame_period, frame_period)
         camera_instance = None
         started = False
         try:
@@ -340,10 +350,15 @@ class Picamera2Camera(BaseCamera):
             if resolution is not None:
                 width, height = resolution
                 main_config["size"] = (int(width), int(height))
-            config = camera_instance.create_video_configuration(main=main_config)
+            config = camera_instance.create_video_configuration(
+                main=main_config,
+                buffer_count=1,
+            )
+            self._apply_frame_duration_hint(config)
             camera_instance.configure(config)
             camera_instance.start()
             started = True
+            self._initialise_controls()
         except Exception as exc:  # pragma: no cover - hardware dependent
             camera = camera_instance or self._camera
             if camera is not None:
@@ -409,11 +424,96 @@ class Picamera2Camera(BaseCamera):
         await asyncio.to_thread(self._camera.stop)
         await asyncio.to_thread(self._camera.close)
 
+    def _normalise_fps(self, fps: int | None) -> int | None:
+        if fps is None:
+            env_value = os.getenv("REVCAM_CAMERA_FPS")
+            if env_value:
+                try:
+                    fps = int(round(float(env_value)))
+                except (TypeError, ValueError):
+                    logger.warning(
+                        "Invalid REVCAM_CAMERA_FPS value %r; ignoring",
+                        env_value,
+                    )
+                    fps = None
+        if fps is None or fps <= 0:
+            return None
+        return int(min(max(fps, 1), 120))
+
+    def _apply_frame_duration_hint(self, config: object) -> None:
+        if self._frame_duration_limits is None:
+            return
+
+        limits = self._frame_duration_limits
+        controls: dict[str, object] | None = None
+        if isinstance(config, dict):
+            controls = dict(config.get("controls") or {})
+        else:
+            existing = getattr(config, "controls", None)
+            if isinstance(existing, dict):
+                controls = dict(existing)
+        if controls is None:
+            controls = {}
+        controls.setdefault("FrameDurationLimits", limits)
+        if isinstance(config, dict):
+            config["controls"] = controls
+        else:
+            try:
+                setattr(config, "controls", controls)
+            except Exception:
+                logger.debug(
+                    "Unable to attach frame duration hint to Picamera2 config", exc_info=True
+                )
+
+    def _initialise_controls(self) -> None:
+        camera = self._camera
+        if camera is None:
+            return
+
+        if self._frame_duration_limits is not None and hasattr(camera, "set_controls"):
+            try:
+                camera.set_controls({"FrameDurationLimits": self._frame_duration_limits})
+            except Exception:
+                logger.debug("Unable to apply frame duration limits", exc_info=True)
+
+        metadata: dict[str, object] | None = None
+        if hasattr(camera, "capture_metadata"):
+            try:
+                time.sleep(0.2)
+                captured = camera.capture_metadata()
+            except Exception:
+                logger.debug("Picamera2 metadata capture failed", exc_info=True)
+            else:
+                if isinstance(captured, dict):
+                    metadata = captured
+
+        controls: dict[str, object] = {"AeEnable": False}
+        if metadata is not None:
+            exposure = metadata.get("ExposureTime")
+            gain = metadata.get("AnalogueGain")
+            if isinstance(exposure, (int, float)) and exposure > 0:
+                controls["ExposureTime"] = int(exposure)
+            if isinstance(gain, (int, float)) and gain > 0:
+                controls["AnalogueGain"] = float(gain)
+        controls.setdefault("AwbEnable", False)
+
+        if hasattr(camera, "set_controls"):
+            try:
+                camera.set_controls(controls)
+            except Exception:
+                logger.debug("Unable to lock Picamera2 automatic controls", exc_info=True)
+
 
 class OpenCVCamera(BaseCamera):
     """Fallback implementation using OpenCV VideoCapture."""
 
-    def __init__(self, index: int = 0, resolution: tuple[int, int] | None = None) -> None:
+    def __init__(
+        self,
+        index: int = 0,
+        resolution: tuple[int, int] | None = None,
+        *,
+        fps: int | None = None,
+    ) -> None:
         try:
             import cv2
         except ImportError as exc:  # pragma: no cover - optional dependency
@@ -427,6 +527,8 @@ class OpenCVCamera(BaseCamera):
             width, height = resolution
             self._capture.set(cv2.CAP_PROP_FRAME_WIDTH, float(width))
             self._capture.set(cv2.CAP_PROP_FRAME_HEIGHT, float(height))
+        if fps is not None and fps > 0:
+            self._capture.set(cv2.CAP_PROP_FPS, float(fps))
 
     async def get_frame(self) -> np.ndarray:
         ret, frame = await asyncio.to_thread(self._capture.read)
@@ -447,6 +549,7 @@ class SyntheticCamera(BaseCamera):
         height: int = 480,
         *,
         resolution: tuple[int, int] | None = None,
+        fps: int | None = None,
     ) -> None:
         if resolution is not None:
             width, height = resolution
@@ -476,6 +579,7 @@ def create_camera(
     choice: str | None = None,
     *,
     resolution: tuple[int, int] | None = None,
+    fps: int | None = None,
 ) -> BaseCamera:
     """Create the camera specified by *choice* or the environment.
 
@@ -490,12 +594,12 @@ def create_camera(
     if resolved_choice == "synthetic":
         return SyntheticCamera(resolution=resolution)
     if resolved_choice == "opencv":
-        return OpenCVCamera(resolution=resolution)
+        return OpenCVCamera(resolution=resolution, fps=fps)
     if resolved_choice == "picamera":
-        return Picamera2Camera(resolution=resolution)
+        return Picamera2Camera(resolution=resolution, fps=fps)
     if resolved_choice == "auto":
         try:
-            return Picamera2Camera(resolution=resolution)
+            return Picamera2Camera(resolution=resolution, fps=fps)
         except CameraError as exc:
             logger.error("Picamera2 unavailable during auto selection: %s", exc)
             return SyntheticCamera(resolution=resolution)

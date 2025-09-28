@@ -42,7 +42,9 @@ if [[ -d "$VENV_DIR/bin" ]]; then
     export PATH="$VENV_DIR/bin:$PATH"
 fi
 
-DEFAULT_ARGS=("rev_cam.app:create_app" "--factory" "--host" "0.0.0.0" "--port" "9000")
+DEFAULT_FLAGS=("--loop" "uvloop" "--http" "httptools" "--ws" "websockets" "--no-server-header" "--limit-max-requests" "0")
+DEFAULT_APP=("rev_cam.app:create_app" "--factory" "--host" "0.0.0.0" "--port" "9000")
+DEFAULT_ARGS=("${DEFAULT_FLAGS[@]}" "${DEFAULT_APP[@]}")
 ARGS=("$@")
 if [[ ${#ARGS[@]} -eq 0 ]]; then
     ARGS=("${DEFAULT_ARGS[@]}")

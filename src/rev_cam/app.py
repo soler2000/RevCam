@@ -462,12 +462,17 @@ def create_app(
         resolution: Resolution,
         *,
         fallback_to_synthetic: bool,
+        target_fps: int | None,
     ) -> tuple[BaseCamera, str]:
         normalised = selection.strip().lower()
         resolution_tuple = resolution.as_tuple()
         if normalised == "auto":
             try:
-                camera_instance = create_camera("picamera", resolution=resolution_tuple)
+                camera_instance = create_camera(
+                    "picamera",
+                    resolution=resolution_tuple,
+                    fps=target_fps,
+                )
             except CameraError as exc:
                 reason = str(exc)
                 logger.warning("Picamera unavailable, using synthetic camera: %s", reason)
@@ -476,6 +481,7 @@ def create_app(
                     "synthetic",
                     resolution,
                     fallback_to_synthetic=False,
+                    target_fps=target_fps,
                 )
                 return fallback_camera, fallback_active
             else:
@@ -483,7 +489,11 @@ def create_app(
                 return camera_instance, identify_camera(camera_instance)
 
         try:
-            camera_instance = create_camera(normalised, resolution=resolution_tuple)
+            camera_instance = create_camera(
+                normalised,
+                resolution=resolution_tuple,
+                fps=target_fps,
+            )
         except CameraError as exc:
             reason = str(exc)
             _record_camera_error(normalised, reason)
@@ -495,6 +505,7 @@ def create_app(
                     "synthetic",
                     resolution,
                     fallback_to_synthetic=False,
+                    target_fps=target_fps,
                 )
                 return fallback_camera, fallback_active
             raise
@@ -515,13 +526,14 @@ def create_app(
             logger.exception("Unexpected error while selecting Wi-Fi network")
         selection = config_manager.get_camera()
         resolution = config_manager.get_resolution()
+        stream_settings = config_manager.get_stream_settings()
         camera, active_camera_choice = _build_camera(
             selection,
             resolution,
             fallback_to_synthetic=True,
+            target_fps=stream_settings.fps,
         )
         active_resolution = resolution
-        stream_settings = config_manager.get_stream_settings()
         try:
             streamer = MJPEGStreamer(
                 camera=camera,
@@ -1033,6 +1045,7 @@ def create_app(
 
         current_selection = config_manager.get_camera()
         current_resolution = config_manager.get_resolution()
+        stream_settings = config_manager.get_stream_settings()
         if (
             camera is not None
             and selection == current_selection
@@ -1067,6 +1080,7 @@ def create_app(
                 selection,
                 requested_resolution,
                 fallback_to_synthetic=(selection == "auto"),
+                target_fps=stream_settings.fps,
             )
         except CameraError as exc:
             # Attempt to restore the previous camera configuration on failure.
@@ -1075,6 +1089,7 @@ def create_app(
                     old_selection,
                     old_resolution,
                     fallback_to_synthetic=True,
+                    target_fps=stream_settings.fps,
                 )
             except Exception:  # pragma: no cover - best-effort recovery
                 camera = None

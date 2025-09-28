@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import inspect
 import logging
+import os
 import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -16,6 +18,18 @@ from .camera import BaseCamera
 from .pipeline import FramePipeline
 
 logger = logging.getLogger(__name__)
+
+
+def _env_positive_int(name: str, default: int) -> int:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        candidate = int(round(float(value)))
+    except (TypeError, ValueError):
+        logger.warning("Invalid %s value %r; using %d", name, value, default)
+        return default
+    return default if candidate <= 0 else candidate
 
 try:  # pragma: no cover - dependency availability varies by platform
     import simplejpeg
@@ -33,12 +47,13 @@ else:  # pragma: no cover - dependency availability varies
         _SIMPLEJPEG_ENCODE_KWARGS = set()
 
 try:  # pragma: no cover - dependency availability varies by platform
-    from aiortc import MediaStreamTrack, RTCPeerConnection, RTCSessionDescription
+    from aiortc import MediaStreamTrack, RTCPeerConnection, RTCSessionDescription, RTCRtpSender
     from aiortc.mediastreams import MediaStreamError
 except ImportError as exc:  # pragma: no cover - dependency availability varies
     MediaStreamTrack = None  # type: ignore[assignment]
     RTCPeerConnection = None  # type: ignore[assignment]
     RTCSessionDescription = None  # type: ignore[assignment]
+    RTCRtpSender = None  # type: ignore[assignment]
     MediaStreamError = None  # type: ignore[assignment]
     _AIORTC_IMPORT_ERROR = exc
 else:  # pragma: no cover - dependency availability varies
@@ -407,6 +422,7 @@ class WebRTCManager:
     camera: BaseCamera
     pipeline: FramePipeline
     fps: int = 20
+    max_bitrate: int = field(default_factory=lambda: _env_positive_int("REVCAM_WEBRTC_MAX_BITRATE", 4_000_000))
     peer_connection_factory: Callable[[], object] | None = None
     _sessions: set[_WebRTCSession] = field(init=False, default_factory=set)
     _tracks: set[PipelineVideoTrack] = field(init=False, default_factory=set)
@@ -431,6 +447,9 @@ class WebRTCManager:
         if self.peer_connection_factory is None:
             self.peer_connection_factory = RTCPeerConnection  # type: ignore[assignment]
 
+        if self.max_bitrate <= 0:
+            self.max_bitrate = 4_000_000
+
     async def create_session(self, sdp: str, offer_type: str) -> RTCSessionDescription:
         """Create a WebRTC session from a remote offer and return the answer."""
 
@@ -445,7 +464,9 @@ class WebRTCManager:
 
         track = PipelineVideoTrack(self)
         session = _WebRTCSession(self, pc, track)
-        pc.addTrack(track)
+        sender = pc.addTrack(track)
+        self._configure_transceiver(pc, sender)
+        self._configure_sender(sender)
 
         @pc.on("connectionstatechange")
         async def _on_state_change() -> None:  # pragma: no cover - event driven
@@ -504,6 +525,84 @@ class WebRTCManager:
 
         for session in sessions:
             await session.close()
+
+    def _configure_transceiver(self, pc: RTCPeerConnection, sender: object) -> None:
+        if RTCRtpSender is None:
+            return
+        try:
+            transceivers = pc.getTransceivers()
+        except Exception:
+            logger.debug("Unable to inspect peer connection transceivers", exc_info=True)
+            return
+        try:
+            transceiver = next((item for item in transceivers if item.sender == sender), None)
+        except Exception:
+            logger.debug("Failed to locate matching transceiver", exc_info=True)
+            return
+        if transceiver is None:
+            return
+
+        try:
+            capabilities = RTCRtpSender.getCapabilities("video")
+        except Exception:
+            logger.debug("Unable to query sender capabilities", exc_info=True)
+            return
+
+        preferred_codecs = []
+        fallback_codecs = []
+        for codec in capabilities.codecs:
+            if codec.mimeType.lower() != "video/h264":
+                fallback_codecs.append(codec)
+                continue
+            tuned = copy.copy(codec)
+            parameters = dict(tuned.parameters or {})
+            parameters.setdefault("packetization-mode", "1")
+            parameters.setdefault("profile-level-id", "42e01f")
+            parameters.setdefault("level-asymmetry-allowed", "1")
+            tuned.parameters = parameters
+            preferred_codecs.append(tuned)
+
+        if not preferred_codecs:
+            return
+
+        try:
+            transceiver.setCodecPreferences(preferred_codecs + fallback_codecs)
+        except Exception:
+            logger.debug("Unable to enforce H.264 codec preferences", exc_info=True)
+
+    def _configure_sender(self, sender: object) -> None:
+        if RTCRtpSender is None:
+            return
+
+        try:
+            parameters = sender.getParameters()  # type: ignore[attr-defined]
+        except Exception:
+            logger.debug("Unable to read sender parameters", exc_info=True)
+            return
+
+        updated = False
+        for encoding in getattr(parameters, "encodings", []):
+            if self.fps > 0:
+                target = float(self.fps)
+                if getattr(encoding, "maxFramerate", None) != target:
+                    encoding.maxFramerate = target
+                    updated = True
+            if self.max_bitrate > 0:
+                max_bitrate = int(self.max_bitrate)
+                if getattr(encoding, "maxBitrate", None) != max_bitrate:
+                    encoding.maxBitrate = max_bitrate
+                    updated = True
+            if hasattr(encoding, "scalabilityMode") and getattr(encoding, "scalabilityMode", None) != "L1T1":
+                encoding.scalabilityMode = "L1T1"
+                updated = True
+
+        if not updated:
+            return
+
+        try:
+            sender.setParameters(parameters)  # type: ignore[attr-defined]
+        except Exception:
+            logger.debug("Unable to apply sender parameters", exc_info=True)
 
 
 __all__ = ["MJPEGStreamer", "WebRTCManager", "PipelineVideoTrack", "encode_frame_to_jpeg"]
