@@ -115,6 +115,7 @@
       .stream-wrapper {
         width: min(100%, max(320px, calc(100vh - 6rem)));
         max-width: min(1100px, max(360px, calc(100vh - 3rem)));
+        margin: 0;
       }
       .stream-display {
         display: block;
@@ -163,6 +164,17 @@
         cursor: not-allowed;
         box-shadow: none;
         transform: none;
+      }
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
       }
       .control-group {
         display: flex;
@@ -657,7 +669,7 @@
       </div>
     </header>
     <main>
-      <div class="stream-wrapper">
+      <figure class="stream-wrapper" aria-labelledby="stream-caption">
         <video
           id="stream-video"
           class="stream-display"
@@ -667,7 +679,8 @@
           hidden
         ></video>
         <img id="stream-fallback" class="stream-display" alt="Camera feed" hidden />
-      </div>
+        <figcaption id="stream-caption" class="sr-only">Live camera feed</figcaption>
+      </figure>
     </main>
     <div
       class="illumination-status-box"
@@ -679,6 +692,9 @@
     <footer>
       <div class="control-group">
         <button id="toggle-stream" type="button" aria-pressed="false">Pause stream</button>
+        <button id="toggle-fullscreen" type="button" aria-pressed="false">
+          Enter full screen
+        </button>
         <button id="reconnect" type="button">Reconnect</button>
         <button id="save-snapshot" type="button">Save snapshot</button>
       </div>
@@ -690,6 +706,7 @@
       const streamVideo = document.getElementById("stream-video");
       const streamImage = document.getElementById("stream-fallback");
       const toggleButton = document.getElementById("toggle-stream");
+      const fullscreenButton = document.getElementById("toggle-fullscreen");
       const snapshotButton = document.getElementById("save-snapshot");
       const batteryIndicator = document.getElementById("battery-indicator");
       const batteryIcon = document.getElementById("battery-icon");
@@ -705,6 +722,119 @@
       const illuminationColourInput = document.getElementById("illumination-colour");
       const illuminationStatusBox = document.getElementById("illumination-status");
       const BATTERY_LEVEL_MAX = 32;
+      const isFullscreenSupported = () => {
+        if (document.fullscreenEnabled || document.webkitFullscreenEnabled) {
+          return true;
+        }
+        if (typeof streamVideo.webkitSupportsFullscreen === "boolean") {
+          return streamVideo.webkitSupportsFullscreen;
+        }
+        return typeof streamVideo.webkitEnterFullscreen === "function";
+      };
+
+      const isVideoFullscreen = () =>
+        document.fullscreenElement === streamVideo ||
+        document.webkitFullscreenElement === streamVideo ||
+        Boolean(streamVideo.webkitDisplayingFullscreen);
+
+      const updateFullscreenButtonState = () => {
+        if (!fullscreenButton) return;
+        const active = isVideoFullscreen();
+        fullscreenButton.setAttribute("aria-pressed", String(active));
+        fullscreenButton.textContent = active ? "Exit full screen" : "Enter full screen";
+      };
+
+      const updateFullscreenAvailability = () => {
+        if (!fullscreenButton) return;
+        const supported = isFullscreenSupported();
+        fullscreenButton.disabled = !supported;
+        if (supported) {
+          fullscreenButton.removeAttribute("aria-disabled");
+        } else {
+          fullscreenButton.setAttribute("aria-disabled", "true");
+          fullscreenButton.setAttribute("aria-pressed", "false");
+        }
+      };
+
+      const requestVideoFullscreen = async () => {
+        if (!isFullscreenSupported()) {
+          return;
+        }
+
+        try {
+          if (streamVideo.requestFullscreen) {
+            await streamVideo.requestFullscreen();
+          } else if (streamVideo.webkitRequestFullscreen) {
+            streamVideo.webkitRequestFullscreen();
+          } else if (streamVideo.webkitEnterFullscreen) {
+            streamVideo.webkitEnterFullscreen();
+          } else if (streamVideo.parentElement && streamVideo.parentElement.requestFullscreen) {
+            await streamVideo.parentElement.requestFullscreen();
+          }
+        } catch (error) {
+          console.error("Unable to enter full screen", error);
+        }
+      };
+
+      const exitVideoFullscreen = async () => {
+        if (document.fullscreenElement === streamVideo || document.webkitFullscreenElement === streamVideo) {
+          if (document.exitFullscreen) {
+            await document.exitFullscreen();
+          } else if (document.webkitExitFullscreen) {
+            document.webkitExitFullscreen();
+          }
+        } else if (streamVideo.webkitDisplayingFullscreen && streamVideo.webkitExitFullscreen) {
+          streamVideo.webkitExitFullscreen();
+        }
+      };
+
+      if (fullscreenButton) {
+        updateFullscreenAvailability();
+
+        fullscreenButton.addEventListener("click", async () => {
+          if (fullscreenButton.disabled) {
+            return;
+          }
+          if (isVideoFullscreen()) {
+            await exitVideoFullscreen();
+          } else {
+            await requestVideoFullscreen();
+          }
+          updateFullscreenButtonState();
+        });
+
+        const fullscreenEvents = [
+          "fullscreenchange",
+          "webkitfullscreenchange",
+          "webkitbeginfullscreen",
+          "webkitendfullscreen",
+        ];
+
+        fullscreenEvents.forEach((eventName) => {
+          const target =
+            eventName === "webkitbeginfullscreen" || eventName === "webkitendfullscreen"
+              ? streamVideo
+              : document;
+          target.addEventListener(eventName, () => {
+            updateFullscreenButtonState();
+            updateFullscreenAvailability();
+          });
+        });
+
+        const availabilityEvents = [
+          "loadedmetadata",
+          "loadeddata",
+          "canplay",
+          "canplaythrough",
+        ];
+        availabilityEvents.forEach((eventName) => {
+          streamVideo.addEventListener(eventName, updateFullscreenAvailability, {
+            once: eventName === "loadedmetadata",
+          });
+        });
+
+        updateFullscreenButtonState();
+      }
       const STATUS_CLASSES = ["is-live", "is-paused", "is-error", "is-busy"];
       function applyStatusState(reference) {
         if (!statusPill) {
