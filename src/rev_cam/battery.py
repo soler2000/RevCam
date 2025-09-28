@@ -822,8 +822,6 @@ def _render_battery_overlay(
         battery_icon_height + padding * 2,
     )
 
-    _apply_top_bar(frame, bar_height)
-
     text_y = max(0, (bar_height - glyph_height) // 2)
 
     wifi_icon_x = padding
@@ -918,18 +916,6 @@ def _signal_to_level(signal: object) -> int:
     if value > 5.0:
         return 1
     return 0
-
-
-def _apply_top_bar(frame, height: int) -> None:
-    if _np is None:
-        return
-    bar_height = max(0, min(height, frame.shape[0]))
-    if bar_height <= 0:
-        return
-    region = frame[:bar_height, :, :].astype(_np.float32)
-    blended = (region * 0.75).clip(0, 255).astype(frame.dtype)
-    frame[:bar_height, :, :] = blended
-    frame[bar_height - 1 : bar_height, :, :] = (60, 60, 60)
 
 
 def _wifi_icon_dimensions(scale: int) -> tuple[int, int]:
