@@ -106,7 +106,7 @@
         display: inline-flex;
         align-items: center;
         gap: var(--space-md);
-        padding: calc(var(--space-sm) * 0.7) var(--space-lg);
+        padding: calc(var(--space-sm) * 0.35) var(--space-lg);
         border-radius: var(--radius-pill);
         background: var(--surface-1);
         border: 1px solid var(--border-muted);
@@ -270,13 +270,14 @@
         gap: var(--space-md);
         font-weight: 600;
         transition: color var(--transition), box-shadow var(--transition);
+        flex: 1 1 clamp(9.6rem, 13.8vw, 13.2rem);
       }
       .header-panels > .pill {
-        flex: 1 1 clamp(16rem, 23vw, 22rem);
-        min-height: 2.275rem;
+        min-height: 1.15rem;
       }
       .illumination-pill {
         display: inline-flex;
+        flex: 1 1 clamp(16rem, 23vw, 22rem);
         flex-wrap: wrap;
         align-items: center;
         gap: var(--space-md);
@@ -297,8 +298,8 @@
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        width: 2.75rem;
-        height: 2.75rem;
+        width: 1.375rem;
+        height: 1.375rem;
         padding: 0;
         border-radius: 50%;
         background: var(--surface-1);
@@ -333,8 +334,8 @@
           0 0 0 4px rgba(74, 222, 128, 0.2);
       }
       .illumination-toggle-icon {
-        width: 1.8rem;
-        height: 1.8rem;
+        width: 0.9rem;
+        height: 0.9rem;
       }
       .illumination-toggle-icon .bulb-glass {
         fill: rgba(255, 255, 255, 0.12);
@@ -530,6 +531,7 @@
       .battery-pill {
         font-weight: 600;
         color: var(--text-primary);
+        flex: 1 1 clamp(11.2rem, 16.1vw, 15.4rem);
       }
       .battery-pill.low {
         color: var(--danger);
@@ -544,8 +546,8 @@
         box-shadow: none;
       }
       .battery-icon {
-        width: 2.6rem;
-        height: 1.5rem;
+        width: 3.9rem;
+        height: 2.25rem;
         flex: 0 0 auto;
       }
       .battery-outline {
