@@ -611,6 +611,7 @@ class ConfigManager:
         DistanceZones,
         DistanceCalibration,
         bool,
+        DistanceMounting,
         BatteryLimits,
         int,
         StreamSettings,

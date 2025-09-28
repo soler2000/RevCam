@@ -241,6 +241,18 @@ alternate adapter. The installation helper installs it automatically when
 possible and otherwise reports a warning so you can install it manually prior to
 changing the bus number.
 
+#### Configuring mounting geometry
+
+Open the **Distance** tab in the settings UI to record how the VL53L1X is
+mounted on your vehicle. The mounting geometry card lets you enter the sensor's
+height above the ground (default 1.5&nbsp;m) and the angle away from vertical
+(default 40°). RevCam stores these values in `config.json`, displays a diagram of
+the installation, and uses basic trigonometry to calculate the projected ground
+distance (the point where the sensor's line meets the road) as
+`height × tan(angle)`. The projected distance is shown alongside live readings
+and is available through the `/api/distance` and `/api/distance/geometry`
+endpoints.
+
 ### Development machine installation
 
 For local development on non-Pi machines a regular virtual environment is
