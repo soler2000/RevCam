@@ -135,3 +135,14 @@ async def test_pipeline_video_track_returns_video_frame(
     assert np.all(array == 128)
 
     track.stop()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("anyio_backend", ["asyncio"], indirect=True)
+async def test_webrtc_session_is_hashable(anyio_backend) -> None:
+    manager = SimpleNamespace(_discard_session=lambda *_: None)
+    session = streaming._WebRTCSession(manager, SimpleNamespace(), SimpleNamespace())
+
+    sessions = {session}
+
+    assert session in sessions

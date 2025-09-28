@@ -375,7 +375,7 @@ else:  # pragma: no cover - dependency availability varies
             raise RuntimeError("aiortc and PyAV are required for WebRTC streaming")
 
 
-@dataclass
+@dataclass(eq=False)
 class _WebRTCSession:
     manager: "WebRTCManager"
     pc: RTCPeerConnection

@@ -1244,11 +1244,11 @@
         font-size: 0.95rem;
         color: var(--danger);
       }
-      .diagnostics-results h3 {
+      .diagnostics-results h4 {
         margin: var(--stack-gap) 0 calc(var(--stack-gap) / 2);
         font-size: 1rem;
       }
-      .diagnostics-results h4 {
+      .diagnostics-results h5 {
         margin: var(--stack-gap) 0 calc(var(--stack-gap) / 2);
         font-size: 0.95rem;
       }
@@ -1511,57 +1511,6 @@
             </div>
           </form>
 
-          <section id="diagnostics-card" class="card">
-            <h2>Diagnostics</h2>
-            <p class="muted helper-text">
-              Check for conflicting camera services and validate the Picamera2 Python stack.
-            </p>
-            <div class="diagnostics-actions">
-              <button type="button" id="diagnostics-refresh" class="secondary-button">
-                Run diagnostics
-              </button>
-              <span
-                id="diagnostics-status"
-                class="diagnostics-status helper-text status-text"
-                role="status"
-                aria-live="polite"
-              ></span>
-            </div>
-            <div id="diagnostics-results" class="diagnostics-results" hidden>
-              <p id="diagnostics-summary" class="muted helper-text"></p>
-              <div>
-                <h3>Camera conflicts</h3>
-                <p id="diagnostics-no-conflicts" class="diagnostics-empty">
-                  No conflicting services detected.
-                </p>
-                <ul id="diagnostics-conflicts" class="diagnostics-list" hidden></ul>
-              </div>
-              <div>
-                <h3>Picamera2 stack</h3>
-                <p id="diagnostics-picamera-status" class="diagnostics-picamera-status"></p>
-                <ul id="diagnostics-picamera-details" class="diagnostics-list" hidden></ul>
-                <div id="diagnostics-picamera-hints-block" hidden>
-                  <h4>Hints</h4>
-                  <ul id="diagnostics-picamera-hints" class="diagnostics-list"></ul>
-                </div>
-              </div>
-              <div>
-                <h3>WebRTC stack</h3>
-                <p id="diagnostics-webrtc-status" class="diagnostics-picamera-status"></p>
-                <ul id="diagnostics-webrtc-details" class="diagnostics-list" hidden></ul>
-                <div id="diagnostics-webrtc-hints-block" hidden>
-                  <h4>Hints</h4>
-                  <ul id="diagnostics-webrtc-hints" class="diagnostics-list"></ul>
-                </div>
-              </div>
-            </div>
-            <p
-              id="diagnostics-error"
-              class="diagnostics-error helper-text"
-              role="alert"
-              aria-live="assertive"
-            ></p>
-          </section>
         </section>
 
             <section
@@ -2123,6 +2072,58 @@
             ></p>
           </section>
 
+          <section id="diagnostics-card" class="card" hidden>
+            <h3>Camera and WebRTC diagnostics</h3>
+            <p class="muted helper-text">
+              Check for conflicting camera services and verify that the Picamera2 and WebRTC stacks are ready.
+            </p>
+            <div class="diagnostics-actions">
+              <button type="button" id="diagnostics-refresh" class="secondary-button">
+                Run diagnostics
+              </button>
+              <span
+                id="diagnostics-status"
+                class="diagnostics-status helper-text status-text"
+                role="status"
+                aria-live="polite"
+              ></span>
+            </div>
+            <div id="diagnostics-results" class="diagnostics-results" hidden>
+              <p id="diagnostics-summary" class="muted helper-text"></p>
+              <div>
+                <h4>Camera conflicts</h4>
+                <p id="diagnostics-no-conflicts" class="diagnostics-empty">
+                  No conflicting services detected.
+                </p>
+                <ul id="diagnostics-conflicts" class="diagnostics-list" hidden></ul>
+              </div>
+              <div>
+                <h4>Picamera2 stack</h4>
+                <p id="diagnostics-picamera-status" class="diagnostics-picamera-status"></p>
+                <ul id="diagnostics-picamera-details" class="diagnostics-list" hidden></ul>
+                <div id="diagnostics-picamera-hints-block" hidden>
+                  <h5>Hints</h5>
+                  <ul id="diagnostics-picamera-hints" class="diagnostics-list"></ul>
+                </div>
+              </div>
+              <div>
+                <h4>WebRTC stack</h4>
+                <p id="diagnostics-webrtc-status" class="diagnostics-picamera-status"></p>
+                <ul id="diagnostics-webrtc-details" class="diagnostics-list" hidden></ul>
+                <div id="diagnostics-webrtc-hints-block" hidden>
+                  <h5>Hints</h5>
+                  <ul id="diagnostics-webrtc-hints" class="diagnostics-list"></ul>
+                </div>
+              </div>
+            </div>
+            <p
+              id="diagnostics-error"
+              class="diagnostics-error helper-text"
+              role="alert"
+              aria-live="assertive"
+            ></p>
+          </section>
+
           <section id="development-distance-card" class="card" hidden>
             <h3>Distance sensor raw data</h3>
             <p class="muted helper-text">
@@ -2401,6 +2402,7 @@
       const REVERSING_SEGMENTS_PER_SIDE = REVERSING_SEGMENT_RATIOS.length;
       const REVERSING_SEGMENT_COLOURS = ["#66bb6a", "#ffc107", "#ef5350"];
       const REVERSING_PREVIEW_DEFAULT_RATIO = "16 / 9";
+      const diagnosticsCard = document.getElementById("diagnostics-card");
       const diagnosticsButton = document.getElementById("diagnostics-refresh");
       const diagnosticsStatus = document.getElementById("diagnostics-status");
       const diagnosticsResults = document.getElementById("diagnostics-results");
@@ -2420,6 +2422,7 @@
       );
       const diagnosticsWebrtcHints = document.getElementById("diagnostics-webrtc-hints");
       const diagnosticsError = document.getElementById("diagnostics-error");
+      const DIAGNOSTICS_DISABLED_MESSAGE = "Enable development features to run diagnostics.";
       let diagnosticsLoading = false;
       let diagnosticsStatusTimer = null;
       const batterySummary = document.getElementById("battery-summary");
@@ -3914,6 +3917,35 @@
         }
         document.documentElement.classList.toggle("development-enabled", developmentEnabled);
         document.body.classList.toggle("development-enabled", developmentEnabled);
+        if (!developmentEnabled) {
+          diagnosticsLoading = false;
+        }
+        if (diagnosticsCard) {
+          diagnosticsCard.hidden = !developmentEnabled;
+        }
+        if (diagnosticsButton instanceof HTMLButtonElement) {
+          diagnosticsButton.disabled = !developmentEnabled || diagnosticsLoading;
+        }
+        if (!developmentEnabled) {
+          if (diagnosticsStatusTimer) {
+            clearTimeout(diagnosticsStatusTimer);
+            diagnosticsStatusTimer = null;
+          }
+          if (diagnosticsStatus) {
+            diagnosticsStatus.textContent = DIAGNOSTICS_DISABLED_MESSAGE;
+          }
+          if (diagnosticsResults) {
+            diagnosticsResults.hidden = true;
+          }
+          if (diagnosticsError) {
+            diagnosticsError.textContent = "";
+          }
+        } else if (
+          diagnosticsStatus &&
+          diagnosticsStatus.textContent === DIAGNOSTICS_DISABLED_MESSAGE
+        ) {
+          diagnosticsStatus.textContent = "";
+        }
         if (developmentDistanceCard) {
           developmentDistanceCard.hidden = !developmentEnabled;
         }
@@ -4099,6 +4131,12 @@
         if (diagnosticsLoading) {
           return;
         }
+        if (!developmentEnabled) {
+          if (diagnosticsStatus) {
+            diagnosticsStatus.textContent = DIAGNOSTICS_DISABLED_MESSAGE;
+          }
+          return;
+        }
         diagnosticsLoading = true;
         if (diagnosticsStatusTimer) {
           clearTimeout(diagnosticsStatusTimer);
@@ -4156,7 +4194,7 @@
         } finally {
           diagnosticsLoading = false;
           if (diagnosticsButton) {
-            diagnosticsButton.disabled = false;
+            diagnosticsButton.disabled = !developmentEnabled;
           }
         }
       }
@@ -4589,6 +4627,12 @@
 
       if (diagnosticsButton) {
         diagnosticsButton.addEventListener("click", () => {
+          if (diagnosticsLoading || !developmentEnabled) {
+            if (!developmentEnabled && diagnosticsStatus) {
+              diagnosticsStatus.textContent = DIAGNOSTICS_DISABLED_MESSAGE;
+            }
+            return;
+          }
           refreshDiagnostics().catch((err) => console.error(err));
         });
       }
