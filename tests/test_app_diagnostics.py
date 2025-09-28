@@ -78,6 +78,9 @@ def _apply_app_stubs(monkeypatch: pytest.MonkeyPatch) -> None:
         def close(self) -> None:  # pragma: no cover - used indirectly
             return None
 
+        def auto_connect_known_networks(self):  # pragma: no cover - framework hook
+            return None
+
     def _create_camera(choice: str, *args, **kwargs):
         return _StubCamera()
 

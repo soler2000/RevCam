@@ -480,3 +480,101 @@ def test_wifi_network_password_reused_from_store(tmp_path: Path) -> None:
     )
     reloaded.connect("Cafe", None)
     assert new_backend.connect_attempts[-1] == ("Cafe", "beanjuice123")
+
+
+def test_auto_connect_prefers_strongest_known_network(
+    tmp_path: Path,
+    wifi_backend: FakeWiFiBackend,
+    mdns_advertiser: FakeMDNSAdvertiser,
+) -> None:
+    wifi_backend.status = WiFiStatus(
+        connected=False,
+        ssid=None,
+        signal=None,
+        ip_address=None,
+        mode="station",
+        hotspot_active=False,
+        profile=None,
+        detail="Disconnected",
+    )
+    wifi_backend.networks = [
+        WiFiNetwork(
+            ssid="Home",
+            signal=45,
+            security="WPA2",
+            frequency=2412.0,
+            channel=1,
+            known=True,
+            active=False,
+        ),
+        WiFiNetwork(
+            ssid="Cafe",
+            signal=82,
+            security="WPA2",
+            frequency=2462.0,
+            channel=11,
+            known=True,
+            active=False,
+        ),
+    ]
+    credentials = WiFiCredentialStore(tmp_path / "wifi_credentials.json")
+    credentials.set_network_password("Home", "homepass")
+    credentials.set_network_password("Cafe", "cafepass")
+    manager = WiFiManager(
+        backend=wifi_backend,
+        rollback_timeout=0.05,
+        poll_interval=0.005,
+        hotspot_rollback_timeout=0.05,
+        mdns_advertiser=mdns_advertiser,
+        credential_store=credentials,
+    )
+
+    status = manager.auto_connect_known_networks()
+
+    assert wifi_backend.connect_attempts
+    assert wifi_backend.connect_attempts[0][0] == "Cafe"
+    assert status.connected is True
+    assert status.ssid == "Cafe"
+
+
+def test_auto_connect_falls_back_to_hotspot(
+    tmp_path: Path,
+    wifi_backend: FakeWiFiBackend,
+    mdns_advertiser: FakeMDNSAdvertiser,
+) -> None:
+    wifi_backend.status = WiFiStatus(
+        connected=False,
+        ssid=None,
+        signal=None,
+        ip_address=None,
+        mode="station",
+        hotspot_active=False,
+        profile=None,
+        detail="Disconnected",
+    )
+    wifi_backend.networks = [
+        WiFiNetwork(
+            ssid="Guest",
+            signal=60,
+            security="WPA2",
+            frequency=2417.0,
+            channel=2,
+            known=True,
+            active=False,
+        )
+    ]
+    manager = WiFiManager(
+        backend=wifi_backend,
+        rollback_timeout=0.05,
+        poll_interval=0.005,
+        hotspot_rollback_timeout=0.05,
+        mdns_advertiser=mdns_advertiser,
+        credential_store=WiFiCredentialStore(tmp_path / "wifi_credentials.json"),
+    )
+
+    status = manager.auto_connect_known_networks()
+
+    assert wifi_backend.connect_attempts
+    assert wifi_backend.connect_attempts[0][0] == "Guest"
+    assert wifi_backend.hotspot_attempts
+    assert status.hotspot_active is True
