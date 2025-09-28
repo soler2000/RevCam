@@ -114,6 +114,15 @@
         backdrop-filter: blur(22px);
         -webkit-backdrop-filter: blur(22px);
         min-width: 0;
+        transition: box-shadow var(--transition), border-color var(--transition);
+      }
+      .pill.has-success-glow {
+        border-color: rgba(74, 222, 128, 0.45);
+        box-shadow: var(--shadow-sm), var(--glow-success);
+      }
+      .pill.has-danger-glow {
+        border-color: rgba(255, 69, 58, 0.35);
+        box-shadow: var(--shadow-sm), var(--glow-danger);
       }
       main {
         flex: 1 1 auto;
@@ -290,8 +299,6 @@
       }
       .illumination-pill.is-active {
         color: var(--success);
-        border-color: rgba(74, 222, 128, 0.45);
-        box-shadow: var(--glow-success);
       }
       .illumination-pill button {
         flex: 0 0 auto;
@@ -535,11 +542,9 @@
       }
       .battery-pill.low {
         color: var(--danger);
-        box-shadow: var(--glow-danger);
       }
       .battery-pill.charging {
         color: var(--success);
-        box-shadow: var(--glow-success);
       }
       .battery-pill.unavailable {
         color: var(--text-muted);
@@ -967,6 +972,7 @@
         }
         const descriptor = typeof reference === "string" ? reference.toLowerCase() : "";
         statusPill.classList.remove(...STATUS_CLASSES);
+        statusPill.classList.remove("has-success-glow", "has-danger-glow");
         let targetClass = "is-busy";
         if (descriptor.includes("error") || descriptor.includes("fail") || descriptor.includes("lost")) {
           targetClass = "is-error";
@@ -976,6 +982,11 @@
           targetClass = "is-live";
         }
         statusPill.classList.add(targetClass);
+        if (targetClass === "is-live") {
+          statusPill.classList.add("has-success-glow");
+        } else if (targetClass === "is-error") {
+          statusPill.classList.add("has-danger-glow");
+        }
       }
 
       let statusModeText = "";
@@ -1208,7 +1219,13 @@
         ) {
           return;
         }
-        batteryIndicator.classList.remove("low", "charging", "unavailable");
+        batteryIndicator.classList.remove(
+          "low",
+          "charging",
+          "unavailable",
+          "has-success-glow",
+          "has-danger-glow",
+        );
         batteryIcon.classList.remove("low", "charging", "unavailable");
 
         if (!data || data.available !== true || typeof data.percentage !== "number") {
@@ -1247,10 +1264,10 @@
         batteryText.textContent = `${rounded}%`;
 
         if (data.charging === true) {
-          batteryIndicator.classList.add("charging");
+          batteryIndicator.classList.add("charging", "has-success-glow");
           batteryIcon.classList.add("charging");
         } else if (percentage <= 20) {
-          batteryIndicator.classList.add("low");
+          batteryIndicator.classList.add("low", "has-danger-glow");
           batteryIcon.classList.add("low");
         }
 
@@ -1419,6 +1436,10 @@
           illuminationControls.classList.toggle("unavailable", !available);
           illuminationControls.classList.toggle(
             "is-active",
+            available && active,
+          );
+          illuminationControls.classList.toggle(
+            "has-success-glow",
             available && active,
           );
         }
