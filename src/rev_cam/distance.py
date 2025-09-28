@@ -582,7 +582,7 @@ _ZONE_LABELS = {
 }
 
 
-def _projected_distance_from_mounting(mounting) -> float | None:
+def _projected_distance_from_mounting(mounting, measured_distance) -> float | None:
     if mounting is None:
         return None
     try:
@@ -591,7 +591,14 @@ def _projected_distance_from_mounting(mounting) -> float | None:
     except (AttributeError, TypeError, ValueError):
         return None
     angle_rad = math.radians(angle)
-    projection = height * math.tan(angle_rad)
+    projection: float
+    if measured_distance is not None and math.isfinite(measured_distance):
+        try:
+            projection = float(measured_distance) * math.sin(angle_rad)
+        except (TypeError, ValueError):
+            return None
+    else:
+        projection = height * math.tan(angle_rad)
     return projection if math.isfinite(projection) else None
 
 def create_distance_overlay(
@@ -614,7 +621,7 @@ def create_distance_overlay(
 
         zones = zonedist_provider()
         mounting = geometry_provider() if geometry_provider is not None else None
-        projection = _projected_distance_from_mounting(mounting)
+        projection = _projected_distance_from_mounting(mounting, reading.distance_m)
         use_projected = False
         if display_mode_provider is not None:
             try:

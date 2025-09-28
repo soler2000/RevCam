@@ -41,9 +41,15 @@ def _load_static(name: str) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def _project_ground_distance(mounting: DistanceMounting) -> float | None:
+def _project_ground_distance(
+    mounting: DistanceMounting, measured_distance: float | None = None
+) -> float | None:
     angle_rad = math.radians(mounting.mount_angle_deg)
-    projection = mounting.mount_height_m * math.tan(angle_rad)
+    projection: float
+    if measured_distance is not None and math.isfinite(measured_distance):
+        projection = float(measured_distance) * math.sin(angle_rad)
+    else:
+        projection = mounting.mount_height_m * math.tan(angle_rad)
     return projection if math.isfinite(projection) else None
 
 
@@ -278,7 +284,7 @@ def create_app(
             mounting = config_manager.get_distance_mounting()
         if use_projected is None:
             use_projected = config_manager.get_distance_use_projected()
-        projection = _project_ground_distance(mounting)
+        projection = _project_ground_distance(mounting, reading.distance_m)
         display_distance = _select_display_distance(
             reading.distance_m,
             projection,

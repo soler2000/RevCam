@@ -118,9 +118,8 @@ def test_distance_endpoint_returns_reading(client: TestClient) -> None:
     assert payload["geometry"]["mount_angle_deg"] == pytest.approx(
         DEFAULT_DISTANCE_MOUNTING.mount_angle_deg
     )
-    expected_projection = (
-        DEFAULT_DISTANCE_MOUNTING.mount_height_m
-        * math.tan(math.radians(DEFAULT_DISTANCE_MOUNTING.mount_angle_deg))
+    expected_projection = payload["distance_m"] * math.sin(
+        math.radians(DEFAULT_DISTANCE_MOUNTING.mount_angle_deg)
     )
     assert payload["projected_distance_m"] == pytest.approx(expected_projection)
 
@@ -229,9 +228,8 @@ def test_distance_display_mode_toggle(client: TestClient) -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["use_projected_distance"] is True
-    expected_projection = (
-        DEFAULT_DISTANCE_MOUNTING.mount_height_m
-        * math.tan(math.radians(DEFAULT_DISTANCE_MOUNTING.mount_angle_deg))
+    expected_projection = payload["distance_m"] * math.sin(
+        math.radians(DEFAULT_DISTANCE_MOUNTING.mount_angle_deg)
     )
     assert payload["projected_distance_m"] == pytest.approx(expected_projection)
     assert payload["display_distance_m"] == pytest.approx(expected_projection)
@@ -242,7 +240,10 @@ def test_distance_display_mode_toggle(client: TestClient) -> None:
     assert follow_up.status_code == 200
     follow_payload = follow_up.json()
     assert follow_payload["use_projected_distance"] is True
-    assert follow_payload["display_distance_m"] == pytest.approx(expected_projection)
+    follow_expected = follow_payload["distance_m"] * math.sin(
+        math.radians(DEFAULT_DISTANCE_MOUNTING.mount_angle_deg)
+    )
+    assert follow_payload["display_distance_m"] == pytest.approx(follow_expected)
 
 
 def test_distance_geometry_update_persists(client: TestClient) -> None:
@@ -254,7 +255,7 @@ def test_distance_geometry_update_persists(client: TestClient) -> None:
     payload = response.json()
     assert payload["geometry"]["mount_height_m"] == pytest.approx(1.9)
     assert payload["geometry"]["mount_angle_deg"] == pytest.approx(32.0)
-    expected_projection = 1.9 * math.tan(math.radians(32.0))
+    expected_projection = payload["distance_m"] * math.sin(math.radians(32.0))
     assert payload["projected_distance_m"] == pytest.approx(expected_projection)
     config_data = json.loads(Path(client.config_path).read_text())
     geometry = config_data["distance"]["geometry"]
