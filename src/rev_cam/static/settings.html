@@ -992,8 +992,42 @@
         font-size: 0.8rem;
         color: var(--text-muted);
       }
+      body:not(.development-enabled) #development-system-card,
       body:not(.development-enabled) #development-distance-card {
         display: none;
+      }
+      #development-system-card {
+        display: flex;
+        flex-direction: column;
+        gap: var(--stack-gap);
+      }
+      #development-system-card h3 {
+        margin: 0;
+      }
+      .development-system-metrics {
+        margin: 0;
+        display: grid;
+        gap: var(--space-sm);
+      }
+      .development-system-metrics div {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+        padding: var(--space-md) var(--space-lg);
+        border-radius: var(--radius-md);
+        background: var(--surface-panel);
+        border: 1px solid var(--border-subtle);
+      }
+      .development-system-metrics dt {
+        font-size: 0.8rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--text-muted);
+        margin: 0;
+      }
+      .development-system-metrics dd {
+        margin: 0;
+        font-size: 0.95rem;
       }
       #development-distance-card {
         display: flex;
@@ -2437,6 +2471,24 @@
             ></p>
           </section>
 
+          <section id="development-system-card" class="card" hidden>
+            <h3>System resource usage</h3>
+            <p class="muted helper-text">
+              Latest CPU and memory statistics captured by the diagnostics service. Metrics refresh whenever
+              diagnostics are run.
+            </p>
+            <dl class="development-system-metrics">
+              <div>
+                <dt>CPU usage</dt>
+                <dd id="development-system-cpu">Enable development features to collect system metrics.</dd>
+              </div>
+              <div>
+                <dt>Memory usage</dt>
+                <dd id="development-system-memory">Enable development features to collect system metrics.</dd>
+              </div>
+            </dl>
+          </section>
+
           <section id="development-distance-card" class="card" hidden>
             <h3>Distance sensor raw data</h3>
             <p class="muted helper-text">
@@ -2630,12 +2682,20 @@
       let distanceGeometrySaving = false;
       const developmentToggle = document.getElementById("development-toggle");
       const developmentStatus = document.getElementById("development-status");
+      const developmentSystemCard = document.getElementById("development-system-card");
+      const developmentSystemCpu = document.getElementById("development-system-cpu");
+      const developmentSystemMemory = document.getElementById("development-system-memory");
       const developmentDistanceCard = document.getElementById("development-distance-card");
       const developmentDistanceEmpty = document.getElementById("development-distance-empty");
       const developmentDistanceLog = document.getElementById("development-distance-log");
       const developmentDistanceRefresh = document.getElementById("development-distance-refresh");
       const developmentDistanceClear = document.getElementById("development-distance-clear");
       const DEVELOPMENT_STORAGE_KEY = "revcam.development.enabled";
+      const DEVELOPMENT_SYSTEM_DISABLED_MESSAGE =
+        "Enable development features to collect system metrics.";
+      const DEVELOPMENT_SYSTEM_WAITING_MESSAGE = "Run diagnostics to load system metrics.";
+      const DEVELOPMENT_SYSTEM_LOADING_MESSAGE = "Collecting system metrics…";
+      const DEVELOPMENT_SYSTEM_ERROR_MESSAGE = "Unable to collect system metrics.";
       const DEVELOPMENT_DISTANCE_LOG_LIMIT = 50;
       const DEVELOPMENT_DISTANCE_EMPTY_DEFAULT_MESSAGE = "No raw distance readings captured yet.";
       const DEVELOPMENT_DISTANCE_DISABLED_MESSAGE = "Enable development features to capture raw readings.";
@@ -4288,6 +4348,16 @@
         }
       }
 
+      function setDevelopmentSystemMetricsMessage(message) {
+        const text = message && message.length > 0 ? message : "";
+        if (developmentSystemCpu) {
+          developmentSystemCpu.textContent = text;
+        }
+        if (developmentSystemMemory) {
+          developmentSystemMemory.textContent = text;
+        }
+      }
+
       function setDevelopmentDistanceEmpty(message, isError = false) {
         if (!developmentDistanceEmpty) {
           return;
@@ -4520,6 +4590,9 @@
         if (!developmentEnabled) {
           diagnosticsLoading = false;
         }
+        if (developmentSystemCard) {
+          developmentSystemCard.hidden = !developmentEnabled;
+        }
         if (diagnosticsCard) {
           diagnosticsCard.hidden = !developmentEnabled;
         }
@@ -4527,6 +4600,7 @@
           diagnosticsButton.disabled = !developmentEnabled || diagnosticsLoading;
         }
         if (!developmentEnabled) {
+          setDevelopmentSystemMetricsMessage(DEVELOPMENT_SYSTEM_DISABLED_MESSAGE);
           if (diagnosticsStatusTimer) {
             clearTimeout(diagnosticsStatusTimer);
             diagnosticsStatusTimer = null;
@@ -4545,6 +4619,9 @@
           diagnosticsStatus.textContent === DIAGNOSTICS_DISABLED_MESSAGE
         ) {
           diagnosticsStatus.textContent = "";
+        }
+        if (developmentEnabled) {
+          setDevelopmentSystemMetricsMessage(DEVELOPMENT_SYSTEM_WAITING_MESSAGE);
         }
         if (developmentDistanceCard) {
           developmentDistanceCard.hidden = !developmentEnabled;
@@ -4581,6 +4658,9 @@
           startDevelopmentDistancePolling();
           if (!developmentDistanceLog || developmentDistanceLog.children.length === 0) {
             fetchDevelopmentDistanceReading().catch((err) => console.error(err));
+          }
+          if (!diagnosticsLoading) {
+            refreshDiagnostics().catch((err) => console.error(err));
           }
         } else {
           stopDevelopmentDistancePolling();
@@ -4629,6 +4709,70 @@
         return entries.length;
       }
 
+      function summariseCpuMetrics(cpu) {
+        if (!cpu || typeof cpu !== "object") {
+          return "Unavailable";
+        }
+        const parts = [];
+        const usagePercent =
+          typeof cpu.usage_percent === "number" && Number.isFinite(cpu.usage_percent)
+            ? formatPercentageValue(cpu.usage_percent)
+            : "";
+        if (usagePercent) {
+          parts.push(`${usagePercent}% avg`);
+        }
+        const load = cpu && typeof cpu.load === "object" && cpu.load !== null ? cpu.load : null;
+        const load1 =
+          load && typeof load["1m"] === "number" && Number.isFinite(load["1m"])
+            ? formatLoadAverage(load["1m"])
+            : "";
+        if (load1) {
+          parts.push(`${load1} load (1m)`);
+        }
+        const cpuCount =
+          typeof cpu.count === "number" && Number.isFinite(cpu.count) && cpu.count > 0
+            ? Math.round(cpu.count)
+            : null;
+        if (cpuCount !== null) {
+          parts.push(`${cpuCount} cores`);
+        }
+        return parts.length > 0 ? parts.join(" • ") : "Unavailable";
+      }
+
+      function summariseMemoryMetrics(memory) {
+        if (!memory || typeof memory !== "object") {
+          return "Unavailable";
+        }
+        const parts = [];
+        const usedPercent =
+          typeof memory.used_percent === "number" && Number.isFinite(memory.used_percent)
+            ? formatPercentageValue(memory.used_percent)
+            : "";
+        if (usedPercent) {
+          parts.push(`${usedPercent}% used`);
+        }
+        const usedBytes =
+          typeof memory.used_bytes === "number" && Number.isFinite(memory.used_bytes)
+            ? memory.used_bytes
+            : null;
+        const totalBytes =
+          typeof memory.total_bytes === "number" && Number.isFinite(memory.total_bytes)
+            ? memory.total_bytes
+            : null;
+        const availableBytes =
+          typeof memory.available_bytes === "number" && Number.isFinite(memory.available_bytes)
+            ? memory.available_bytes
+            : null;
+        if (usedBytes !== null && totalBytes !== null) {
+          parts.push(`${formatByteSize(usedBytes)} / ${formatByteSize(totalBytes)}`);
+        } else if (totalBytes !== null) {
+          parts.push(`total ${formatByteSize(totalBytes)}`);
+        } else if (availableBytes !== null) {
+          parts.push(`${formatByteSize(availableBytes)} free`);
+        }
+        return parts.length > 0 ? parts.join(" • ") : "Unavailable";
+      }
+
       function applyDiagnostics(data) {
         if (!diagnosticsResults) {
           return;
@@ -4645,79 +4789,22 @@
         }
         const system =
           data && typeof data.system === "object" && data.system !== null ? data.system : null;
+        const cpu = system && typeof system.cpu === "object" && system.cpu !== null ? system.cpu : null;
+        const cpuSummary = summariseCpuMetrics(cpu);
         if (diagnosticsSystemCpu) {
-          let summary = "Unavailable";
-          const cpu =
-            system && typeof system.cpu === "object" && system.cpu !== null ? system.cpu : null;
-          if (cpu) {
-            const parts = [];
-            const usagePercent =
-              typeof cpu.usage_percent === "number" && Number.isFinite(cpu.usage_percent)
-                ? formatPercentageValue(cpu.usage_percent)
-                : "";
-            if (usagePercent) {
-              parts.push(`${usagePercent}% avg`);
-            }
-            const load = cpu && typeof cpu.load === "object" && cpu.load !== null ? cpu.load : null;
-            const load1 =
-              load && typeof load["1m"] === "number" && Number.isFinite(load["1m"])
-                ? formatLoadAverage(load["1m"])
-                : "";
-            if (load1) {
-              parts.push(`${load1} load (1m)`);
-            }
-            const cpuCount =
-              typeof cpu.count === "number" && Number.isFinite(cpu.count) && cpu.count > 0
-                ? Math.round(cpu.count)
-                : null;
-            if (cpuCount !== null) {
-              parts.push(`${cpuCount} cores`);
-            }
-            if (parts.length > 0) {
-              summary = parts.join(" • ");
-            }
-          }
-          diagnosticsSystemCpu.textContent = summary;
+          diagnosticsSystemCpu.textContent = cpuSummary;
         }
+        if (developmentSystemCpu) {
+          developmentSystemCpu.textContent = cpuSummary;
+        }
+        const memory =
+          system && typeof system.memory === "object" && system.memory !== null ? system.memory : null;
+        const memorySummary = summariseMemoryMetrics(memory);
         if (diagnosticsSystemMemory) {
-          let summary = "Unavailable";
-          const memory =
-            system && typeof system.memory === "object" && system.memory !== null
-              ? system.memory
-              : null;
-          if (memory) {
-            const parts = [];
-            const usedPercent =
-              typeof memory.used_percent === "number" && Number.isFinite(memory.used_percent)
-                ? formatPercentageValue(memory.used_percent)
-                : "";
-            if (usedPercent) {
-              parts.push(`${usedPercent}% used`);
-            }
-            const usedBytes =
-              typeof memory.used_bytes === "number" && Number.isFinite(memory.used_bytes)
-                ? memory.used_bytes
-                : null;
-            const totalBytes =
-              typeof memory.total_bytes === "number" && Number.isFinite(memory.total_bytes)
-                ? memory.total_bytes
-                : null;
-            const availableBytes =
-              typeof memory.available_bytes === "number" && Number.isFinite(memory.available_bytes)
-                ? memory.available_bytes
-                : null;
-            if (usedBytes !== null && totalBytes !== null) {
-              parts.push(`${formatByteSize(usedBytes)} / ${formatByteSize(totalBytes)}`);
-            } else if (totalBytes !== null) {
-              parts.push(`total ${formatByteSize(totalBytes)}`);
-            } else if (availableBytes !== null) {
-              parts.push(`${formatByteSize(availableBytes)} free`);
-            }
-            if (parts.length > 0) {
-              summary = parts.join(" • ");
-            }
-          }
-          diagnosticsSystemMemory.textContent = summary;
+          diagnosticsSystemMemory.textContent = memorySummary;
+        }
+        if (developmentSystemMemory) {
+          developmentSystemMemory.textContent = memorySummary;
         }
         const conflicts = data && Array.isArray(data.camera_conflicts)
           ? data.camera_conflicts
@@ -4827,6 +4914,9 @@
         if (diagnosticsError) {
           diagnosticsError.textContent = "";
         }
+        if (developmentEnabled) {
+          setDevelopmentSystemMetricsMessage(DEVELOPMENT_SYSTEM_LOADING_MESSAGE);
+        }
         try {
           const response = await fetch("/api/diagnostics", { cache: "no-store" });
           if (!response.ok) {
@@ -4866,6 +4956,9 @@
           }
           if (diagnosticsStatus) {
             diagnosticsStatus.textContent = "Diagnostics failed";
+          }
+          if (developmentEnabled) {
+            setDevelopmentSystemMetricsMessage(DEVELOPMENT_SYSTEM_ERROR_MESSAGE);
           }
         } finally {
           diagnosticsLoading = false;
