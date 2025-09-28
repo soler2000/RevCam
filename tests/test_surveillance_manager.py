@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -39,6 +40,25 @@ def test_surveillance_manager_creates_and_lists_clips(tmp_path):
     clips, total = manager.list_clips(ClipFilters())
     assert total == 0
     assert clips == []
+
+
+def test_manual_record_request_creates_command_file(tmp_path):
+    manager = SurveillanceManager(base_path=tmp_path)
+
+    request = manager.request_manual_record(duration_s=12)
+    assert request["duration_s"] == 12
+    assert isinstance(request["requested_at"], datetime)
+
+    command_path = Path(request["path"])
+    assert command_path.exists()
+    payload = json.loads(command_path.read_text(encoding="utf-8"))
+    assert payload["id"] == request["id"]
+    assert payload["duration_s"] == 12
+
+    # Request without explicit duration defaults to None and writes another file.
+    request2 = manager.request_manual_record()
+    assert request2["duration_s"] is None
+    assert Path(request2["path"]).exists()
 
 
 def test_surveillance_retention(tmp_path):

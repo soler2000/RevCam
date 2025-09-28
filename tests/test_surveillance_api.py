@@ -49,6 +49,14 @@ def test_surveillance_endpoints(tmp_path):
         assert response.status_code == 200
         assert response.json()["storage_max_size_gb"] == 0.1
 
+        response = client.post("/api/surv/manual-record", json={"duration_s": 15})
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "queued"
+        assert payload["duration_s"] == 15
+        assert payload["request_id"]
+        assert "requested_at" in payload
+
         response = client.post("/api/surv/test-motion")
         assert response.status_code == 200
         clip = response.json()["clip"]

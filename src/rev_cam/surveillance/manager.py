@@ -62,7 +62,9 @@ class SurveillanceManager:
         self._base_path.mkdir(parents=True, exist_ok=True)
         self._db_path = self._base_path / "index.db"
         self._exports_path = self._base_path / "exports"
+        self._manual_requests_path = self._base_path / "manual_requests"
         self._exports_path.mkdir(parents=True, exist_ok=True)
+        self._manual_requests_path.mkdir(parents=True, exist_ok=True)
         self._settings_store = (
             settings_store
             if settings_store is not None
@@ -90,6 +92,47 @@ class SurveillanceManager:
     @property
     def exports_path(self) -> Path:
         return self._exports_path
+
+    @property
+    def manual_requests_path(self) -> Path:
+        return self._manual_requests_path
+
+    # ------------------------------------------------------------------
+    # Manual recording
+    # ------------------------------------------------------------------
+    def request_manual_record(
+        self,
+        *,
+        duration_s: float | int | None = None,
+    ) -> dict[str, object]:
+        if duration_s is not None:
+            try:
+                duration_val = float(duration_s)
+            except (TypeError, ValueError):
+                raise ValueError("Manual record duration must be numeric") from None
+            if duration_val <= 0:
+                raise ValueError("Manual record duration must be positive")
+            if duration_val > 3600:
+                raise ValueError("Manual record duration cannot exceed one hour")
+        else:
+            duration_val = None
+
+        request_id = uuid.uuid4().hex[:12]
+        requested_at = datetime.now(timezone.utc)
+        payload = {
+            "id": request_id,
+            "requested_at": requested_at.isoformat(),
+            "duration_s": duration_val,
+        }
+        file_name = f"manual-{requested_at.isoformat().replace(':', '-')}-{request_id}.json"
+        path = self._manual_requests_path / file_name
+        path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+        return {
+            "id": request_id,
+            "path": str(path),
+            "requested_at": requested_at,
+            "duration_s": duration_val,
+        }
 
     # ------------------------------------------------------------------
     # Clip operations

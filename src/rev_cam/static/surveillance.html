@@ -136,6 +136,69 @@
         color: var(--text-primary);
       }
 
+      .mode-toggle {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--space-sm);
+        padding: var(--space-sm) var(--space-lg);
+        border-radius: var(--radius-pill);
+        background: var(--surface-1);
+        border: 1px solid var(--border-muted);
+        box-shadow: var(--shadow-sm);
+      }
+
+      .mode-toggle .mode-label {
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--text-muted);
+      }
+
+      .mode-toggle .mode-buttons {
+        display: inline-flex;
+        gap: var(--space-xs);
+        padding: var(--space-xs);
+        border-radius: var(--radius-pill);
+        background: var(--surface-soft);
+      }
+
+      .mode-toggle .mode-option {
+        background: transparent;
+        background-image: none;
+        color: var(--text-muted);
+        border: none;
+        border-radius: var(--radius-pill);
+        padding: calc(var(--space-xs) + 0.1rem) var(--space-md);
+        font-weight: 600;
+        font-size: 0.9rem;
+        box-shadow: none;
+        transform: none;
+        transition: background var(--transition), color var(--transition);
+      }
+
+      .mode-toggle .mode-option:not(:disabled):hover,
+      .mode-toggle .mode-option:not(:disabled):focus-visible {
+        outline: none;
+        background: var(--surface-muted);
+        color: var(--text-primary);
+      }
+
+      .mode-toggle .mode-option.is-active {
+        background: var(--accent);
+        color: var(--text-on-accent);
+      }
+
+      .mode-toggle .mode-option:disabled {
+        opacity: 0.6;
+        cursor: wait;
+      }
+
+      .mode-toggle .mode-status {
+        font-size: 0.85rem;
+        color: var(--text-muted);
+        min-width: 6ch;
+      }
+
       a.button-link {
         display: inline-flex;
         align-items: center;
@@ -536,6 +599,18 @@
         <a href="/surveillance" aria-current="page">Surveillance</a>
         <a href="/settings">Settings</a>
       </nav>
+      <div class="mode-toggle" id="mode-toggle" role="group" aria-label="Operating mode">
+        <span class="mode-label">Mode</span>
+        <div class="mode-buttons" role="group">
+          <button type="button" class="mode-option" data-mode-option="reversing" aria-pressed="false">
+            Reversing
+          </button>
+          <button type="button" class="mode-option" data-mode-option="surveillance" aria-pressed="false">
+            Surveillance
+          </button>
+        </div>
+        <span class="mode-status" id="mode-status">Loading…</span>
+      </div>
     </header>
     <main>
       <section class="card player-card" aria-label="Clip player">
@@ -583,6 +658,7 @@
           </dl>
         </div>
         <div class="player-actions">
+          <button type="button" id="manual-record">Manual record</button>
           <a
             id="download-clip"
             class="button-link disabled"
@@ -704,6 +780,7 @@
       const downloadLink = document.getElementById("download-clip");
       const openClipButton = document.getElementById("open-clip");
       const playerStatus = document.getElementById("player-status");
+      const manualRecordButton = document.getElementById("manual-record");
       const filterForm = document.getElementById("clip-filter-form");
       const resetFiltersButton = document.getElementById("reset-filters");
       const gallery = document.getElementById("clip-gallery");
@@ -717,6 +794,11 @@
       const prevPageButton = document.getElementById("prev-page");
       const nextPageButton = document.getElementById("next-page");
       const selectionSummary = document.getElementById("selection-summary");
+      const modeToggle = document.getElementById("mode-toggle");
+      const modeStatus = document.getElementById("mode-status");
+      const modeButtons = modeToggle
+        ? Array.from(modeToggle.querySelectorAll(".mode-option"))
+        : [];
       const sortSelect = filterForm?.querySelector('select[name="sort"]');
       const pageSizeSelect = filterForm?.querySelector('select[name="page_size"]');
 
@@ -727,6 +809,8 @@
       let currentSort = "-start_ts";
       const selectedIds = new Set();
       let activeClipId = null;
+      let activeMode = null;
+      let modeSwitching = false;
 
       function formatDate(isoString) {
         if (!isoString) return "—";
@@ -771,6 +855,89 @@
       function setPlayerStatus(message) {
         if (playerStatus) {
           playerStatus.textContent = message || "";
+        }
+      }
+
+      function formatModeLabel(mode) {
+        if (!mode) return "Unknown";
+        return mode.charAt(0).toUpperCase() + mode.slice(1);
+      }
+
+      function updateModeToggle(mode, { busy = false, message } = {}) {
+        if (!modeToggle) {
+          return;
+        }
+        for (const button of modeButtons) {
+          const target = button.dataset.modeOption;
+          const isActive = target === mode;
+          button.classList.toggle("is-active", isActive);
+          button.setAttribute("aria-pressed", String(isActive));
+          button.disabled = busy;
+        }
+        if (modeStatus) {
+          if (message) {
+            modeStatus.textContent = message;
+          } else if (mode) {
+            modeStatus.textContent = formatModeLabel(mode);
+          } else {
+            modeStatus.textContent = "Unknown";
+          }
+        }
+      }
+
+      async function fetchMode() {
+        if (!modeToggle) {
+          return;
+        }
+        updateModeToggle(activeMode, { busy: true, message: "Loading…" });
+        try {
+          const response = await fetch("/api/mode");
+          if (!response.ok) {
+            throw new Error("Unable to determine mode");
+          }
+          const payload = await response.json();
+          activeMode = payload.mode;
+          updateModeToggle(activeMode);
+        } catch (error) {
+          console.error(error);
+          updateModeToggle(activeMode, { message: error.message || "Unavailable" });
+        }
+      }
+
+      async function changeMode(requested) {
+        if (!modeToggle || !requested || modeSwitching || requested === activeMode) {
+          return;
+        }
+        modeSwitching = true;
+        updateModeToggle(activeMode, { busy: true, message: "Switching…" });
+        try {
+          const response = await fetch("/api/mode", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ mode: requested }),
+          });
+          if (!response.ok) {
+            let detail = `Failed (${response.status})`;
+            try {
+              const errorPayload = await response.json();
+              if (errorPayload?.detail) {
+                detail = errorPayload.detail;
+              }
+            } catch (parseError) {
+              console.error(parseError);
+            }
+            throw new Error(detail);
+          }
+          const payload = await response.json();
+          activeMode = payload.mode;
+          updateModeToggle(activeMode);
+        } catch (error) {
+          console.error(error);
+          updateModeToggle(activeMode, {
+            message: error.message || "Switch failed",
+          });
+        } finally {
+          modeSwitching = false;
         }
       }
 
@@ -1239,6 +1406,46 @@
         });
       }
 
+      if (manualRecordButton) {
+        manualRecordButton.addEventListener("click", async () => {
+          setPlayerStatus("Requesting manual recording…");
+          manualRecordButton.disabled = true;
+          try {
+            const response = await fetch("/api/surv/manual-record", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({}),
+            });
+            if (!response.ok) {
+              let detail = `Unable to start recording (${response.status})`;
+              try {
+                const errorPayload = await response.json();
+                if (errorPayload?.detail) {
+                  detail = errorPayload.detail;
+                }
+              } catch (parseError) {
+                console.error(parseError);
+              }
+              throw new Error(detail);
+            }
+            const payload = await response.json();
+            const durationPart =
+              typeof payload.duration_s === "number" && payload.duration_s > 0
+                ? ` (${payload.duration_s}s)`
+                : "";
+            setPlayerStatus(`Manual recording queued${durationPart}.`);
+            setTimeout(() => {
+              loadClips({ page: 1 });
+            }, 2500);
+          } catch (error) {
+            console.error(error);
+            setPlayerStatus(error instanceof Error ? error.message : "Manual record failed.");
+          } finally {
+            manualRecordButton.disabled = false;
+          }
+        });
+      }
+
       prevPageButton.addEventListener("click", () => {
         if (currentPage <= 1) return;
         activeClipId = null;
@@ -1251,6 +1458,15 @@
         activeClipId = null;
         loadClips({ page: currentPage + 1 });
       });
+
+      if (modeToggle) {
+        fetchMode();
+        for (const button of modeButtons) {
+          button.addEventListener("click", () => {
+            changeMode(button.dataset.modeOption);
+          });
+        }
+      }
 
       clearSelection();
       loadClips({ page: 1 });

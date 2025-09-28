@@ -199,6 +199,9 @@ class ClipBulkPayload(BaseModel):
     ids: list[int]
 
 
+class ManualRecordPayload(BaseModel):
+    duration_s: float | None = Field(default=None, gt=0.0, le=3600.0)
+
 def create_app(
     config_path: Path | str = Path("data/config.json"),
     *,
@@ -1384,6 +1387,27 @@ def create_app(
     def delete_surveillance_clips(payload: ClipBulkPayload) -> dict[str, int]:
         removed = surveillance_manager.delete_clips(payload.ids)
         return {"removed": removed}
+
+    @app.post("/api/surv/manual-record")
+    def request_manual_record(
+        payload: ManualRecordPayload = Body(default=ManualRecordPayload()),
+    ) -> dict[str, Any]:
+        try:
+            request_info = surveillance_manager.request_manual_record(
+                duration_s=payload.duration_s
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        requested_at = request_info["requested_at"]
+        timestamp = (
+            requested_at.isoformat() if isinstance(requested_at, datetime) else str(requested_at)
+        )
+        return {
+            "status": "queued",
+            "request_id": request_info["id"],
+            "duration_s": request_info["duration_s"],
+            "requested_at": timestamp,
+        }
 
     @app.post("/api/surv/test-motion")
     def trigger_surveillance_test_motion() -> dict[str, Any]:

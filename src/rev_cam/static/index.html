@@ -121,6 +121,55 @@
         min-width: 0;
         transition: box-shadow var(--transition), border-color var(--transition);
       }
+      .pill.mode-toggle {
+        align-items: center;
+        gap: var(--space-sm);
+      }
+      .mode-toggle .mode-label {
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--text-muted);
+      }
+      .mode-toggle .mode-buttons {
+        display: inline-flex;
+        gap: var(--space-xs);
+        background: var(--surface-soft);
+        border-radius: var(--radius-pill);
+        padding: var(--space-xs);
+      }
+      .mode-toggle .mode-option {
+        background: transparent;
+        background-image: none;
+        color: var(--text-muted);
+        border: none;
+        border-radius: var(--radius-pill);
+        padding: calc(var(--space-xs) + 0.1rem) var(--space-md);
+        font-size: 0.9rem;
+        font-weight: 600;
+        box-shadow: none;
+        transform: none;
+        transition: background var(--transition), color var(--transition);
+      }
+      .mode-toggle .mode-option:not(:disabled):hover,
+      .mode-toggle .mode-option:not(:disabled):focus-visible {
+        outline: none;
+        background: var(--surface-muted);
+        color: var(--text-primary);
+      }
+      .mode-toggle .mode-option.is-active {
+        background: var(--accent);
+        color: var(--text-on-accent);
+      }
+      .mode-toggle .mode-option:disabled {
+        opacity: 0.6;
+        cursor: wait;
+      }
+      .mode-toggle .mode-status {
+        font-size: 0.85rem;
+        color: var(--text-muted);
+        min-width: 6ch;
+      }
       .pill.has-success-glow {
         border-color: rgba(74, 222, 128, 0.45);
         box-shadow: var(--shadow-sm), var(--glow-success);
@@ -680,6 +729,18 @@
     <header>
       <strong class="brand">RevCam</strong>
       <div class="header-panels">
+        <div class="pill mode-toggle" id="mode-toggle" role="group" aria-label="Operating mode">
+          <span class="mode-label">Mode</span>
+          <div class="mode-buttons" role="group">
+            <button type="button" class="mode-option" data-mode-option="reversing" aria-pressed="false">
+              Reversing
+            </button>
+            <button type="button" class="mode-option" data-mode-option="surveillance" aria-pressed="false">
+              Surveillance
+            </button>
+          </div>
+          <span class="mode-status" id="mode-status">Loading…</span>
+        </div>
         <div class="pill status-pill is-busy" id="status-pill" role="status" aria-live="polite">
           <svg class="status-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
             <g class="icon icon-live">
@@ -859,7 +920,14 @@
       const illuminationIntensityDisplay = document.getElementById("illumination-intensity-display");
       const illuminationColourInput = document.getElementById("illumination-colour");
       const illuminationStatusBox = document.getElementById("illumination-status");
+      const modeToggle = document.getElementById("mode-toggle");
+      const modeStatus = document.getElementById("mode-status");
+      const modeButtons = modeToggle
+        ? Array.from(modeToggle.querySelectorAll(".mode-option"))
+        : [];
       const BATTERY_LEVEL_MAX = 32;
+      let activeMode = null;
+      let modeSwitching = false;
       const isFullscreenSupported = () => {
         if (document.fullscreenEnabled || document.webkitFullscreenEnabled) {
           return true;
@@ -1011,6 +1079,89 @@
           statusLabel.textContent = message;
         }
         applyStatusState(stateHint || message);
+      }
+
+      function formatModeLabel(mode) {
+        if (!mode) return "Unknown";
+        return mode.charAt(0).toUpperCase() + mode.slice(1);
+      }
+
+      function updateModeToggle(mode, { busy = false, message } = {}) {
+        if (!modeToggle) {
+          return;
+        }
+        for (const button of modeButtons) {
+          const target = button.dataset.modeOption;
+          const isActive = target === mode;
+          button.classList.toggle("is-active", isActive);
+          button.setAttribute("aria-pressed", String(isActive));
+          button.disabled = busy;
+        }
+        if (modeStatus) {
+          if (message) {
+            modeStatus.textContent = message;
+          } else if (mode) {
+            modeStatus.textContent = formatModeLabel(mode);
+          } else {
+            modeStatus.textContent = "Unknown";
+          }
+        }
+      }
+
+      async function fetchMode() {
+        if (!modeToggle) {
+          return;
+        }
+        updateModeToggle(activeMode, { busy: true, message: "Loading…" });
+        try {
+          const response = await fetch("/api/mode");
+          if (!response.ok) {
+            throw new Error("Unable to determine mode");
+          }
+          const payload = await response.json();
+          activeMode = payload.mode;
+          updateModeToggle(activeMode);
+        } catch (error) {
+          console.error(error);
+          updateModeToggle(activeMode, { message: error.message || "Unavailable" });
+        }
+      }
+
+      async function changeMode(requested) {
+        if (!modeToggle || !requested || modeSwitching || requested === activeMode) {
+          return;
+        }
+        modeSwitching = true;
+        updateModeToggle(activeMode, { busy: true, message: "Switching…" });
+        try {
+          const response = await fetch("/api/mode", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ mode: requested }),
+          });
+          if (!response.ok) {
+            let detail = `Failed (${response.status})`;
+            try {
+              const errorPayload = await response.json();
+              if (errorPayload?.detail) {
+                detail = errorPayload.detail;
+              }
+            } catch (parseError) {
+              console.error(parseError);
+            }
+            throw new Error(detail);
+          }
+          const payload = await response.json();
+          activeMode = payload.mode;
+          updateModeToggle(activeMode);
+          setStatus(`Mode: ${formatModeLabel(activeMode)}`, "live");
+        } catch (error) {
+          console.error(error);
+          updateModeToggle(activeMode, { message: error.message || "Switch failed" });
+          setStatus("Mode switch failed", "error");
+        } finally {
+          modeSwitching = false;
+        }
       }
 
       function setStreamModeLabel(mode) {
@@ -2043,6 +2194,15 @@
           refreshIlluminationState();
         }
       });
+
+      if (modeToggle) {
+        fetchMode();
+        for (const button of modeButtons) {
+          button.addEventListener("click", () => {
+            changeMode(button.dataset.modeOption);
+          });
+        }
+      }
 
       refreshIlluminationState({ showLoading: true });
       scheduleBatteryUpdates();
