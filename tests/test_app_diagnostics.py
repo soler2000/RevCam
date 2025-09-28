@@ -104,6 +104,11 @@ def test_diagnostics_endpoint_returns_payload(tmp_path, monkeypatch: pytest.Monk
             "hints": ["Install Picamera2 packages"],
             "numpy_version": "1.26.2",
         },
+        "webrtc": {
+            "status": "error",
+            "details": ["aiortc module not found."],
+            "hints": ["Install aiortc"],
+        },
     }
     monkeypatch.setattr(app_module, "collect_diagnostics", lambda: payload)
 

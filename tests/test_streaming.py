@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from types import SimpleNamespace
 
 pytest.importorskip("numpy")
 import numpy as np
@@ -106,3 +107,42 @@ def test_streamer_apply_settings_updates_runtime(monkeypatch: pytest.MonkeyPatch
 
     with pytest.raises(ValueError):
         streamer.apply_settings(fps=0)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("anyio_backend", ["asyncio"], indirect=True)
+async def test_pipeline_video_track_returns_video_frame(
+    monkeypatch: pytest.MonkeyPatch, anyio_backend
+) -> None:
+    pytest.importorskip("aiortc")
+    pytest.importorskip("av")
+
+    class _Camera(BaseCamera):
+        async def get_frame(self) -> np.ndarray:
+            return np.full((2, 2, 3), 128, dtype=np.uint8)
+
+    camera = _Camera()
+    pipeline = FramePipeline(lambda: Orientation())
+    manager = SimpleNamespace(camera=camera, pipeline=pipeline, fps=30, _tracks=set())
+
+    track = streaming.PipelineVideoTrack(manager)
+    frame = await track.recv()
+
+    assert frame.pts is not None
+    assert frame.time_base.denominator == 90_000
+    array = frame.to_ndarray(format="rgb24")
+    assert array.shape == (2, 2, 3)
+    assert np.all(array == 128)
+
+    track.stop()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("anyio_backend", ["asyncio"], indirect=True)
+async def test_webrtc_session_is_hashable(anyio_backend) -> None:
+    manager = SimpleNamespace(_discard_session=lambda *_: None)
+    session = streaming._WebRTCSession(manager, SimpleNamespace(), SimpleNamespace())
+
+    sessions = {session}
+
+    assert session in sessions

@@ -18,12 +18,18 @@ def test_collect_diagnostics(monkeypatch: pytest.MonkeyPatch) -> None:
         "diagnose_picamera_stack",
         lambda: {"status": "ok", "details": []},
     )
+    monkeypatch.setattr(
+        diagnostics,
+        "diagnose_webrtc_stack",
+        lambda: {"status": "ok", "details": []},
+    )
 
     payload = diagnostics.collect_diagnostics()
 
     assert payload["version"] == diagnostics.APP_VERSION
     assert payload["camera_conflicts"] == ["service"]
     assert payload["picamera"] == {"status": "ok", "details": []}
+    assert payload["webrtc"] == {"status": "ok", "details": []}
 
 
 def test_run_outputs_conflicts(capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
@@ -33,6 +39,11 @@ def test_run_outputs_conflicts(capsys: pytest.CaptureFixture[str], monkeypatch: 
         "diagnose_picamera_stack",
         lambda: {"status": "error", "details": ["picamera2 module not found."], "hints": ["install"]},
     )
+    monkeypatch.setattr(
+        diagnostics,
+        "diagnose_webrtc_stack",
+        lambda: {"status": "error", "details": ["aiortc module not found."], "hints": ["install"]},
+    )
 
     exit_code = diagnostics.run([])
 
@@ -41,6 +52,8 @@ def test_run_outputs_conflicts(capsys: pytest.CaptureFixture[str], monkeypatch: 
     assert "service running" in out
     assert "Picamera2 Python stack issues detected:" in out
     assert "picamera2 module not found." in out
+    assert "WebRTC stack issues detected:" in out
+    assert "aiortc module not found." in out
     assert diagnostics.APP_VERSION in out
 
 
@@ -50,6 +63,11 @@ def test_run_json(monkeypatch: pytest.MonkeyPatch) -> None:
         diagnostics,
         "diagnose_picamera_stack",
         lambda: {"status": "ok", "details": [], "numpy_version": "1.26.1"},
+    )
+    monkeypatch.setattr(
+        diagnostics,
+        "diagnose_webrtc_stack",
+        lambda: {"status": "ok", "details": []},
     )
 
     buffer: list[str] = []
@@ -68,6 +86,7 @@ def test_run_json(monkeypatch: pytest.MonkeyPatch) -> None:
     assert payload["camera_conflicts"] == ["process"]
     assert payload["version"] == diagnostics.APP_VERSION
     assert payload["picamera"] == {"status": "ok", "details": [], "numpy_version": "1.26.1"}
+    assert payload["webrtc"] == {"status": "ok", "details": []}
 
 
 def test_diagnose_picamera_stack_numpy_mismatch(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -100,3 +119,33 @@ def test_diagnose_picamera_stack_success(monkeypatch: pytest.MonkeyPatch) -> Non
     result = diagnostics.diagnose_picamera_stack()
 
     assert result == {"status": "ok", "details": [], "numpy_version": "1.26.2"}
+
+
+def test_diagnose_webrtc_stack_missing_modules(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_import(name: str):
+        raise ModuleNotFoundError(name)
+
+    monkeypatch.setattr(diagnostics.importlib, "import_module", fake_import)
+
+    result = diagnostics.diagnose_webrtc_stack()
+
+    assert result["status"] == "error"
+    assert any("PyAV module not found." in detail for detail in result["details"])
+    assert diagnostics.WEBRTC_PIP_HINT in result["hints"]
+
+
+def test_diagnose_webrtc_stack_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_import(name: str):
+        if name == "av":
+            return types.SimpleNamespace(VideoFrame=object())
+        if name == "aiortc":
+            return types.SimpleNamespace()
+        if name == "aiortc.rtcrtpsender":
+            return object()
+        raise ModuleNotFoundError(name)
+
+    monkeypatch.setattr(diagnostics.importlib, "import_module", fake_import)
+
+    result = diagnostics.diagnose_webrtc_stack()
+
+    assert result == {"status": "ok", "details": []}

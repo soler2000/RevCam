@@ -17,7 +17,9 @@ dependencies = [
     "pydantic>=2.5",
     "zeroconf>=0.39",
     "adafruit-blinka>=8",
-    "adafruit-circuitpython-neopixel>=6.3"
+    "adafruit-circuitpython-neopixel>=6.3",
+    "av>=10",
+    "aiortc>=1.7"
 ]
 
 [project.optional-dependencies]

@@ -98,8 +98,47 @@ building everything from PyPI. Follow these steps on the Pi:
    pip install --prefer-binary --extra-index-url https://www.piwheels.org/simple -e .
    ```
 
+   > **Note:** Older Raspberry Pi OS images bundle a `Send2Trash` build whose
+   > metadata confuses modern versions of `pip`, yielding a warning such as
+   > `Error parsing dependencies of send2trash`. The install helper now
+   > replaces that wheel inside the virtual environment automatically. If
+   > network access is unavailable, rerun `pip install --upgrade
+   > Send2Trash>=1.8.3` once a connection is restored to silence the warning.
+
 The `--prefer-binary` flag asks `pip` to fetch pre-built wheels when
 available, and the PiWheels index provides ARM builds for most dependencies.
+
+### WebRTC requirements
+
+RevCam's WebRTC mode relies on `aiortc` and PyAV. Building those wheels from
+source requires FFmpeg and SRTP development headers. When using the bundled
+helper scripts the native libraries and Python wheels are installed
+automatically:
+
+- `scripts/install_prereqs.sh` adds `libav*`, `libopus`, `libvpx`, and
+  `libsrtp2` development packages so PyAV can link against FFmpeg.
+- `scripts/install.sh` ensures the `av` and `aiortc` wheels are present in the
+  virtual environment even when reusing an existing install.
+
+If you manage the environment manually, install the native prerequisites via
+APT first:
+
+```bash
+sudo apt install \
+  libavdevice-dev libavfilter-dev libavformat-dev libavcodec-dev libavutil-dev \
+  libswresample-dev libswscale-dev libsrtp2-dev libopus-dev libvpx-dev \
+  libffi-dev libssl-dev
+```
+
+Then install the Python packages inside the RevCam virtual environment:
+
+```bash
+pip install av>=10 aiortc>=1.7
+```
+
+Once these dependencies are available the settings panel reports "Live stream
+ready (WebRTC)" and the live view negotiates an RTP connection instead of
+falling back to MJPEG.
 
 ### LED ring requirements
 

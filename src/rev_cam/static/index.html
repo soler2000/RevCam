@@ -111,15 +111,25 @@
         justify-content: center;
         padding: clamp(var(--space-lg), 4vw, var(--space-2xl));
       }
-      img#stream {
-        display: block;
+      .stream-wrapper {
         width: min(100%, max(320px, calc(100vh - 6rem)));
         max-width: min(1100px, max(360px, calc(100vh - 3rem)));
+      }
+      .stream-display {
+        display: block;
+        width: 100%;
         background: linear-gradient(160deg, var(--surface-0), var(--surface-1));
         border-radius: var(--radius-lg);
         border: 1px solid var(--border-subtle);
         box-shadow: var(--shadow-lg);
         transition: box-shadow var(--transition);
+      }
+      .stream-display[hidden] {
+        display: none;
+      }
+      video.stream-display {
+        background-color: black;
+        object-fit: contain;
       }
       button {
         background: linear-gradient(135deg, var(--accent), var(--accent-hover));
@@ -511,7 +521,7 @@
         }
       }
       @media (max-width: 960px) {
-        img#stream {
+        .stream-display {
           border-radius: calc(var(--radius-lg) - 0.25rem);
           box-shadow: 0 28px 70px rgba(0, 0, 0, 0.55);
         }
@@ -646,7 +656,17 @@
       </div>
     </header>
     <main>
-      <img id="stream" alt="Camera feed" />
+      <div class="stream-wrapper">
+        <video
+          id="stream-video"
+          class="stream-display"
+          autoplay
+          playsinline
+          muted
+          hidden
+        ></video>
+        <img id="stream-fallback" class="stream-display" alt="Camera feed" hidden />
+      </div>
     </main>
     <div
       class="illumination-status-box"
@@ -666,7 +686,8 @@
     <script>
       const statusLabel = document.getElementById("status");
       const reconnectButton = document.getElementById("reconnect");
-      const streamElement = document.getElementById("stream");
+      const streamVideo = document.getElementById("stream-video");
+      const streamImage = document.getElementById("stream-fallback");
       const toggleButton = document.getElementById("toggle-stream");
       const snapshotButton = document.getElementById("save-snapshot");
       const batteryIndicator = document.getElementById("battery-indicator");
@@ -701,6 +722,23 @@
         statusPill.classList.add(targetClass);
       }
 
+      let statusModeText = "";
+      let statusChargingText = "";
+
+      function renderStatusSubtext() {
+        if (!statusSubtext) {
+          return;
+        }
+        const parts = [];
+        if (statusModeText) {
+          parts.push(statusModeText);
+        }
+        if (statusChargingText) {
+          parts.push(statusChargingText);
+        }
+        statusSubtext.textContent = parts.join(" · ");
+      }
+
       function setStatus(message, stateHint) {
         if (statusLabel) {
           statusLabel.textContent = message;
@@ -708,19 +746,206 @@
         applyStatusState(stateHint || message);
       }
 
+      function setStreamModeLabel(mode) {
+        if (mode === "webrtc") {
+          statusModeText = "WebRTC stream";
+        } else if (mode === "mjpeg") {
+          statusModeText = "MJPEG stream";
+        } else {
+          statusModeText = "";
+        }
+        renderStatusSubtext();
+      }
+
       function setChargingState(isCharging) {
         const charging = Boolean(isCharging);
         if (statusPill) {
           statusPill.classList.toggle("is-charging", charging);
         }
-        if (statusSubtext) {
-          statusSubtext.textContent = charging ? "Charging" : "";
-        }
+        statusChargingText = charging ? "Charging" : "";
+        renderStatusSubtext();
       }
 
       let reconnectTimer = null;
       let batteryTimer = null;
       let shouldStream = false;
+      let peerConnection = null;
+      let activeStreamMode = null;
+      const webrtcSupported = typeof window.RTCPeerConnection === "function";
+      let streamCapabilities = null;
+
+      function extractWebRTCErrorMessage(error) {
+        if (!error) {
+          return "Unknown error";
+        }
+        if (typeof error === "string") {
+          return error;
+        }
+        if (error instanceof Error) {
+          return error.message || error.name || "Unknown error";
+        }
+        if (typeof error === "object") {
+          const possible = [error.message, error.error, error.reason, error.name];
+          for (const value of possible) {
+            if (typeof value === "string" && value.trim()) {
+              return value;
+            }
+          }
+          try {
+            return JSON.stringify(error);
+          } catch (jsonError) {
+            console.debug("Failed to serialise WebRTC error", jsonError);
+          }
+        }
+        return String(error);
+      }
+
+      function summariseWebRTCError(error) {
+        const raw = extractWebRTCErrorMessage(error).trim() || "Unknown error";
+        if (raw.length <= 160) {
+          return raw;
+        }
+        return `${raw.slice(0, 157)}…`;
+      }
+
+      function reportWebRTCFailure(error) {
+        try {
+          const payload = {
+            message: summariseWebRTCError(error),
+          };
+          if (error && typeof error === "object") {
+            if (typeof error.name === "string" && error.name.trim()) {
+              payload.name = error.name.trim().slice(0, 128);
+            }
+            if (typeof error.stack === "string" && error.stack.trim()) {
+              payload.stack = error.stack.trim().slice(0, 4096);
+            }
+          }
+          const body = JSON.stringify(payload);
+          if (navigator.sendBeacon) {
+            const blob = new Blob([body], { type: "application/json" });
+            if (navigator.sendBeacon("/api/log/webrtc-error", blob)) {
+              return;
+            }
+          }
+          fetch("/api/log/webrtc-error", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            keepalive: true,
+            body,
+          }).catch((reportError) =>
+            console.debug("Failed to report WebRTC error", reportError),
+          );
+        } catch (loggingError) {
+          console.debug("Failed to prepare WebRTC error report", loggingError);
+        }
+      }
+
+      function getWebRTCCapabilities() {
+        if (!streamCapabilities || typeof streamCapabilities !== "object") {
+          return null;
+        }
+        const { webrtc } = streamCapabilities;
+        if (!webrtc || typeof webrtc !== "object") {
+          return null;
+        }
+        return webrtc;
+      }
+
+      function getWebRTCErrorMessage() {
+        const details = getWebRTCCapabilities();
+        if (!details) {
+          return "";
+        }
+        if (typeof details.error === "string" && details.error.trim()) {
+          return details.error.trim();
+        }
+        return "";
+      }
+
+      function isServerWebRTCReady() {
+        const details = getWebRTCCapabilities();
+        if (!details) {
+          return false;
+        }
+        if (details.enabled !== true) {
+          return false;
+        }
+        if (typeof details.error === "string" && details.error.trim()) {
+          return false;
+        }
+        return true;
+      }
+
+      function isStreamingServiceAvailable() {
+        if (!streamCapabilities || typeof streamCapabilities !== "object") {
+          return true;
+        }
+        return streamCapabilities.enabled !== false;
+      }
+
+      async function refreshStreamCapabilities() {
+        try {
+          const response = await fetch("/api/stream", { cache: "no-store" });
+          if (!response.ok) {
+            throw new Error(`Stream info request failed with ${response.status}`);
+          }
+          const payload = await response.json();
+          streamCapabilities =
+            payload && typeof payload === "object" ? payload : null;
+        } catch (error) {
+          console.error("Stream info error", error);
+          streamCapabilities = null;
+          return null;
+        }
+        return streamCapabilities;
+      }
+
+      async function waitForIceGatheringComplete(peerConnection, timeout = 4000) {
+        if (!peerConnection) {
+          throw new Error("Missing peer connection");
+        }
+        if (peerConnection.iceGatheringState === "complete") {
+          return;
+        }
+
+        await new Promise((resolve) => {
+          let finished = false;
+          const timer = window.setTimeout(() => {
+            finished = true;
+            peerConnection.removeEventListener(
+              "icegatheringstatechange",
+              handleStateChange,
+            );
+            resolve();
+          }, timeout);
+
+          function cleanup() {
+            if (finished) {
+              return;
+            }
+            finished = true;
+            window.clearTimeout(timer);
+            peerConnection.removeEventListener(
+              "icegatheringstatechange",
+              handleStateChange,
+            );
+            resolve();
+          }
+
+          function handleStateChange() {
+            if (peerConnection.iceGatheringState === "complete") {
+              cleanup();
+            }
+          }
+
+          peerConnection.addEventListener(
+            "icegatheringstatechange",
+            handleStateChange,
+          );
+          handleStateChange();
+        });
+      }
       let illuminationState = null;
       let illuminationPreviousPattern = null;
       let illuminationBusy = false;
@@ -1098,29 +1323,238 @@
         }
       }
 
+      function teardownPeerConnection() {
+        if (peerConnection) {
+          try {
+            peerConnection.close();
+          } catch (error) {
+            console.warn("Peer connection close error", error);
+          }
+          peerConnection = null;
+        }
+        if (streamVideo instanceof HTMLVideoElement) {
+          try {
+            streamVideo.pause();
+          } catch (error) {
+            console.warn("Video pause error", error);
+          }
+          streamVideo.srcObject = null;
+          streamVideo.hidden = true;
+        }
+      }
+
+      function startMjpegStream() {
+        if (!(streamImage instanceof HTMLImageElement)) {
+          throw new Error("MJPEG stream element unavailable");
+        }
+        activeStreamMode = "mjpeg";
+        setStreamModeLabel("mjpeg");
+        teardownPeerConnection();
+        const cacheBuster = Date.now();
+        streamImage.hidden = false;
+        streamImage.src = `/stream/mjpeg?cb=${cacheBuster}`;
+        if (streamVideo instanceof HTMLVideoElement) {
+          streamVideo.hidden = true;
+          streamVideo.srcObject = null;
+        }
+      }
+
+      async function startWebRTCStream() {
+        if (!webrtcSupported || !(streamVideo instanceof HTMLVideoElement)) {
+          throw new Error("WebRTC streaming unsupported in this browser");
+        }
+        activeStreamMode = "webrtc";
+        setStreamModeLabel("webrtc");
+        if (streamImage instanceof HTMLImageElement) {
+          streamImage.hidden = true;
+          streamImage.removeAttribute("src");
+        }
+        teardownPeerConnection();
+
+        const pc = new RTCPeerConnection();
+        peerConnection = pc;
+        pc.addTransceiver("video", { direction: "recvonly" });
+
+        pc.addEventListener("connectionstatechange", () => {
+          if (!shouldStream || activeStreamMode !== "webrtc") {
+            return;
+          }
+          const state = pc.connectionState;
+          if (state === "connected") {
+            setStatus("Streaming", "live");
+          } else if (state === "failed" || state === "disconnected") {
+            setStatus("Connection lost – retrying…", "error");
+            reportWebRTCFailure(new Error(`Peer connection state ${state}`));
+            scheduleReconnect();
+          }
+        });
+
+        pc.addEventListener("track", (event) => {
+          if (!shouldStream || activeStreamMode !== "webrtc") {
+            return;
+          }
+          const [remoteStream] = event.streams;
+          if (remoteStream && streamVideo.srcObject !== remoteStream) {
+            streamVideo.srcObject = remoteStream;
+            streamVideo.hidden = false;
+            streamVideo
+              .play()
+              .catch((error) => console.warn("Video playback failed", error));
+          }
+        });
+
+        try {
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          await waitForIceGatheringComplete(pc);
+          const localDescription = pc.localDescription;
+          if (!localDescription) {
+            throw new Error("Missing local description");
+          }
+          const response = await fetch("/stream/webrtc", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sdp: localDescription.sdp, type: localDescription.type }),
+          });
+          if (!response.ok) {
+            throw new Error(`WebRTC negotiation failed with ${response.status}`);
+          }
+          const answer = await response.json();
+          if (!answer || typeof answer.sdp !== "string" || typeof answer.type !== "string") {
+            throw new Error("Invalid WebRTC response");
+          }
+          if (!shouldStream || activeStreamMode !== "webrtc") {
+            return;
+          }
+          await pc.setRemoteDescription(answer);
+        } catch (error) {
+          try {
+            pc.close();
+          } catch (closeError) {
+            console.warn("Peer connection close error", closeError);
+          }
+          if (peerConnection === pc) {
+            peerConnection = null;
+          }
+          throw error;
+        }
+      }
+
       function scheduleReconnect(delay = 1000) {
         if (!shouldStream) {
           return;
         }
         clearReconnectTimer();
-        reconnectTimer = setTimeout(() => startStream("Reconnecting…"), delay);
+        reconnectTimer = setTimeout(() => {
+          startStream({ message: "Reconnecting…", refreshCapabilities: true }).catch((error) =>
+            console.error("Reconnect attempt failed", error),
+          );
+        }, delay);
       }
 
-      function startStream(message = "Connecting to camera…") {
+      async function startStream(messageOrOptions = "Connecting to camera…", maybeOptions) {
+        let message = "Connecting to camera…";
+        let options = {};
+        if (
+          messageOrOptions &&
+          typeof messageOrOptions === "object" &&
+          !Array.isArray(messageOrOptions)
+        ) {
+          options = messageOrOptions;
+          if (typeof options.message === "string" && options.message.trim()) {
+            message = options.message.trim();
+          }
+        } else {
+          if (typeof messageOrOptions === "string" && messageOrOptions.trim()) {
+            message = messageOrOptions.trim();
+          }
+          if (maybeOptions && typeof maybeOptions === "object") {
+            options = maybeOptions;
+          }
+        }
+
+        const refreshCapabilities = options.refreshCapabilities === true;
+
         shouldStream = true;
         clearReconnectTimer();
+        activeStreamMode = null;
+        setStreamModeLabel(null);
         toggleButton.textContent = "Pause stream";
         toggleButton.setAttribute("aria-pressed", "true");
         setStatus(message, "busy");
-        const cacheBuster = Date.now();
-        streamElement.src = `/stream/mjpeg?cb=${cacheBuster}`;
+        teardownPeerConnection();
+        if (streamImage instanceof HTMLImageElement) {
+          streamImage.hidden = true;
+          streamImage.removeAttribute("src");
+        }
+        if (streamVideo instanceof HTMLVideoElement) {
+          streamVideo.hidden = true;
+          streamVideo.srcObject = null;
+        }
+
+        if (refreshCapabilities || !streamCapabilities) {
+          await refreshStreamCapabilities();
+        }
+
+        if (!isStreamingServiceAvailable()) {
+          const issue =
+            streamCapabilities &&
+            typeof streamCapabilities.error === "string" &&
+            streamCapabilities.error.trim()
+              ? streamCapabilities.error.trim()
+              : "Streaming unavailable";
+          setStatus(issue, "error");
+          toggleButton.textContent = "Start stream";
+          toggleButton.setAttribute("aria-pressed", "false");
+          shouldStream = false;
+          return;
+        }
+
+        const canUseWebRTC = webrtcSupported && isServerWebRTCReady();
+
+        if (canUseWebRTC) {
+          try {
+            await startWebRTCStream();
+            return;
+          } catch (error) {
+            const summary = summariseWebRTCError(error);
+            console.error("WebRTC stream error", error);
+            setStatus(`WebRTC failed: ${summary}`, "error");
+            reportWebRTCFailure(error);
+          }
+        } else if (webrtcSupported) {
+          const capabilityError = getWebRTCErrorMessage();
+          if (capabilityError) {
+            setStatus(`Streaming issue: ${capabilityError}`, "error");
+          }
+        }
+
+        if (!shouldStream) {
+          return;
+        }
+
+        setStatus("Falling back to MJPEG…", "busy");
+        try {
+          startMjpegStream();
+        } catch (error) {
+          console.error("MJPEG stream error", error);
+          setStatus("Streaming unavailable", "error");
+          toggleButton.textContent = "Start stream";
+          toggleButton.setAttribute("aria-pressed", "false");
+        }
       }
 
       function stopStream(message = "Streaming paused") {
         shouldStream = false;
+        activeStreamMode = null;
+        setStreamModeLabel(null);
         clearReconnectTimer();
-        streamElement.src = "";
-        streamElement.removeAttribute("src");
+        teardownPeerConnection();
+        if (streamImage instanceof HTMLImageElement) {
+          streamImage.hidden = true;
+          streamImage.src = "";
+          streamImage.removeAttribute("src");
+        }
         setStatus(message, "paused");
         toggleButton.textContent = "Start stream";
         toggleButton.setAttribute("aria-pressed", "false");
@@ -1253,34 +1687,62 @@
         });
       }
 
-      streamElement.addEventListener("load", () => {
-        if (!shouldStream) {
-          return;
-        }
-        setStatus("Streaming", "live");
-      });
+      if (streamImage instanceof HTMLImageElement) {
+        streamImage.addEventListener("load", () => {
+          if (!shouldStream || activeStreamMode !== "mjpeg") {
+            return;
+          }
+          setStatus("Streaming", "live");
+        });
 
-      streamElement.addEventListener("error", (event) => {
-        console.error("Stream error", event);
-        setStatus("Connection lost – retrying…", "error");
-        scheduleReconnect();
-      });
+        streamImage.addEventListener("error", (event) => {
+          if (!shouldStream || activeStreamMode !== "mjpeg") {
+            return;
+          }
+          console.error("MJPEG stream error", event);
+          setStatus("Connection lost – retrying…", "error");
+          scheduleReconnect();
+        });
+      }
 
-      reconnectButton.addEventListener("click", () => {
-        if (!shouldStream) {
-          startStream();
-        } else {
-          startStream("Reconnecting…");
-        }
-      });
+      if (streamVideo instanceof HTMLVideoElement) {
+        streamVideo.addEventListener("playing", () => {
+          if (!shouldStream || activeStreamMode !== "webrtc") {
+            return;
+          }
+          setStatus("Streaming", "live");
+        });
 
-      toggleButton.addEventListener("click", () => {
-        if (shouldStream) {
-          stopStream();
-        } else {
-          startStream();
-        }
-      });
+        streamVideo.addEventListener("error", (event) => {
+          if (!shouldStream || activeStreamMode !== "webrtc") {
+            return;
+          }
+          console.error("WebRTC video error", event);
+          setStatus("Connection lost – retrying…", "error");
+          scheduleReconnect();
+        });
+      }
+
+      if (reconnectButton instanceof HTMLButtonElement) {
+        reconnectButton.addEventListener("click", () => {
+          const message = shouldStream ? "Reconnecting…" : "Connecting to camera…";
+          startStream({ message, refreshCapabilities: true }).catch((error) =>
+            console.error("Reconnect button error", error),
+          );
+        });
+      }
+
+      if (toggleButton instanceof HTMLButtonElement) {
+        toggleButton.addEventListener("click", () => {
+          if (shouldStream) {
+            stopStream();
+          } else {
+            startStream({ refreshCapabilities: true }).catch((error) =>
+              console.error("Stream toggle error", error),
+            );
+          }
+        });
+      }
 
       if (snapshotButton) {
         snapshotButton.addEventListener("click", () => {
@@ -1293,6 +1755,7 @@
         if (batteryTimer) {
           clearInterval(batteryTimer);
         }
+        teardownPeerConnection();
       });
 
       document.addEventListener("visibilitychange", () => {
@@ -1304,7 +1767,9 @@
 
       refreshIlluminationState({ showLoading: true });
       scheduleBatteryUpdates();
-      startStream();
+      startStream({ refreshCapabilities: true }).catch((error) =>
+        console.error("Initial stream error", error),
+      );
     </script>
   </body>
 </html>
