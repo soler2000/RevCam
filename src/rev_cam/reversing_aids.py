@@ -59,7 +59,7 @@ def create_reversing_aids_overlay(
         if needs_refresh:
             overlay = _np.zeros_like(frame)
             overlay = _render_reversing_aids(overlay, config)
-            mask = _np.any(overlay != 0, axis=2) if overlay.ndim == 3 else overlay != 0
+            mask = overlay != 0
 
             cached_overlay = overlay
             cached_mask = mask
@@ -72,7 +72,7 @@ def create_reversing_aids_overlay(
         if cached_overlay is None or cached_mask is None:
             return frame
 
-        frame[cached_mask] = cached_overlay[cached_mask]
+        _np.copyto(frame, cached_overlay, where=cached_mask)
         return frame
 
     return _overlay
