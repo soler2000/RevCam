@@ -42,7 +42,8 @@ if [[ -d "$VENV_DIR/bin" ]]; then
     export PATH="$VENV_DIR/bin:$PATH"
 fi
 
-DEFAULT_FLAGS=("--loop" "uvloop" "--http" "httptools" "--ws" "websockets" "--no-server-header" "--limit-max-requests" "0")
+# Keep uvicorn in low-latency mode without capping the number of served requests.
+DEFAULT_FLAGS=("--loop" "uvloop" "--http" "httptools" "--ws" "websockets" "--no-server-header")
 DEFAULT_APP=("rev_cam.app:create_app" "--factory" "--host" "0.0.0.0" "--port" "9000")
 DEFAULT_ARGS=("${DEFAULT_FLAGS[@]}" "${DEFAULT_APP[@]}")
 ARGS=("$@")
