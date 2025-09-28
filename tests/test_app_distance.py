@@ -230,3 +230,10 @@ def test_distance_geometry_update_persists(client: TestClient) -> None:
     geometry = config_data["distance"]["geometry"]
     assert geometry["mount_height_m"] == pytest.approx(1.9)
     assert geometry["mount_angle_deg"] == pytest.approx(32.0)
+
+
+def test_distance_diagram_image_served(client: TestClient) -> None:
+    response = client.get("/images/distance-diagram.svg")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("image/svg+xml")
+    assert "<svg" in response.text

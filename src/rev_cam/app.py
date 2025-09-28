@@ -10,7 +10,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from .battery import BatteryMonitor, BatterySupervisor, create_battery_overlay
@@ -506,6 +506,17 @@ def create_app(
     @app.get("/settings", response_class=HTMLResponse)
     async def settings() -> str:
         return _load_static("settings.html")
+
+    @app.get("/images/{asset}")
+    async def get_image(asset: str):
+        safe_name = Path(asset).name
+        if safe_name != asset:
+            raise HTTPException(status_code=404, detail="Asset not found")
+        path = STATIC_DIR / "images" / safe_name
+        if not path.exists() or path.is_dir():
+            raise HTTPException(status_code=404, detail="Asset not found")
+        media_type = "image/svg+xml" if path.suffix.lower() == ".svg" else None
+        return FileResponse(path, media_type=media_type)
 
     @app.get("/api/led")
     async def get_led_status() -> dict[str, object]:
