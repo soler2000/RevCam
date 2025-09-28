@@ -14,7 +14,9 @@ from rev_cam.battery import (
     BatteryReading,
     BatterySupervisor,
     create_battery_overlay,
+    create_wifi_overlay,
 )
+from rev_cam.wifi import WiFiStatus
 
 
 class _StubSensor:
@@ -385,6 +387,48 @@ def test_battery_overlay_respects_enabled_provider() -> None:
 
     assert np.array_equal(result, frame)
     assert monitor.calls == 0
+
+
+def test_create_wifi_overlay_renders_status() -> None:
+    np = pytest.importorskip("numpy")
+
+    class _StatusProvider:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def __call__(self) -> WiFiStatus:
+            self.calls += 1
+            return WiFiStatus(
+                connected=True,
+                ssid="TestNet",
+                signal=72,
+                ip_address="192.168.0.10",
+            )
+
+    provider = _StatusProvider()
+    overlay = create_wifi_overlay(provider)
+    frame = np.zeros((120, 160, 3), dtype=np.uint8)
+
+    result = overlay(frame)
+
+    assert result is frame
+    assert provider.calls == 1
+    assert np.any(result != 0)
+
+
+def test_wifi_overlay_respects_enabled_provider() -> None:
+    np = pytest.importorskip("numpy")
+
+    class _StatusProvider:
+        def __call__(self) -> WiFiStatus:
+            raise AssertionError("Provider should not be called when disabled")
+
+    overlay = create_wifi_overlay(_StatusProvider(), enabled_provider=lambda: False)
+    frame = np.zeros((60, 80, 3), dtype=np.uint8)
+
+    result = overlay(frame.copy())
+
+    assert np.array_equal(result, frame)
 
 
 def test_battery_supervisor_triggers_shutdown_when_low() -> None:

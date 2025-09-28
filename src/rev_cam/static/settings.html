@@ -2434,7 +2434,7 @@
               <div class="toggle-text">
                 <h4 id="overlay-battery-heading">Battery overlay</h4>
                 <p id="overlay-battery-description" class="muted helper-text">
-                  Show current battery status and wireless signal strength on the preview.
+                  Show current battery status on the preview.
                 </p>
               </div>
               <label
@@ -2443,6 +2443,24 @@
                 aria-describedby="overlay-battery-description"
               >
                 <input type="checkbox" id="overlay-battery-toggle" />
+                <span class="switch-track" aria-hidden="true">
+                  <span class="switch-thumb"></span>
+                </span>
+              </label>
+            </div>
+            <div class="toggle-row">
+              <div class="toggle-text">
+                <h4 id="overlay-wifi-heading">Wi-Fi overlay</h4>
+                <p id="overlay-wifi-description" class="muted helper-text">
+                  Display wireless connection status and signal quality on the preview.
+                </p>
+              </div>
+              <label
+                class="switch-control"
+                aria-labelledby="overlay-wifi-heading"
+                aria-describedby="overlay-wifi-description"
+              >
+                <input type="checkbox" id="overlay-wifi-toggle" />
                 <span class="switch-track" aria-hidden="true">
                   <span class="switch-thumb"></span>
                 </span>
@@ -2929,6 +2947,7 @@
       const developmentOverlaysCard = document.getElementById("development-overlays-card");
       const overlayMasterToggle = document.getElementById("overlay-master-toggle");
       const overlayBatteryToggle = document.getElementById("overlay-battery-toggle");
+      const overlayWifiToggle = document.getElementById("overlay-wifi-toggle");
       const overlayDistanceToggle = document.getElementById("overlay-distance-toggle");
       const overlayReversingToggle = document.getElementById("overlay-reversing-toggle");
       const overlaysStatus = document.getElementById("overlays-status");
@@ -4392,6 +4411,7 @@
         const toggles = [
           overlayMasterToggle,
           overlayBatteryToggle,
+          overlayWifiToggle,
           overlayDistanceToggle,
           overlayReversingToggle,
         ];
@@ -4418,6 +4438,7 @@
       const overlayToggleMessages = new Map([
         ["master_enabled", { enabled: "All overlays enabled.", disabled: "Overlay pipeline bypassed." }],
         ["battery_enabled", { enabled: "Battery overlay enabled.", disabled: "Battery overlay disabled." }],
+        ["wifi_enabled", { enabled: "Wi-Fi overlay enabled.", disabled: "Wi-Fi overlay disabled." }],
         ["distance_enabled", { enabled: "Distance overlay enabled.", disabled: "Distance overlay disabled." }],
         [
           "reversing_aids_enabled",
@@ -4440,6 +4461,9 @@
         }
         if (payload && typeof payload.battery_enabled === "boolean") {
           updateOverlayToggle(overlayBatteryToggle, payload.battery_enabled, { forceUpdate });
+        }
+        if (payload && typeof payload.wifi_enabled === "boolean") {
+          updateOverlayToggle(overlayWifiToggle, payload.wifi_enabled, { forceUpdate });
         }
         if (payload && typeof payload.distance_enabled === "boolean") {
           updateOverlayToggle(overlayDistanceToggle, payload.distance_enabled, { forceUpdate });
@@ -5761,6 +5785,7 @@
 
       bindOverlayToggle(overlayMasterToggle, "master_enabled");
       bindOverlayToggle(overlayBatteryToggle, "battery_enabled");
+      bindOverlayToggle(overlayWifiToggle, "wifi_enabled");
       bindOverlayToggle(overlayDistanceToggle, "distance_enabled");
       bindOverlayToggle(overlayReversingToggle, "reversing_aids_enabled");
 

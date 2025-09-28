@@ -13,7 +13,12 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-from .battery import BatteryMonitor, BatterySupervisor, create_battery_overlay
+from .battery import (
+    BatteryMonitor,
+    BatterySupervisor,
+    create_battery_overlay,
+    create_wifi_overlay,
+)
 from .camera import CAMERA_SOURCES, BaseCamera, CameraError, create_camera, identify_camera
 from .config import (
     ConfigManager,
@@ -166,6 +171,7 @@ class ReversingAidsPayload(BaseModel):
 class OverlaySettingsPayload(BaseModel):
     master_enabled: bool | None = Field(default=None)
     battery_enabled: bool | None = Field(default=None)
+    wifi_enabled: bool | None = Field(default=None)
     distance_enabled: bool | None = Field(default=None)
     reversing_aids_enabled: bool | None = Field(default=None)
 
@@ -249,10 +255,15 @@ def create_app(
         overlay_enabled_provider=config_manager.get_overlay_master_enabled,
     )
     pipeline.add_overlay(
+        create_wifi_overlay(
+            wifi_manager.get_status,
+            enabled_provider=config_manager.get_wifi_overlay_enabled,
+        )
+    )
+    pipeline.add_overlay(
         create_battery_overlay(
             battery_monitor,
             config_manager.get_battery_limits,
-            wifi_manager.get_status,
             enabled_provider=config_manager.get_battery_overlay_enabled,
         )
     )
@@ -957,6 +968,7 @@ def create_app(
         return {
             "master_enabled": config_manager.get_overlay_master_enabled(),
             "battery_enabled": config_manager.get_battery_overlay_enabled(),
+            "wifi_enabled": config_manager.get_wifi_overlay_enabled(),
             "distance_enabled": config_manager.get_distance_overlay_enabled(),
             "reversing_aids_enabled": config_manager.get_reversing_overlay_enabled(),
         }
@@ -968,6 +980,8 @@ def create_app(
                 config_manager.set_overlay_master_enabled(payload.master_enabled)
             if payload.battery_enabled is not None:
                 config_manager.set_battery_overlay_enabled(payload.battery_enabled)
+            if payload.wifi_enabled is not None:
+                config_manager.set_wifi_overlay_enabled(payload.wifi_enabled)
             if payload.distance_enabled is not None:
                 config_manager.set_distance_overlay_enabled(payload.distance_enabled)
             if payload.reversing_aids_enabled is not None:

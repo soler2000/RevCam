@@ -14,6 +14,7 @@ from rev_cam.config import (
     StreamSettings,
     generate_reversing_segments,
     DEFAULT_DISTANCE_OVERLAY_ENABLED,
+    DEFAULT_WIFI_OVERLAY_ENABLED,
     DEFAULT_BATTERY_CAPACITY_MAH,
     DEFAULT_CAMERA_CHOICE,
     DEFAULT_REVERSING_AIDS,
@@ -270,6 +271,7 @@ def test_default_overlay_settings(tmp_path: Path) -> None:
     manager = ConfigManager(tmp_path / "config.json")
     assert manager.get_overlay_master_enabled() is True
     assert manager.get_battery_overlay_enabled() is True
+    assert manager.get_wifi_overlay_enabled() is DEFAULT_WIFI_OVERLAY_ENABLED
     assert manager.get_distance_overlay_enabled() is DEFAULT_DISTANCE_OVERLAY_ENABLED
     assert manager.get_reversing_overlay_enabled() is DEFAULT_REVERSING_AIDS.enabled
 
@@ -279,10 +281,12 @@ def test_overlay_settings_persist(tmp_path: Path) -> None:
     manager = ConfigManager(config_file)
     manager.set_overlay_master_enabled(False)
     manager.set_battery_overlay_enabled(False)
+    manager.set_wifi_overlay_enabled(False)
     manager.set_distance_overlay_enabled(False)
     manager.set_reversing_overlay_enabled(False)
     reloaded = ConfigManager(config_file)
     assert reloaded.get_overlay_master_enabled() is False
     assert reloaded.get_battery_overlay_enabled() is False
+    assert reloaded.get_wifi_overlay_enabled() is False
     assert reloaded.get_distance_overlay_enabled() is False
     assert reloaded.get_reversing_overlay_enabled() is False
