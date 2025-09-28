@@ -37,23 +37,33 @@ class _SequenceSensor:
 
 def test_distance_monitor_reports_reading() -> None:
     sensor = _SequenceSensor([123.0])
-    monitor = DistanceMonitor(sensor_factory=lambda: sensor, update_interval=0.0)
+    monitor = DistanceMonitor(
+        sensor_factory=lambda: sensor,
+        update_interval=0.0,
+        auto_start=False,
+    )
 
-    reading = monitor.read()
+    reading = monitor.refresh()
+    cached = monitor.read()
 
     assert reading.available is True
     assert reading.distance_m == pytest.approx(1.23, rel=1e-6)
     assert reading.raw_distance_m == pytest.approx(1.23, rel=1e-6)
     assert reading.error is None
+    assert cached == reading
 
 
 def test_distance_monitor_filters_invalid_samples() -> None:
     sensor = _SequenceSensor([123.0, 9999.0, 140.0])
-    monitor = DistanceMonitor(sensor_factory=lambda: sensor, update_interval=0.0)
+    monitor = DistanceMonitor(
+        sensor_factory=lambda: sensor,
+        update_interval=0.0,
+        auto_start=False,
+    )
 
-    first = monitor.read()
-    second = monitor.read()
-    third = monitor.read()
+    first = monitor.refresh()
+    second = monitor.refresh()
+    third = monitor.refresh()
 
     assert second.available is True
     assert second.distance_m == pytest.approx(first.distance_m)
@@ -65,10 +75,14 @@ def test_distance_monitor_filters_invalid_samples() -> None:
 
 def test_distance_monitor_handles_measurements_in_metres() -> None:
     sensor = _SequenceSensor([1.8, 1.75])
-    monitor = DistanceMonitor(sensor_factory=lambda: sensor, update_interval=0.0)
+    monitor = DistanceMonitor(
+        sensor_factory=lambda: sensor,
+        update_interval=0.0,
+        auto_start=False,
+    )
 
-    first = monitor.read()
-    second = monitor.read()
+    first = monitor.refresh()
+    second = monitor.refresh()
 
     assert first.distance_m == pytest.approx(1.8, rel=1e-6)
     assert first.raw_distance_m == pytest.approx(1.8, rel=1e-6)
@@ -78,11 +92,15 @@ def test_distance_monitor_handles_measurements_in_metres() -> None:
 
 def test_distance_monitor_recovers_from_legitimate_jump() -> None:
     sensor = _SequenceSensor([20.0, 500.0, 500.0])
-    monitor = DistanceMonitor(sensor_factory=lambda: sensor, update_interval=0.0)
+    monitor = DistanceMonitor(
+        sensor_factory=lambda: sensor,
+        update_interval=0.0,
+        auto_start=False,
+    )
 
-    first = monitor.read()
-    second = monitor.read()
-    third = monitor.read()
+    first = monitor.refresh()
+    second = monitor.refresh()
+    third = monitor.refresh()
 
     assert first.distance_m == pytest.approx(0.2, rel=1e-6)
     assert second.distance_m == pytest.approx(first.distance_m)
@@ -95,14 +113,38 @@ def test_distance_monitor_reports_unavailable_when_sensor_missing() -> None:
     def _failing_factory() -> object:
         raise RuntimeError("sensor offline")
 
-    monitor = DistanceMonitor(sensor_factory=_failing_factory, update_interval=0.0)
+    monitor = DistanceMonitor(
+        sensor_factory=_failing_factory,
+        update_interval=0.0,
+        auto_start=False,
+    )
 
-    reading = monitor.read()
+    reading = monitor.refresh()
 
     assert reading.available is False
     assert reading.distance_m is None
     assert reading.error == "sensor offline"
     assert monitor.last_error == "sensor offline"
+
+
+def test_distance_monitor_read_does_not_sample_sensor() -> None:
+    sensor = _SequenceSensor([200.0])
+    monitor = DistanceMonitor(
+        sensor_factory=lambda: sensor,
+        update_interval=0.0,
+        auto_start=False,
+    )
+
+    placeholder = monitor.read()
+
+    assert placeholder.available is False
+    assert sensor._index == 0
+
+    monitor.refresh()
+    cached = monitor.read()
+
+    assert cached.available is True
+    assert sensor._index == 1
 
 
 def test_distance_monitor_prefers_long_range_mode() -> None:
@@ -116,9 +158,13 @@ def test_distance_monitor_prefers_long_range_mode() -> None:
             self.started = True
 
     sensor = _ConfigurableSensor()
-    monitor = DistanceMonitor(sensor_factory=lambda: sensor, update_interval=0.0)
+    monitor = DistanceMonitor(
+        sensor_factory=lambda: sensor,
+        update_interval=0.0,
+        auto_start=False,
+    )
 
-    monitor.read()
+    monitor.refresh()
 
     assert sensor.distance_mode in (2, "long")
     assert sensor.started is True
@@ -143,9 +189,13 @@ def test_distance_monitor_falls_back_when_long_mode_unavailable() -> None:
             pass
 
     sensor = _LimitedSensor()
-    monitor = DistanceMonitor(sensor_factory=lambda: sensor, update_interval=0.0)
+    monitor = DistanceMonitor(
+        sensor_factory=lambda: sensor,
+        update_interval=0.0,
+        auto_start=False,
+    )
 
-    monitor.read()
+    monitor.refresh()
 
     assert sensor.distance_mode in (1, "short")
 
@@ -157,9 +207,10 @@ def test_distance_monitor_applies_calibration() -> None:
         sensor_factory=lambda: sensor,
         calibration=calibration,
         update_interval=0.0,
+        auto_start=False,
     )
 
-    reading = monitor.read()
+    reading = monitor.refresh()
 
     assert reading.raw_distance_m == pytest.approx(1.0, rel=1e-6)
     assert reading.distance_m == pytest.approx(0.0, abs=1e-6)
@@ -167,25 +218,34 @@ def test_distance_monitor_applies_calibration() -> None:
 
 def test_distance_monitor_set_calibration_updates_immediately() -> None:
     sensor = _SequenceSensor([100.0, 100.0])
-    monitor = DistanceMonitor(sensor_factory=lambda: sensor, update_interval=5.0)
+    monitor = DistanceMonitor(
+        sensor_factory=lambda: sensor,
+        update_interval=5.0,
+        auto_start=False,
+    )
 
-    first = monitor.read()
+    first = monitor.refresh()
     assert first.distance_m == pytest.approx(1.0, rel=1e-6)
 
     updated = monitor.set_calibration(offset_m=-0.25)
     assert updated.offset_m == pytest.approx(-0.25, rel=1e-6)
 
-    second = monitor.read()
+    second = monitor.refresh()
     assert second.raw_distance_m == pytest.approx(1.0, rel=1e-6)
     assert second.distance_m == pytest.approx(0.75, rel=1e-6)
 
 
 def test_distance_overlay_draws_on_frame() -> None:
     sensor = _SequenceSensor([150.0])
-    monitor = DistanceMonitor(sensor_factory=lambda: sensor, update_interval=0.0)
+    monitor = DistanceMonitor(
+        sensor_factory=lambda: sensor,
+        update_interval=0.0,
+        auto_start=False,
+    )
     zones = DistanceZones(caution=2.0, warning=1.0, danger=0.5)
     overlay = create_distance_overlay(monitor, lambda: zones)
 
+    monitor.refresh()
     frame = np.zeros((120, 160, 3), dtype=np.uint8)
     result = overlay(frame)
 
@@ -195,7 +255,11 @@ def test_distance_overlay_draws_on_frame() -> None:
 
 def test_distance_overlay_handles_non_numpy_frames() -> None:
     sensor = _SequenceSensor([150.0])
-    monitor = DistanceMonitor(sensor_factory=lambda: sensor, update_interval=0.0)
+    monitor = DistanceMonitor(
+        sensor_factory=lambda: sensor,
+        update_interval=0.0,
+        auto_start=False,
+    )
     overlay = create_distance_overlay(monitor, lambda: DistanceZones(2.0, 1.0, 0.5))
 
     frame = [[0, 0, 0], [0, 0, 0]]
@@ -232,8 +296,12 @@ def test_distance_monitor_close_only_releases_supplied_sensor() -> None:
     bus = _StubI2CBus()
     device = _StubDevice(bus)
     sensor = _ClosableSensor(device)
-    monitor = DistanceMonitor(sensor_factory=lambda: sensor, update_interval=0.0)
-    monitor.read()
+    monitor = DistanceMonitor(
+        sensor_factory=lambda: sensor,
+        update_interval=0.0,
+        auto_start=False,
+    )
+    monitor.refresh()
 
     monitor.close()
 
@@ -269,7 +337,7 @@ def test_distance_monitor_close_releases_owned_bus(monkeypatch: pytest.MonkeyPat
     monkeypatch.setitem(sys.modules, "board", types.SimpleNamespace(I2C=lambda: bus))
 
     monitor = DistanceMonitor(update_interval=0.0)
-    reading = monitor.read()
+    reading = monitor.refresh()
 
     assert reading.available is True
 

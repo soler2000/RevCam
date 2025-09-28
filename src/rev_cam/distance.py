@@ -8,7 +8,7 @@ import time
 from collections import deque
 from dataclasses import dataclass
 from statistics import median
-from threading import Lock
+from threading import Event, Lock, Thread, current_thread
 from typing import Callable, Deque
 
 try:  # pragma: no cover - optional dependency on numpy for overlays
@@ -117,7 +117,12 @@ class DistanceReading:
 
 
 class DistanceMonitor:
-    """Read and smooth measurements from a VL53L1X time-of-flight sensor."""
+    """Read and smooth measurements from a VL53L1X time-of-flight sensor.
+
+    A background sampler thread keeps the latest processed reading cached so
+    that overlays and API handlers can fetch distance data without blocking on
+    slow I²C calls.
+    """
 
     DEFAULT_I2C_ADDRESS = 0x29
 
@@ -134,6 +139,7 @@ class DistanceMonitor:
         min_distance_m: float = 0.04,
         max_distance_m: float = 8.0,
         update_interval: float = 0.05,
+        auto_start: bool = True,
     ) -> None:
         if not (0.0 < smoothing_alpha <= 1.0):
             raise ValueError("smoothing_alpha must be between 0 and 1")
@@ -163,6 +169,9 @@ class DistanceMonitor:
         self._last_reading: DistanceReading | None = None
         self._last_timestamp: float = 0.0
         self._lock = Lock()
+        self._stop_event = Event()
+        self._sampling_thread: Thread | None = None
+        self._auto_start = bool(auto_start)
         if calibration is None:
             self._calibration = DistanceCalibration()
         else:
@@ -170,6 +179,8 @@ class DistanceMonitor:
         self._owned_i2c_bus: object | None = None
         self._owns_i2c_bus = False
         self._logger = logging.getLogger(f"{__name__}.{type(self).__name__}")
+        if self._auto_start:
+            self.start_sampling()
 
     @property
     def last_error(self) -> str | None:
@@ -327,11 +338,17 @@ class DistanceMonitor:
     def close(self) -> None:
         """Release the underlying sensor and any I2C resources."""
 
+        thread: Thread | None
         with self._lock:
+            thread = self._sampling_thread
+            self._sampling_thread = None
+            self._stop_event.set()
             sensor = self._sensor
             self._sensor = None
             self._last_reading = None
             self._clear_error_state()
+        if thread and thread.is_alive():
+            thread.join(timeout=1.0)
         self._release_sensor(sensor)
         self._release_owned_i2c_bus()
 
@@ -502,17 +519,23 @@ class DistanceMonitor:
         self._last_reading = reading
         return reading
 
-    def read(self) -> DistanceReading:
-        """Return a smoothed distance reading."""
+    def start_sampling(self) -> None:
+        """Start a background thread that continually refreshes the sensor reading."""
+
+        with self._lock:
+            thread = self._sampling_thread
+            if thread is not None and thread.is_alive():
+                return
+            self._stop_event.clear()
+            thread = Thread(target=self._run_sampling_loop, name="DistanceMonitorSampler", daemon=True)
+            self._sampling_thread = thread
+        thread.start()
+
+    def refresh(self) -> DistanceReading:
+        """Synchronously fetch a new reading from the sensor."""
 
         now = time.monotonic()
         with self._lock:
-            if (
-                self._last_reading is not None
-                and now - self._last_timestamp < self._min_interval
-            ):
-                return self._last_reading
-
             sensor = self._obtain_sensor()
             if sensor is None:
                 reading = DistanceReading(
@@ -531,38 +554,78 @@ class DistanceMonitor:
         except Exception as exc:  # pragma: no cover - defensive guard
             self._release_sensor(sensor)
             self._release_owned_i2c_bus()
-            self._sensor = None
-            message = f"Failed to read distance: {exc}"
-            reading = self._handle_invalid_sample(
-                now, message, level=logging.ERROR, exc_info=True
+            with self._lock:
+                self._sensor = None
+                message = f"Failed to read distance: {exc}"
+                reading = self._handle_invalid_sample(
+                    now, message, level=logging.ERROR, exc_info=True
+                )
+                self._last_timestamp = now
+                return reading
+
+        with self._lock:
+            if measurement is None:
+                reading = self._handle_invalid_sample(
+                    now, "Distance measurement unavailable"
+                )
+                self._last_timestamp = now
+                return reading
+
+            filtered = self._filter_measurement(measurement)
+            if filtered is None:
+                reading = self._handle_invalid_sample(
+                    now, "Filtered invalid distance sample"
+                )
+                self._last_timestamp = now
+                return reading
+
+            calibrated = self._apply_calibration(filtered)
+            smoothed = self._apply_smoothing(calibrated)
+            reading = DistanceReading(
+                available=True,
+                distance_m=smoothed,
+                raw_distance_m=filtered,
+                timestamp=now,
+                error=None,
             )
+            self._clear_error_state()
+            self._last_reading = reading
             self._last_timestamp = now
             return reading
 
-        if measurement is None:
-            reading = self._handle_invalid_sample(now, "Distance measurement unavailable")
-            self._last_timestamp = now
-            return reading
+    def read(self) -> DistanceReading:
+        """Return the latest cached distance reading without touching the sensor."""
 
-        filtered = self._filter_measurement(measurement)
-        if filtered is None:
-            reading = self._handle_invalid_sample(now, "Filtered invalid distance sample")
-            self._last_timestamp = now
-            return reading
+        if self._auto_start:
+            self.start_sampling()
+        with self._lock:
+            if self._last_reading is not None:
+                return self._last_reading
+            now = time.monotonic()
+            return DistanceReading(
+                available=False,
+                distance_m=None,
+                raw_distance_m=None,
+                timestamp=now,
+                error=self._last_error,
+            )
 
-        calibrated = self._apply_calibration(filtered)
-        smoothed = self._apply_smoothing(calibrated)
-        reading = DistanceReading(
-            available=True,
-            distance_m=smoothed,
-            raw_distance_m=filtered,
-            timestamp=now,
-            error=None,
-        )
-        self._clear_error_state()
-        self._last_reading = reading
-        self._last_timestamp = now
-        return reading
+    def _run_sampling_loop(self) -> None:
+        while not self._stop_event.is_set():
+            start = time.monotonic()
+            try:
+                self.refresh()
+            except Exception:  # pragma: no cover - defensive guard
+                self._logger.exception("Unexpected error refreshing distance reading")
+            elapsed = time.monotonic() - start
+            wait_time = max(0.0, self._min_interval - elapsed)
+            if wait_time == 0.0:
+                continue
+            if self._stop_event.wait(wait_time):
+                break
+        with self._lock:
+            if self._sampling_thread is current_thread():
+                self._sampling_thread = None
 
 
 _ZONE_COLOURS = {
@@ -610,6 +673,8 @@ def create_distance_overlay(
     display_mode_provider: Callable[[], bool] | None = None,
 ):
     """Return an overlay function that renders the current distance reading."""
+
+    monitor.start_sampling()
 
     def _overlay(frame):
         reading = monitor.read()
