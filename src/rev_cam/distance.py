@@ -744,13 +744,12 @@ def _render_distance_overlay(
         (label, secondary_scale, 0.55),
     ]
 
+    line_entries: list[tuple[str, int, float, _TextBitmap]] = []
     measurements: list[tuple[int, int]] = []
-    for text, scale, _ in line_specs:
-        glyph_width = _FONT_WIDTH * scale
-        char_spacing = 1 * scale
-        text_width = _measure_text(text, glyph_width, char_spacing)
-        text_height = _FONT_HEIGHT * scale
-        measurements.append((text_width, text_height))
+    for text, scale, alpha in line_specs:
+        bitmap = _get_text_bitmap(text, scale)
+        measurements.append((bitmap.width, bitmap.height))
+        line_entries.append((text, scale, alpha, bitmap))
 
     block_width = max(width for width, _ in measurements)
     block_height = sum(height for _, height in measurements) + line_spacing * (len(line_specs) - 1)
@@ -760,12 +759,48 @@ def _render_distance_overlay(
     start_y = max(0, height - bottom_margin - block_height)
 
     cursor_y = start_y
-    for (text, scale, alpha), (line_width, line_height) in zip(line_specs, measurements):
+    for (text, scale, alpha, bitmap), (line_width, line_height) in zip(line_entries, measurements):
         offset_x = start_x + max(0, (block_width - line_width) // 2)
-        _blend_text(frame, text, offset_x, cursor_y, scale, colour, alpha)
+        _blend_text(frame, text, offset_x, cursor_y, scale, colour, alpha, bitmap)
         cursor_y += line_height + line_spacing
 
     return frame
+
+
+@dataclass(slots=True)
+class _TextBitmap:
+    """Cache entry storing the rendered mask for a text string."""
+
+    width: int
+    height: int
+    mask: "_np.ndarray"
+
+
+_TEXT_BITMAP_CACHE: dict[tuple[str, int], _TextBitmap] = {}
+
+
+def _get_text_bitmap(text: str, scale: int) -> _TextBitmap:
+    """Return a cached bitmap and metrics for *text* at *scale*."""
+
+    key = (text.upper(), int(scale))
+    cached = _TEXT_BITMAP_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    glyph_width = _FONT_WIDTH * scale
+    char_spacing = 1 * scale
+    text_width = _measure_text(text, glyph_width, char_spacing)
+    text_height = _FONT_HEIGHT * scale
+
+    if text_width <= 0 or text_height <= 0:
+        mask = _np.zeros((0, 0), dtype=_np.bool_)
+    else:
+        mask = _np.zeros((text_height, text_width), dtype=_np.bool_)
+        _draw_text(mask, text, 0, 0, scale, True)
+
+    bitmap = _TextBitmap(width=text_width, height=text_height, mask=mask)
+    _TEXT_BITMAP_CACHE[key] = bitmap
+    return bitmap
 
 
 def _blend_text(
@@ -776,6 +811,7 @@ def _blend_text(
     scale: int,
     colour: tuple[int, int, int],
     alpha: float = 0.7,
+    bitmap: _TextBitmap | None = None,
 ) -> None:
     if _np is None or not isinstance(frame, _np.ndarray):  # pragma: no cover - optional guard
         return
@@ -784,24 +820,11 @@ def _blend_text(
     alpha = float(alpha)
     if alpha <= 0.0:
         return
-    glyph_width = _FONT_WIDTH * scale
-    char_spacing = 1 * scale
-    text_width = _measure_text(text, glyph_width, char_spacing)
-    text_height = _FONT_HEIGHT * scale
+    entry = bitmap if bitmap is not None else _get_text_bitmap(text, scale)
+    text_width = entry.width
+    text_height = entry.height
     if text_width <= 0 or text_height <= 0:
         return
-
-    channels = frame.shape[2] if frame.ndim >= 3 else 1
-    colour_array = _np.array(colour, dtype=_np.uint8)
-    if channels >= 3:
-        buffer = _np.zeros((text_height, text_width, channels), dtype=frame.dtype)
-        target = buffer if channels == 3 else buffer[..., :3]
-        draw_colour = tuple(int(c) for c in colour_array[:3])
-        _draw_text(target, text, 0, 0, scale, draw_colour)
-    else:
-        buffer = _np.zeros((text_height, text_width), dtype=frame.dtype)
-        draw_colour = int(colour_array[0]) if colour_array.size else 255
-        _draw_text(buffer, text, 0, 0, scale, draw_colour)
 
     x0 = max(0, x)
     y0 = max(0, y)
@@ -810,21 +833,49 @@ def _blend_text(
     if x1 <= x0 or y1 <= y0:
         return
 
-    frame_slice = frame[y0:y1, x0:x1].astype(_np.float32)
-    buffer_slice = buffer[y0 - y : y1 - y, x0 - x : x1 - x].astype(_np.float32)
-    if frame_slice.ndim == 2:
-        mask = buffer_slice > 0
-    else:
-        mask = _np.any(buffer_slice > 0, axis=2)
-    if not _np.any(mask):
+    mask_slice = entry.mask[y0 - y : y1 - y, x0 - x : x1 - x]
+    if mask_slice.size == 0:
         return
-    alpha = min(1.0, max(0.0, alpha))
+
+    active = mask_slice
+    if not _np.any(active):
+        return
+
+    frame_slice = frame[y0:y1, x0:x1]
+    alpha = min(1.0, max(0.0, float(alpha)))
+    alpha_u8 = int(round(alpha * 255))
+    if alpha_u8 <= 0:
+        return
+    inv_alpha = 255 - alpha_u8
+
     if frame_slice.ndim == 2:
-        blended = frame_slice[mask] * (1.0 - alpha) + buffer_slice[mask] * alpha
+        target_value = int(colour[0]) if colour else 255
+        src_vals = frame_slice[active]
+        if src_vals.size == 0:
+            return
+        blended = (
+            src_vals.astype(_np.uint16) * inv_alpha
+            + target_value * alpha_u8
+        ) // 255
+        frame_slice[active] = blended.astype(frame.dtype, copy=False)
+        return
+
+    channels = frame_slice.shape[2]
+    if colour:
+        last_value = int(colour[-1])
+        colour_values = [int(colour[i]) if i < len(colour) else last_value for i in range(min(3, channels))]
     else:
-        blended = frame_slice[mask] * (1.0 - alpha) + buffer_slice[mask] * alpha
-    frame_slice[mask] = _np.clip(blended, 0, 255)
-    frame[y0:y1, x0:x1] = frame_slice.astype(frame.dtype)
+        colour_values = [255] * min(3, channels)
+    for channel, colour_value in enumerate(colour_values):
+        channel_slice = frame_slice[..., channel]
+        src_vals = channel_slice[active]
+        if src_vals.size == 0:
+            continue
+        blended = (
+            src_vals.astype(_np.uint16) * inv_alpha
+            + colour_value * alpha_u8
+        ) // 255
+        channel_slice[active] = blended.astype(frame.dtype, copy=False)
 __all__ = [
     "DistanceCalibration",
     "DistanceMonitor",
