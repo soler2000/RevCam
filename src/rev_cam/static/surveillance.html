@@ -1,0 +1,1259 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>RevCam Surveillance</title>
+    <link rel="icon" type="image/svg+xml" href="images/favicon.svg" />
+    <style>
+      :root {
+        color-scheme: dark;
+        --font-family: "Inter", "Manrope", "Segoe UI", system-ui, -apple-system,
+          BlinkMacSystemFont, sans-serif;
+        --line-height: 1.65;
+        --transition: 200ms ease;
+        --surface-0: rgba(14, 16, 22, 0.82);
+        --surface-1: rgba(26, 28, 36, 0.78);
+        --surface-muted: rgba(255, 255, 255, 0.08);
+        --surface-soft: rgba(255, 255, 255, 0.04);
+        --surface-primary: rgba(38, 42, 55, 0.85);
+        --surface-secondary: rgba(24, 27, 38, 0.88);
+        --border-subtle: rgba(255, 255, 255, 0.08);
+        --border-muted: rgba(255, 255, 255, 0.12);
+        --text-primary: #f5f7fb;
+        --text-muted: rgba(245, 247, 250, 0.72);
+        --text-on-accent: #ffffff;
+        --accent: #0a84ff;
+        --accent-hover: #2f95ff;
+        --accent-active: #55adff;
+        --accent-soft: rgba(10, 132, 255, 0.16);
+        --accent-ring: rgba(10, 132, 255, 0.45);
+        --success: #4ade80;
+        --success-soft: rgba(74, 222, 128, 0.16);
+        --warning: #ff9f0a;
+        --warning-soft: rgba(255, 159, 10, 0.18);
+        --danger: #ff453a;
+        --danger-soft: rgba(255, 69, 58, 0.2);
+        --radius-sm: 0.5rem;
+        --radius-md: 0.75rem;
+        --radius-lg: 1rem;
+        --radius-xl: 1.5rem;
+        --radius-pill: 999px;
+        --space-xs: 0.25rem;
+        --space-sm: 0.5rem;
+        --space-md: 0.75rem;
+        --space-lg: 1.25rem;
+        --space-xl: 1.75rem;
+        --space-2xl: 2.5rem;
+        --shell-padding-y: clamp(2rem, 7vh, 3.5rem);
+        --shell-padding-x: clamp(1rem, 5vw, 3rem);
+        --card-padding: 1.5rem;
+        --shadow-sm: 0 18px 44px rgba(0, 0, 0, 0.45);
+        --shadow-md: 0 26px 60px rgba(0, 0, 0, 0.5);
+        --shadow-lg: 0 40px 80px rgba(0, 0, 0, 0.6);
+        --page-gradient: radial-gradient(120% 140% at top, #1b1e26 0%, #10131a 60%,
+            #050609 100%);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: var(--font-family);
+        line-height: var(--line-height);
+        background: var(--page-gradient);
+        color: var(--text-primary);
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+      }
+
+      header,
+      footer {
+        background: var(--surface-0);
+        backdrop-filter: blur(18px) saturate(125%);
+        -webkit-backdrop-filter: blur(18px) saturate(125%);
+        padding: var(--space-md) var(--shell-padding-x);
+        box-shadow: var(--shadow-sm);
+        border-bottom: 1px solid var(--border-subtle);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-lg);
+        flex-wrap: wrap;
+      }
+
+      footer {
+        border-top: 1px solid var(--border-subtle);
+        border-bottom: none;
+        box-shadow: 0 -18px 40px rgba(0, 0, 0, 0.45);
+        justify-content: flex-end;
+      }
+
+      main {
+        flex: 1 1 auto;
+        padding: var(--shell-padding-y) var(--shell-padding-x);
+        display: grid;
+        gap: var(--space-2xl);
+      }
+
+      strong.brand {
+        font-size: 1.25rem;
+        letter-spacing: 0.04em;
+        color: var(--success);
+      }
+
+      nav {
+        display: flex;
+        gap: var(--space-md);
+        align-items: center;
+        flex-wrap: wrap;
+      }
+
+      nav a {
+        color: var(--text-primary);
+        text-decoration: none;
+        font-weight: 600;
+        padding: var(--space-xs) var(--space-sm);
+        border-radius: var(--radius-pill);
+        border: 1px solid transparent;
+        transition: background var(--transition), border-color var(--transition),
+          color var(--transition);
+      }
+
+      nav a:hover,
+      nav a:focus-visible {
+        outline: none;
+        background: var(--surface-soft);
+        border-color: var(--border-muted);
+      }
+
+      nav a[aria-current="page"] {
+        background: var(--accent-soft);
+        border-color: var(--accent);
+        color: var(--text-primary);
+      }
+
+      a.button-link {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: var(--space-sm);
+        padding: var(--space-sm) var(--space-lg);
+        border-radius: var(--radius-pill);
+        border: 1px solid transparent;
+        background: linear-gradient(135deg, var(--accent), var(--accent-hover));
+        color: var(--text-on-accent);
+        text-decoration: none;
+        font-weight: 600;
+        transition: transform var(--transition), box-shadow var(--transition);
+      }
+
+      a.button-link:hover,
+      a.button-link:focus-visible {
+        outline: none;
+        box-shadow: 0 18px 40px rgba(10, 132, 255, 0.35);
+        transform: translateY(-1px);
+      }
+
+      button {
+        background: linear-gradient(135deg, var(--accent), var(--accent-hover));
+        color: var(--text-on-accent);
+        border: none;
+        padding: var(--space-sm) var(--space-lg);
+        border-radius: var(--radius-pill);
+        font-weight: 600;
+        cursor: pointer;
+        transition: transform var(--transition), box-shadow var(--transition),
+          opacity var(--transition);
+      }
+
+      button.secondary-button {
+        background: var(--surface-soft);
+        color: var(--text-primary);
+        border: 1px solid var(--border-muted);
+      }
+
+      button.danger-button {
+        background: linear-gradient(135deg, var(--danger), #ff5d52);
+      }
+
+      button:disabled,
+      button[aria-disabled="true"],
+      a.button-link.disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+        pointer-events: none;
+        box-shadow: none;
+        transform: none;
+      }
+
+      .layout {
+        display: grid;
+        gap: var(--space-2xl);
+      }
+
+      @media (min-width: 1100px) {
+        .layout {
+          grid-template-columns: 2fr 3fr;
+        }
+        .player-card {
+          grid-column: 1 / -1;
+        }
+      }
+
+      .card {
+        background: var(--surface-primary);
+        border-radius: var(--radius-xl);
+        padding: var(--card-padding);
+        box-shadow: var(--shadow-md);
+        border: 1px solid var(--border-subtle);
+      }
+
+      .player-card {
+        display: grid;
+        gap: var(--space-lg);
+      }
+
+      .player-media {
+        position: relative;
+        border-radius: var(--radius-lg);
+        overflow: hidden;
+        background: linear-gradient(160deg, var(--surface-0), var(--surface-1));
+        border: 1px solid var(--border-subtle);
+        min-height: 240px;
+      }
+
+      video#clip-player {
+        width: 100%;
+        height: 100%;
+        display: none;
+        background-color: black;
+      }
+
+      video#clip-player.is-visible {
+        display: block;
+      }
+
+      #player-placeholder {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        color: var(--text-muted);
+        font-size: 1rem;
+        text-align: center;
+        padding: var(--space-lg);
+      }
+
+      .player-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-end;
+        gap: var(--space-md);
+        flex-wrap: wrap;
+      }
+
+      .player-header h1 {
+        margin: 0;
+        font-size: clamp(1.8rem, 3vw, 2.4rem);
+      }
+
+      .player-meta {
+        display: grid;
+        gap: var(--space-sm);
+      }
+
+      .player-meta dl {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+        gap: var(--space-sm) var(--space-lg);
+        margin: 0;
+      }
+
+      .player-meta dt {
+        font-weight: 600;
+        color: var(--text-muted);
+      }
+
+      .player-meta dd {
+        margin: 0;
+      }
+
+      .player-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-md);
+        align-items: center;
+      }
+
+      .filters-card {
+        display: grid;
+        gap: var(--space-lg);
+      }
+
+      .filters-card p.helper-text {
+        margin: 0;
+        color: var(--text-muted);
+        font-size: 0.9rem;
+      }
+
+      form.filter-form {
+        display: grid;
+        gap: var(--space-lg);
+      }
+
+      .filter-grid {
+        display: grid;
+        gap: var(--space-lg);
+      }
+
+      @media (min-width: 720px) {
+        .filter-grid {
+          grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        }
+      }
+
+      label {
+        display: grid;
+        gap: var(--space-xs);
+        font-weight: 600;
+      }
+
+      input,
+      select,
+      textarea {
+        font: inherit;
+        border-radius: var(--radius-sm);
+        border: 1px solid transparent;
+        padding: var(--space-sm) var(--space-md);
+        background: var(--surface-soft);
+        color: inherit;
+        box-shadow: inset 0 0 0 1px var(--border-subtle);
+        transition: background var(--transition), box-shadow var(--transition),
+          border-color var(--transition);
+      }
+
+      input:focus-visible,
+      select:focus-visible,
+      textarea:focus-visible {
+        outline: none;
+        background: var(--surface-1);
+        box-shadow: inset 0 0 0 1px var(--accent), 0 0 0 4px var(--accent-soft);
+      }
+
+      input[type="checkbox"] {
+        width: 1.1rem;
+        height: 1.1rem;
+        display: inline-grid;
+        place-items: center;
+        border-radius: 0.35rem;
+        padding: 0;
+      }
+
+      input[type="checkbox"]::after {
+        content: "";
+        width: 0.5rem;
+        height: 0.3rem;
+        border: 2px solid var(--text-on-accent);
+        border-top: 0;
+        border-right: 0;
+        transform: rotate(-45deg) scale(0);
+        transition: transform var(--transition);
+      }
+
+      input[type="checkbox"]:checked {
+        background: var(--accent);
+        box-shadow: inset 0 0 0 1px var(--accent-active),
+          0 0 0 4px rgba(10, 132, 255, 0.18);
+      }
+
+      input[type="checkbox"]:checked::after {
+        transform: rotate(-45deg) scale(1);
+      }
+
+      .filter-actions,
+      .bulk-actions {
+        display: flex;
+        gap: var(--space-md);
+        flex-wrap: wrap;
+        align-items: center;
+      }
+
+      .gallery-card {
+        display: grid;
+        gap: var(--space-lg);
+      }
+
+      .clip-grid {
+        display: grid;
+        gap: var(--space-lg);
+      }
+
+      @media (min-width: 720px) {
+        .clip-grid {
+          grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        }
+      }
+
+      .clip-card {
+        background: var(--surface-secondary);
+        border-radius: var(--radius-lg);
+        border: 1px solid var(--border-subtle);
+        display: grid;
+        gap: var(--space-md);
+        padding: var(--space-md);
+        position: relative;
+        transition: transform var(--transition), box-shadow var(--transition),
+          border-color var(--transition);
+        cursor: pointer;
+      }
+
+      .clip-card:hover,
+      .clip-card:focus-within {
+        transform: translateY(-2px);
+        box-shadow: var(--shadow-sm);
+      }
+
+      .clip-card.is-active {
+        border-color: var(--accent);
+        box-shadow: var(--shadow-sm), 0 0 0 3px var(--accent-soft);
+      }
+
+      .clip-card.is-selected {
+        border-color: var(--success);
+        box-shadow: var(--shadow-sm), 0 0 0 3px var(--success-soft);
+      }
+
+      .clip-thumb {
+        position: relative;
+        border-radius: var(--radius-md);
+        overflow: hidden;
+        aspect-ratio: 16 / 9;
+        background: linear-gradient(160deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02));
+        display: grid;
+        place-items: center;
+      }
+
+      .clip-thumb img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+      }
+
+      .clip-duration {
+        position: absolute;
+        bottom: var(--space-sm);
+        right: var(--space-sm);
+        padding: 0.25rem 0.6rem;
+        border-radius: var(--radius-pill);
+        background: rgba(0, 0, 0, 0.6);
+        font-size: 0.85rem;
+      }
+
+      .clip-meta h3 {
+        margin: 0;
+        font-size: 1rem;
+      }
+
+      .clip-meta p {
+        margin: 0;
+        color: var(--text-muted);
+        font-size: 0.9rem;
+      }
+
+      .clip-select {
+        display: inline-flex;
+        gap: var(--space-sm);
+        align-items: center;
+        margin-top: var(--space-sm);
+      }
+
+      .pagination {
+        display: flex;
+        align-items: center;
+        gap: var(--space-md);
+        flex-wrap: wrap;
+      }
+
+      .status-text {
+        color: var(--text-muted);
+        font-size: 0.9rem;
+      }
+
+      .helper-text {
+        color: var(--text-muted);
+        font-size: 0.9rem;
+      }
+
+      .muted {
+        color: var(--text-muted);
+      }
+
+      .selection-summary {
+        margin-left: auto;
+        font-weight: 600;
+      }
+
+      footer a {
+        color: var(--text-primary);
+        text-decoration: none;
+        font-weight: 600;
+        padding: var(--space-xs) var(--space-sm);
+        border-radius: var(--radius-pill);
+        border: 1px solid transparent;
+        transition: background var(--transition), border-color var(--transition);
+      }
+
+      footer a:hover,
+      footer a:focus-visible {
+        outline: none;
+        background: var(--surface-soft);
+        border-color: var(--border-muted);
+      }
+
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <strong class="brand">RevCam</strong>
+      <nav aria-label="Primary navigation">
+        <a href="/">Live view</a>
+        <a href="/surveillance" aria-current="page">Surveillance</a>
+        <a href="/settings">Settings</a>
+      </nav>
+    </header>
+    <main>
+      <section class="card player-card" aria-label="Clip player">
+        <div class="player-header">
+          <h1>Surveillance clips</h1>
+          <p id="clip-count" class="muted">Loading…</p>
+        </div>
+        <div class="player-media">
+          <video id="clip-player" controls preload="metadata">
+            <source id="clip-source" src="" type="video/mp4" />
+            Your browser does not support HTML5 video playback.
+          </video>
+          <div id="player-placeholder">Select a clip to begin playback.</div>
+        </div>
+        <div class="player-meta" role="status" aria-live="polite">
+          <dl>
+            <div>
+              <dt>Filename</dt>
+              <dd id="clip-filename">—</dd>
+            </div>
+            <div>
+              <dt>Start</dt>
+              <dd id="clip-start">—</dd>
+            </div>
+            <div>
+              <dt>End</dt>
+              <dd id="clip-end">—</dd>
+            </div>
+            <div>
+              <dt>Duration</dt>
+              <dd id="clip-duration">—</dd>
+            </div>
+            <div>
+              <dt>Size</dt>
+              <dd id="clip-size">—</dd>
+            </div>
+            <div>
+              <dt>Audio</dt>
+              <dd id="clip-audio">—</dd>
+            </div>
+            <div>
+              <dt>Motion score</dt>
+              <dd id="clip-motion">—</dd>
+            </div>
+          </dl>
+        </div>
+        <div class="player-actions">
+          <a
+            id="download-clip"
+            class="button-link disabled"
+            href="#"
+            aria-disabled="true"
+            download
+            >Download clip</a
+          >
+          <button type="button" id="open-clip" class="secondary-button" disabled>
+            Open in new tab
+          </button>
+          <span id="player-status" class="status-text"></span>
+        </div>
+      </section>
+
+      <section class="card filters-card" aria-label="Clip filters">
+        <h2>Filters</h2>
+        <p class="helper-text">
+          Use the filters to narrow down the clips. Date filters apply to the
+          server query; additional filters refine the current page of results.
+        </p>
+        <form id="clip-filter-form" class="filter-form">
+          <div class="filter-grid">
+            <label>
+              From
+              <input type="datetime-local" name="from" />
+            </label>
+            <label>
+              To
+              <input type="datetime-local" name="to" />
+            </label>
+            <label>
+              Sort by
+              <select name="sort">
+                <option value="-start_ts">Newest first</option>
+                <option value="start_ts">Oldest first</option>
+                <option value="-duration_s">Longest duration</option>
+                <option value="duration_s">Shortest duration</option>
+                <option value="-size_bytes">Largest size</option>
+                <option value="size_bytes">Smallest size</option>
+                <option value="-motion_score">Highest motion score</option>
+                <option value="motion_score">Lowest motion score</option>
+              </select>
+            </label>
+            <label>
+              Page size
+              <select name="page_size">
+                <option value="12">12</option>
+                <option value="24">24</option>
+                <option value="36">36</option>
+                <option value="48">48</option>
+              </select>
+            </label>
+            <label>
+              Minimum motion score
+              <input type="number" name="motion_min" min="0" max="1" step="0.05" />
+            </label>
+            <label>
+              Maximum motion score
+              <input type="number" name="motion_max" min="0" max="1" step="0.05" />
+            </label>
+            <label>
+              Minimum size (MB)
+              <input type="number" name="size_min" min="0" step="0.1" />
+            </label>
+            <label>
+              Maximum size (MB)
+              <input type="number" name="size_max" min="0" step="0.1" />
+            </label>
+          </div>
+          <div class="filter-actions">
+            <button type="submit">Apply filters</button>
+            <button type="button" id="reset-filters" class="secondary-button">
+              Reset
+            </button>
+          </div>
+        </form>
+      </section>
+
+      <section class="card gallery-card" aria-label="Clip gallery">
+        <div class="gallery-header" style="display: flex; gap: var(--space-md); flex-wrap: wrap; align-items: center;">
+          <h2 style="margin: 0;">Gallery</h2>
+          <div class="selection-summary" id="selection-summary">No clips selected</div>
+        </div>
+        <div class="bulk-actions">
+          <button type="button" id="select-page" class="secondary-button">Select page</button>
+          <button type="button" id="clear-selection" class="secondary-button">Clear selection</button>
+          <button type="button" id="export-selected" disabled>Export selected</button>
+          <button type="button" id="delete-selected" class="danger-button" disabled>
+            Delete selected
+          </button>
+        </div>
+        <div id="clip-gallery" class="clip-grid" role="list"></div>
+        <p id="clip-empty" class="helper-text" hidden>No clips found for the current filters.</p>
+        <div class="pagination">
+          <button type="button" id="prev-page" class="secondary-button">Previous</button>
+          <span id="pagination-info">Page 1</span>
+          <button type="button" id="next-page" class="secondary-button">Next</button>
+        </div>
+        <p id="gallery-status" class="status-text"></p>
+      </section>
+    </main>
+    <footer>
+      <a href="/">Live view</a>
+      <a href="/settings">Settings</a>
+    </footer>
+    <script>
+      const clipPlayer = document.getElementById("clip-player");
+      const clipSource = document.getElementById("clip-source");
+      const playerPlaceholder = document.getElementById("player-placeholder");
+      const clipFilename = document.getElementById("clip-filename");
+      const clipStart = document.getElementById("clip-start");
+      const clipEnd = document.getElementById("clip-end");
+      const clipDuration = document.getElementById("clip-duration");
+      const clipSize = document.getElementById("clip-size");
+      const clipAudio = document.getElementById("clip-audio");
+      const clipMotion = document.getElementById("clip-motion");
+      const clipCountLabel = document.getElementById("clip-count");
+      const downloadLink = document.getElementById("download-clip");
+      const openClipButton = document.getElementById("open-clip");
+      const playerStatus = document.getElementById("player-status");
+      const filterForm = document.getElementById("clip-filter-form");
+      const resetFiltersButton = document.getElementById("reset-filters");
+      const gallery = document.getElementById("clip-gallery");
+      const galleryStatus = document.getElementById("gallery-status");
+      const clipEmpty = document.getElementById("clip-empty");
+      const selectPageButton = document.getElementById("select-page");
+      const clearSelectionButton = document.getElementById("clear-selection");
+      const exportButton = document.getElementById("export-selected");
+      const deleteButton = document.getElementById("delete-selected");
+      const paginationInfo = document.getElementById("pagination-info");
+      const prevPageButton = document.getElementById("prev-page");
+      const nextPageButton = document.getElementById("next-page");
+      const selectionSummary = document.getElementById("selection-summary");
+      const sortSelect = filterForm?.querySelector('select[name="sort"]');
+      const pageSizeSelect = filterForm?.querySelector('select[name="page_size"]');
+
+      let clips = [];
+      let totalClips = 0;
+      let currentPage = 1;
+      let currentPageSize = 12;
+      let currentSort = "-start_ts";
+      const selectedIds = new Set();
+      let activeClipId = null;
+
+      function formatDate(isoString) {
+        if (!isoString) return "—";
+        const date = new Date(isoString);
+        if (Number.isNaN(date.getTime())) {
+          return isoString;
+        }
+        return date.toLocaleString();
+      }
+
+      function formatDuration(seconds) {
+        if (!Number.isFinite(seconds)) return "—";
+        const total = Math.max(0, seconds);
+        const hours = Math.floor(total / 3600);
+        const minutes = Math.floor((total % 3600) / 60);
+        const secs = Math.round(total % 60);
+        const parts = [];
+        if (hours) {
+          parts.push(`${hours}h`);
+        }
+        if (minutes) {
+          parts.push(`${minutes}m`);
+        }
+        parts.push(`${secs}s`);
+        return parts.join(" ");
+      }
+
+      function formatBytes(value) {
+        if (!Number.isFinite(value) || value <= 0) {
+          return "—";
+        }
+        const units = ["B", "KB", "MB", "GB", "TB"];
+        let index = 0;
+        let size = value;
+        while (size >= 1024 && index < units.length - 1) {
+          size /= 1024;
+          index += 1;
+        }
+        return `${size.toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
+      }
+
+      function setPlayerStatus(message) {
+        if (playerStatus) {
+          playerStatus.textContent = message || "";
+        }
+      }
+
+      function setGalleryStatus(message) {
+        if (galleryStatus) {
+          galleryStatus.textContent = message || "";
+        }
+      }
+
+      function updateSelectionSummary() {
+        const count = selectedIds.size;
+        if (selectionSummary) {
+          selectionSummary.textContent =
+            count === 0
+              ? "No clips selected"
+              : `${count} clip${count === 1 ? "" : "s"} selected`;
+        }
+        if (exportButton) {
+          exportButton.disabled = count === 0;
+        }
+        if (deleteButton) {
+          deleteButton.disabled = count === 0;
+        }
+      }
+
+      function toggleSelection(id, checked) {
+        if (checked) {
+          selectedIds.add(id);
+        } else {
+          selectedIds.delete(id);
+        }
+        updateSelectionSummary();
+        const card = gallery?.querySelector(`.clip-card[data-clip-id="${id}"]`);
+        if (card) {
+          card.classList.toggle("is-selected", checked);
+        }
+      }
+
+      function clearSelection() {
+        selectedIds.clear();
+        updateSelectionSummary();
+        if (gallery) {
+          for (const card of gallery.querySelectorAll(".clip-card")) {
+            card.classList.remove("is-selected");
+            const checkbox = card.querySelector('input[type="checkbox"]');
+            if (checkbox instanceof HTMLInputElement) {
+              checkbox.checked = false;
+            }
+          }
+        }
+      }
+
+      function selectPage() {
+        for (const clip of clips) {
+          selectedIds.add(clip.id);
+        }
+        if (gallery) {
+          for (const card of gallery.querySelectorAll(".clip-card")) {
+            card.classList.add("is-selected");
+            const checkbox = card.querySelector('input[type="checkbox"]');
+            if (checkbox instanceof HTMLInputElement) {
+              checkbox.checked = true;
+            }
+          }
+        }
+        updateSelectionSummary();
+      }
+
+      function updatePlayer(clip) {
+        if (!clip) {
+          if (clipPlayer instanceof HTMLVideoElement) {
+            clipPlayer.pause();
+            clipPlayer.classList.remove("is-visible");
+          }
+          if (playerPlaceholder) {
+            playerPlaceholder.hidden = false;
+          }
+          if (downloadLink) {
+            downloadLink.classList.add("disabled");
+            downloadLink.setAttribute("aria-disabled", "true");
+            downloadLink.href = "#";
+          }
+          if (openClipButton) {
+            openClipButton.disabled = true;
+          }
+          clipFilename.textContent = "—";
+          clipStart.textContent = "—";
+          clipEnd.textContent = "—";
+          clipDuration.textContent = "—";
+          clipSize.textContent = "—";
+          clipAudio.textContent = "—";
+          clipMotion.textContent = "—";
+          return;
+        }
+        if (clipSource && clipPlayer instanceof HTMLVideoElement) {
+          const url = `/api/surv/clips/${clip.id}/stream`;
+          clipSource.src = url;
+          clipPlayer.load();
+          clipPlayer.classList.add("is-visible");
+          if (playerPlaceholder) {
+            playerPlaceholder.hidden = true;
+          }
+        }
+        if (downloadLink) {
+          downloadLink.href = `/api/surv/clips/${clip.id}/stream`;
+          downloadLink.classList.remove("disabled");
+          downloadLink.removeAttribute("aria-disabled");
+          downloadLink.download = clip.path ? clip.path.split("/").pop() || "clip.mp4" : "clip.mp4";
+        }
+        if (openClipButton) {
+          openClipButton.disabled = false;
+          openClipButton.onclick = () => {
+            window.open(`/api/surv/clips/${clip.id}/stream`, "_blank", "noopener");
+          };
+        }
+        clipFilename.textContent = clip.path ? clip.path.split("/").pop() : `Clip ${clip.id}`;
+        clipStart.textContent = formatDate(clip.start_ts);
+        clipEnd.textContent = formatDate(clip.end_ts);
+        clipDuration.textContent = formatDuration(clip.duration_s);
+        clipSize.textContent = formatBytes(clip.size_bytes);
+        clipAudio.textContent = clip.has_audio ? "Yes" : "No";
+        clipMotion.textContent =
+          typeof clip.motion_score === "number" && Number.isFinite(clip.motion_score)
+            ? clip.motion_score.toFixed(2)
+            : "—";
+      }
+
+      function renderGallery() {
+        if (!gallery) return;
+        gallery.textContent = "";
+        const fragment = document.createDocumentFragment();
+        const filters = new FormData(filterForm);
+        const motionMin = Number(filters.get("motion_min"));
+        const motionMax = Number(filters.get("motion_max"));
+        const sizeMin = Number(filters.get("size_min"));
+        const sizeMax = Number(filters.get("size_max"));
+        const filtered = clips.filter((clip) => {
+          let include = true;
+          const score =
+            typeof clip.motion_score === "number" && Number.isFinite(clip.motion_score)
+              ? clip.motion_score
+              : null;
+          if (Number.isFinite(motionMin)) {
+            include = include && score !== null && score >= motionMin;
+          }
+          if (!include) return false;
+          if (Number.isFinite(motionMax)) {
+            include = include && score !== null && score <= motionMax;
+          }
+          if (!include) return false;
+          if (Number.isFinite(sizeMin)) {
+            include = include && Number.isFinite(clip.size_bytes) && clip.size_bytes >= sizeMin * 1024 * 1024;
+          }
+          if (!include) return false;
+          if (Number.isFinite(sizeMax)) {
+            include = include && Number.isFinite(clip.size_bytes) && clip.size_bytes <= sizeMax * 1024 * 1024;
+          }
+          return include;
+        });
+
+        for (const clip of filtered) {
+          const card = document.createElement("article");
+          card.className = "clip-card";
+          card.dataset.clipId = String(clip.id);
+          card.setAttribute("role", "listitem");
+
+          if (clip.id === activeClipId) {
+            card.classList.add("is-active");
+          }
+          if (selectedIds.has(clip.id)) {
+            card.classList.add("is-selected");
+          }
+
+          const thumb = document.createElement("div");
+          thumb.className = "clip-thumb";
+          if (clip.thumb_path) {
+            const img = document.createElement("img");
+            img.src = `/api/surv/clips/${clip.id}/thumb`;
+            img.alt = `Thumbnail for clip ${clip.id}`;
+            thumb.appendChild(img);
+          } else {
+            const placeholder = document.createElement("span");
+            placeholder.className = "muted";
+            placeholder.textContent = "No thumbnail";
+            thumb.appendChild(placeholder);
+          }
+          const durationBadge = document.createElement("div");
+          durationBadge.className = "clip-duration";
+          durationBadge.textContent = formatDuration(clip.duration_s);
+          thumb.appendChild(durationBadge);
+          card.appendChild(thumb);
+
+          const meta = document.createElement("div");
+          meta.className = "clip-meta";
+          const title = document.createElement("h3");
+          title.textContent = formatDate(clip.start_ts);
+          meta.appendChild(title);
+          const summary = document.createElement("p");
+          const pieces = [];
+          pieces.push(formatDuration(clip.duration_s));
+          const sizeLabel = formatBytes(clip.size_bytes);
+          if (sizeLabel && sizeLabel !== "—") {
+            pieces.push(sizeLabel);
+          }
+          if (
+            typeof clip.motion_score === "number" &&
+            Number.isFinite(clip.motion_score)
+          ) {
+            pieces.push(`Motion ${clip.motion_score.toFixed(2)}`);
+          }
+          summary.textContent = pieces.join(" • ");
+          meta.appendChild(summary);
+
+          const select = document.createElement("label");
+          select.className = "clip-select";
+          const checkbox = document.createElement("input");
+          checkbox.type = "checkbox";
+          checkbox.checked = selectedIds.has(clip.id);
+          checkbox.addEventListener("click", (event) => {
+            event.stopPropagation();
+          });
+          checkbox.addEventListener("change", (event) => {
+            toggleSelection(clip.id, event.target.checked);
+          });
+          const span = document.createElement("span");
+          span.textContent = "Select";
+          select.append(checkbox, span);
+          meta.appendChild(select);
+
+          card.appendChild(meta);
+          card.addEventListener("click", () => {
+            activeClipId = clip.id;
+            updatePlayer(clip);
+            setPlayerStatus("");
+            for (const sibling of gallery.querySelectorAll(".clip-card")) {
+              sibling.classList.toggle(
+                "is-active",
+                sibling.dataset.clipId === String(clip.id)
+              );
+            }
+          });
+
+          fragment.appendChild(card);
+        }
+
+        gallery.appendChild(fragment);
+        const visibleCount = filtered.length;
+        clipEmpty.hidden = visibleCount !== 0;
+        const totalPages = currentPageSize > 0 ? Math.max(1, Math.ceil(totalClips / currentPageSize)) : 1;
+        const startIndex = totalClips === 0 ? 0 : (currentPage - 1) * currentPageSize + 1;
+        const endIndex = visibleCount ? Math.min(startIndex + visibleCount - 1, totalClips) : startIndex - (totalClips === 0 ? 0 : 1);
+        if (clipCountLabel) {
+          clipCountLabel.textContent = `${totalClips} total clip${totalClips === 1 ? "" : "s"}`;
+        }
+        if (paginationInfo) {
+          if (totalClips === 0) {
+            paginationInfo.textContent = "Page 0 of 0";
+          } else if (visibleCount === 0) {
+            paginationInfo.textContent = `No clips displayed • Page ${currentPage} of ${totalPages}`;
+          } else {
+            paginationInfo.textContent = `Showing ${startIndex}-${endIndex} of ${totalClips} • Page ${currentPage}`;
+          }
+        }
+      }
+
+      function isoFromInput(value) {
+        if (!value) return null;
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) {
+          return null;
+        }
+        return date.toISOString();
+      }
+
+      function ensureSelectOption(select, value) {
+        if (!(select instanceof HTMLSelectElement)) {
+          return;
+        }
+        const exists = Array.from(select.options).some((option) => option.value === value);
+        if (!exists) {
+          const option = new Option(value, value, false, false);
+          select.appendChild(option);
+        }
+      }
+
+      async function loadClips({ page = currentPage } = {}) {
+        setGalleryStatus("Loading clips…");
+        const formData = new FormData(filterForm);
+        const params = new URLSearchParams();
+        const fromIso = isoFromInput(formData.get("from"));
+        const toIso = isoFromInput(formData.get("to"));
+        currentSort = formData.get("sort") || "-start_ts";
+        currentPageSize = Number(formData.get("page_size")) || currentPageSize;
+        if (fromIso) {
+          params.set("from_ts", fromIso);
+        }
+        if (toIso) {
+          params.set("to_ts", toIso);
+        }
+        params.set("sort", currentSort);
+        params.set("page", String(page));
+        params.set("page_size", String(currentPageSize));
+        try {
+          const response = await fetch(`/api/surv/clips?${params.toString()}`);
+          if (!response.ok) {
+            throw new Error(`Unable to load clips (${response.status})`);
+          }
+          const payload = await response.json();
+          clips = Array.isArray(payload.items) ? payload.items : [];
+          totalClips = Number(payload.total) || 0;
+          currentPage = Number(payload.page) || 1;
+          currentPageSize = Number(payload.page_size) || currentPageSize;
+          if (sortSelect instanceof HTMLSelectElement) {
+            sortSelect.value = currentSort;
+          }
+          if (pageSizeSelect instanceof HTMLSelectElement) {
+            const pageSizeValue = String(currentPageSize);
+            ensureSelectOption(pageSizeSelect, pageSizeValue);
+            pageSizeSelect.value = pageSizeValue;
+          }
+          renderGallery();
+          setGalleryStatus(clips.length ? "" : "No clips on this page.");
+          if (clips.length && !activeClipId) {
+            activeClipId = clips[0].id;
+            updatePlayer(clips[0]);
+            const card = gallery.querySelector(
+              `.clip-card[data-clip-id="${clips[0].id}"]`
+            );
+            if (card) {
+              card.classList.add("is-active");
+            }
+          } else if (!clips.length) {
+            activeClipId = null;
+            updatePlayer(null);
+          }
+          prevPageButton.disabled = currentPage <= 1;
+          const totalPages = currentPageSize > 0 ? Math.ceil(totalClips / currentPageSize) : 1;
+          nextPageButton.disabled = currentPage >= totalPages;
+        } catch (error) {
+          console.error(error);
+          setGalleryStatus(error instanceof Error ? error.message : "Unable to load clips");
+        }
+      }
+
+      async function exportSelectedClips() {
+        if (!selectedIds.size) return;
+        setGalleryStatus("Preparing export…");
+        try {
+          const response = await fetch("/api/surv/clips/export", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ids: Array.from(selectedIds) }),
+          });
+          if (!response.ok) {
+            let detail = "Unable to export clips.";
+            try {
+              const error = await response.json();
+              if (error?.detail) {
+                detail = error.detail;
+              }
+            } catch (err) {
+              console.error(err);
+            }
+            throw new Error(detail);
+          }
+          const data = await response.json();
+          if (data?.zip_url) {
+            window.open(data.zip_url, "_blank", "noopener");
+          }
+          setGalleryStatus("Export ready in new tab.");
+        } catch (error) {
+          console.error(error);
+          setGalleryStatus(error instanceof Error ? error.message : "Export failed.");
+        }
+      }
+
+      async function deleteSelectedClips() {
+        if (!selectedIds.size) return;
+        const confirmed = window.confirm(
+          selectedIds.size === 1
+            ? "Delete the selected clip? This cannot be undone."
+            : `Delete ${selectedIds.size} clips? This cannot be undone.`
+        );
+        if (!confirmed) {
+          return;
+        }
+        setGalleryStatus("Deleting clips…");
+        try {
+          const response = await fetch("/api/surv/clips", {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ids: Array.from(selectedIds) }),
+          });
+          if (!response.ok) {
+            let detail = "Unable to delete clips.";
+            try {
+              const error = await response.json();
+              if (error?.detail) {
+                detail = error.detail;
+              }
+            } catch (err) {
+              console.error(err);
+            }
+            throw new Error(detail);
+          }
+          clearSelection();
+          await loadClips({ page: currentPage });
+          setGalleryStatus("Selected clips deleted.");
+        } catch (error) {
+          console.error(error);
+          setGalleryStatus(error instanceof Error ? error.message : "Delete failed.");
+        }
+      }
+
+      filterForm.addEventListener("submit", (event) => {
+        event.preventDefault();
+        activeClipId = null;
+        loadClips({ page: 1 });
+      });
+
+      if (resetFiltersButton) {
+        resetFiltersButton.addEventListener("click", () => {
+          filterForm.reset();
+          activeClipId = null;
+          loadClips({ page: 1 });
+        });
+      }
+
+      if (sortSelect instanceof HTMLSelectElement) {
+        sortSelect.addEventListener("change", () => {
+          activeClipId = null;
+          currentSort = sortSelect.value || "-start_ts";
+          loadClips({ page: 1 });
+        });
+      }
+
+      if (pageSizeSelect instanceof HTMLSelectElement) {
+        pageSizeSelect.addEventListener("change", () => {
+          activeClipId = null;
+          currentPageSize = Number(pageSizeSelect.value) || currentPageSize;
+          loadClips({ page: 1 });
+        });
+      }
+
+      if (selectPageButton) {
+        selectPageButton.addEventListener("click", () => {
+          selectPage();
+        });
+      }
+
+      if (clearSelectionButton) {
+        clearSelectionButton.addEventListener("click", () => {
+          clearSelection();
+        });
+      }
+
+      if (exportButton) {
+        exportButton.addEventListener("click", () => {
+          exportSelectedClips();
+        });
+      }
+
+      if (deleteButton) {
+        deleteButton.addEventListener("click", () => {
+          deleteSelectedClips();
+        });
+      }
+
+      prevPageButton.addEventListener("click", () => {
+        if (currentPage <= 1) return;
+        activeClipId = null;
+        loadClips({ page: currentPage - 1 });
+      });
+
+      nextPageButton.addEventListener("click", () => {
+        const totalPages = currentPageSize > 0 ? Math.ceil(totalClips / currentPageSize) : 1;
+        if (currentPage >= totalPages) return;
+        activeClipId = null;
+        loadClips({ page: currentPage + 1 });
+      });
+
+      clearSelection();
+      loadClips({ page: 1 });
+    </script>
+  </body>
+</html>

@@ -629,6 +629,52 @@
         gap: var(--stack-gap);
         grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
       }
+      .surveillance-grid {
+        display: grid;
+        gap: var(--stack-gap);
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      }
+      .privacy-mask-list {
+        display: grid;
+        gap: var(--stack-gap);
+      }
+      .privacy-mask-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-md);
+        align-items: flex-end;
+        padding: var(--space-md);
+        border-radius: var(--radius-md);
+        background: var(--surface-muted);
+        border: 1px solid var(--border-subtle);
+      }
+      .privacy-mask-fields {
+        display: grid;
+        gap: var(--space-md);
+        grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+        flex: 1 1 auto;
+      }
+      .privacy-mask-actions {
+        display: flex;
+        gap: var(--space-md);
+        flex-wrap: wrap;
+        align-items: center;
+      }
+      .surveillance-maintenance-actions {
+        display: flex;
+        gap: var(--space-md);
+        flex-wrap: wrap;
+        align-items: center;
+      }
+      button.danger-button {
+        background: linear-gradient(135deg, var(--danger), #ff5d52);
+        color: var(--text-on-accent);
+        border: none;
+      }
+      button.danger-button:focus-visible,
+      button.danger-button:hover {
+        box-shadow: 0 12px 26px rgba(255, 69, 58, 0.35);
+      }
       fieldset.reversing-side {
         border: 1px solid var(--border-muted);
         border-radius: var(--radius-md);
@@ -1610,6 +1656,18 @@
                   type="button"
                   class="tab-button"
                   role="tab"
+                  id="tab-surveillance"
+                  aria-controls="panel-surveillance"
+                  aria-selected="false"
+                  data-tab="surveillance"
+                  tabindex="-1"
+                >
+                  Surveillance
+                </button>
+                <button
+                  type="button"
+                  class="tab-button"
+                  role="tab"
                   id="tab-network"
                   aria-controls="panel-network"
                   aria-selected="false"
@@ -2266,6 +2324,203 @@
               <span id="reversing-aids-status" class="muted helper-text status-text"></span>
             </div>
           </form>
+        </section>
+
+            <section
+          id="panel-surveillance"
+          class="tab-panel"
+          role="tabpanel"
+          aria-labelledby="tab-surveillance"
+          data-tab="surveillance"
+          hidden
+        >
+          <form id="surveillance-settings-form" class="card">
+            <h2>Surveillance recording</h2>
+            <p class="muted">
+              Configure how motion-triggered clips are captured, annotated, and retained.
+            </p>
+            <div class="surveillance-grid">
+              <label>
+                Resolution
+                <select name="resolution">
+                  <option value="640x360">640 × 360</option>
+                  <option value="1280x720">1280 × 720</option>
+                  <option value="1920x1080">1920 × 1080</option>
+                </select>
+              </label>
+              <label>
+                Framerate (fps)
+                <input type="number" name="framerate" min="5" max="60" step="1" />
+              </label>
+              <label>
+                Encoding
+                <select name="encoding">
+                  <option value="h264">H.264</option>
+                  <option value="hevc">HEVC</option>
+                </select>
+              </label>
+              <label>
+                Clip max length (seconds)
+                <input type="number" name="clip_max_length_s" min="10" max="600" step="5" />
+              </label>
+              <label>
+                Pre-roll (seconds)
+                <input type="number" name="pre_roll_s" min="0" max="10" step="1" />
+              </label>
+              <label>
+                Post-motion gap (seconds)
+                <input type="number" name="post_motion_gap_s" min="1" max="30" step="1" />
+              </label>
+              <label class="toggle-row">
+                <span class="toggle-text">
+                  <strong>Capture audio</strong>
+                  <span class="muted helper-text">Enable microphone input if hardware allows.</span>
+                </span>
+                <input type="checkbox" name="audio_enabled" />
+              </label>
+            </div>
+
+            <h3>Motion detection</h3>
+            <div class="surveillance-grid">
+              <label>
+                Sensitivity
+                <input
+                  type="number"
+                  name="sensitivity"
+                  min="0.01"
+                  max="1"
+                  step="0.01"
+                />
+              </label>
+              <label>
+                Minimum changed area (%)
+                <input
+                  type="number"
+                  name="min_changed_area_percent"
+                  min="0"
+                  max="100"
+                  step="0.1"
+                />
+              </label>
+              <label>
+                Minimum motion duration (ms)
+                <input type="number" name="min_motion_duration_ms" min="0" step="10" />
+              </label>
+              <label>
+                Detection FPS
+                <input type="number" name="detection_fps" min="1" max="30" step="1" />
+              </label>
+            </div>
+
+            <h3>Privacy masks</h3>
+            <p class="muted">
+              Define normalised rectangles (0–1) to exclude from motion analysis. Use up to eight masks.
+            </p>
+            <div id="privacy-mask-list" class="privacy-mask-list" role="list"></div>
+            <template id="privacy-mask-template">
+              <div class="privacy-mask-row" role="listitem">
+                <div class="privacy-mask-fields">
+                  <label>
+                    X
+                    <input type="number" data-mask-field="x" min="0" max="1" step="0.01" required />
+                  </label>
+                  <label>
+                    Y
+                    <input type="number" data-mask-field="y" min="0" max="1" step="0.01" required />
+                  </label>
+                  <label>
+                    Width
+                    <input type="number" data-mask-field="width" min="0.01" max="1" step="0.01" required />
+                  </label>
+                  <label>
+                    Height
+                    <input type="number" data-mask-field="height" min="0.01" max="1" step="0.01" required />
+                  </label>
+                </div>
+                <button type="button" class="secondary-button privacy-mask-remove">Remove</button>
+              </div>
+            </template>
+            <div class="privacy-mask-actions">
+              <button type="button" id="add-privacy-mask" class="secondary-button">Add mask</button>
+              <span id="privacy-mask-status" class="muted helper-text"></span>
+            </div>
+
+            <h3>Actions on motion</h3>
+            <div class="surveillance-grid">
+              <label class="toggle-row">
+                <span class="toggle-text">
+                  <strong>Record clip</strong>
+                  <span class="muted helper-text">Turn off to run detection without saving video.</span>
+                </span>
+                <input type="checkbox" name="record_on_motion" />
+              </label>
+              <label>
+                LED behaviour
+                <select name="led_behaviour">
+                  <option value="off">Off</option>
+                  <option value="steady">Steady</option>
+                  <option value="flash">Flash</option>
+                </select>
+              </label>
+              <label>
+                Flash rate (Hz)
+                <input type="number" name="led_flash_rate_hz" min="0.5" max="10" step="0.5" />
+              </label>
+              <label>
+                Webhook URL
+                <input type="url" name="webhook_url" placeholder="https://example.com/webhook" />
+              </label>
+              <label>
+                Webhook method
+                <select name="webhook_method">
+                  <option value="POST">POST</option>
+                  <option value="PUT">PUT</option>
+                  <option value="GET">GET</option>
+                </select>
+              </label>
+              <label>
+                Webhook payload template
+                <textarea
+                  name="webhook_payload_template"
+                  rows="3"
+                  placeholder='{"clip_id": "{{id}}"}'
+                ></textarea>
+              </label>
+            </div>
+
+            <h3>Storage &amp; retention</h3>
+            <div class="surveillance-grid">
+              <label>
+                Max age (days)
+                <input type="number" name="storage_max_days" min="0" step="1" />
+              </label>
+              <label>
+                Max size (GB)
+                <input type="number" name="storage_max_size_gb" min="0" step="0.1" />
+              </label>
+              <label>
+                Export path override
+                <input type="text" name="export_path" placeholder="/var/lib/revcam/exports" />
+              </label>
+            </div>
+
+            <div class="form-actions">
+              <button type="submit">Save surveillance settings</button>
+              <span id="surveillance-status" class="muted helper-text status-text"></span>
+            </div>
+          </form>
+
+          <section class="card" id="surveillance-maintenance">
+            <h2>Maintenance</h2>
+            <p class="muted">
+              Run quick actions to verify the pipeline or reclaim space without waiting for the automatic schedule.
+            </p>
+            <div class="surveillance-maintenance-actions">
+              <button type="button" id="simulate-motion" class="secondary-button">Simulate motion event</button>
+              <button type="button" id="purge-storage" class="danger-button">Run retention purge</button>
+            </div>
+            <p id="surveillance-maintenance-status" class="muted helper-text status-text"></p>
+          </section>
         </section>
 
             <section
@@ -3002,6 +3257,32 @@
           }
         }
       }
+      const surveillanceForm = document.getElementById("surveillance-settings-form");
+      const surveillanceStatus = document.getElementById("surveillance-status");
+      const surveillanceSubmitButton = surveillanceForm
+        ? surveillanceForm.querySelector('button[type="submit"]')
+        : null;
+      const ledBehaviourSelect = surveillanceForm
+        ? surveillanceForm.querySelector('select[name="led_behaviour"]')
+        : null;
+      const flashRateInput = surveillanceForm
+        ? surveillanceForm.querySelector('input[name="led_flash_rate_hz"]')
+        : null;
+      const surveillanceMaintenanceStatus = document.getElementById(
+        "surveillance-maintenance-status"
+      );
+      const privacyMaskList = document.getElementById("privacy-mask-list");
+      const privacyMaskTemplate = document.getElementById("privacy-mask-template");
+      const addPrivacyMaskButton = document.getElementById("add-privacy-mask");
+      const privacyMaskStatus = document.getElementById("privacy-mask-status");
+      const simulateMotionButton = document.getElementById("simulate-motion");
+      const purgeStorageButton = document.getElementById("purge-storage");
+      const MAX_PRIVACY_MASKS = 8;
+      let surveillanceSettingsCache = null;
+      let surveillanceStatusTimer = null;
+      let privacyMaskStatusTimer = null;
+      let surveillanceSaving = false;
+      let surveillanceMaintenanceTimer = null;
       const form = document.getElementById("orientation-form");
       const statusLabel = document.getElementById("status");
       const versionValue = document.getElementById("version-value");
@@ -3080,6 +3361,391 @@
       }
 
       setHotspotPasswordVisibility(false);
+
+      function setSurveillanceStatus(message, options = {}) {
+        if (!surveillanceStatus) {
+          return;
+        }
+        if (surveillanceStatusTimer) {
+          window.clearTimeout(surveillanceStatusTimer);
+          surveillanceStatusTimer = null;
+        }
+        surveillanceStatus.textContent = message || "";
+        if (message && options.persistent !== true) {
+          surveillanceStatusTimer = window.setTimeout(() => {
+            if (surveillanceStatus && surveillanceStatus.textContent === message) {
+              surveillanceStatus.textContent = "";
+            }
+            surveillanceStatusTimer = null;
+          }, 4000);
+        }
+      }
+
+      function setPrivacyMaskStatus(message, options = {}) {
+        if (!privacyMaskStatus) {
+          return;
+        }
+        if (privacyMaskStatusTimer) {
+          window.clearTimeout(privacyMaskStatusTimer);
+          privacyMaskStatusTimer = null;
+        }
+        privacyMaskStatus.textContent = message || "";
+        if (message && options.persistent !== true) {
+          privacyMaskStatusTimer = window.setTimeout(() => {
+            if (privacyMaskStatus && privacyMaskStatus.textContent === message) {
+              privacyMaskStatus.textContent = "";
+            }
+            privacyMaskStatusTimer = null;
+          }, 4000);
+        }
+      }
+
+      function setSurveillanceMaintenanceStatus(message, options = {}) {
+        if (!surveillanceMaintenanceStatus) {
+          return;
+        }
+        if (surveillanceMaintenanceTimer) {
+          window.clearTimeout(surveillanceMaintenanceTimer);
+          surveillanceMaintenanceTimer = null;
+        }
+        surveillanceMaintenanceStatus.textContent = message || "";
+        if (message && options.persistent !== true) {
+          surveillanceMaintenanceTimer = window.setTimeout(() => {
+            if (
+              surveillanceMaintenanceStatus &&
+              surveillanceMaintenanceStatus.textContent === message
+            ) {
+              surveillanceMaintenanceStatus.textContent = "";
+            }
+            surveillanceMaintenanceTimer = null;
+          }, 4000);
+        }
+      }
+
+      function createPrivacyMaskRow(values = {}) {
+        let element = null;
+        if (privacyMaskTemplate instanceof HTMLTemplateElement) {
+          const templateChild = privacyMaskTemplate.content.firstElementChild;
+          if (templateChild) {
+            element = templateChild.cloneNode(true);
+          }
+        }
+        if (!(element instanceof HTMLElement)) {
+          element = document.createElement("div");
+          element.className = "privacy-mask-row";
+          element.innerHTML =
+            '<div class="privacy-mask-fields">' +
+            '<label>X<input type="number" data-mask-field="x" min="0" max="1" step="0.01" required /></label>' +
+            '<label>Y<input type="number" data-mask-field="y" min="0" max="1" step="0.01" required /></label>' +
+            '<label>Width<input type="number" data-mask-field="width" min="0.01" max="1" step="0.01" required /></label>' +
+            '<label>Height<input type="number" data-mask-field="height" min="0.01" max="1" step="0.01" required /></label>' +
+            '</div>' +
+            '<button type="button" class="secondary-button privacy-mask-remove">Remove</button>';
+        }
+        const inputs = element.querySelectorAll('[data-mask-field]');
+        inputs.forEach((input) => {
+          if (!(input instanceof HTMLInputElement)) {
+            return;
+          }
+          const field = input.dataset.maskField || "";
+          if (field && Object.prototype.hasOwnProperty.call(values, field)) {
+            const numeric = Number(values[field]);
+            input.value = Number.isFinite(numeric) ? numeric : "";
+          } else {
+            input.value = "";
+          }
+          input.addEventListener("input", () => {
+            if (privacyMaskStatusTimer) {
+              window.clearTimeout(privacyMaskStatusTimer);
+              privacyMaskStatusTimer = null;
+            }
+            if (privacyMaskStatus) {
+              privacyMaskStatus.textContent = "";
+            }
+          });
+        });
+        const removeButton = element.querySelector(".privacy-mask-remove");
+        if (removeButton instanceof HTMLButtonElement) {
+          removeButton.addEventListener("click", () => {
+            element.remove();
+            setPrivacyMaskStatus("Mask removed");
+          });
+        }
+        return element;
+      }
+
+      function renderPrivacyMasks(masks = []) {
+        if (!privacyMaskList) {
+          return;
+        }
+        privacyMaskList.replaceChildren();
+        const items = Array.isArray(masks) ? masks : [];
+        const limited = items.slice(0, MAX_PRIVACY_MASKS);
+        for (const mask of limited) {
+          const row = createPrivacyMaskRow(mask);
+          privacyMaskList.appendChild(row);
+        }
+        if (items.length > MAX_PRIVACY_MASKS) {
+          setPrivacyMaskStatus("Showing first eight masks.", { persistent: true });
+        }
+      }
+
+      function getPrivacyMasksFromForm() {
+        if (!privacyMaskList) {
+          return [];
+        }
+        const rows = Array.from(privacyMaskList.querySelectorAll(".privacy-mask-row"));
+        const results = [];
+        for (const row of rows) {
+          const entry = {};
+          const inputs = row.querySelectorAll('[data-mask-field]');
+          let valid = true;
+          inputs.forEach((input) => {
+            if (!valid || !(input instanceof HTMLInputElement)) {
+              return;
+            }
+            const field = input.dataset.maskField || "";
+            if (!field) {
+              return;
+            }
+            if (!input.value) {
+              input.reportValidity();
+              input.focus({ preventScroll: true });
+              valid = false;
+              return;
+            }
+            const value = Number(input.value);
+            if (!Number.isFinite(value)) {
+              input.reportValidity();
+              input.focus({ preventScroll: true });
+              valid = false;
+              return;
+            }
+            entry[field] = value;
+          });
+          if (!valid) {
+            return null;
+          }
+          if (Object.keys(entry).length) {
+            results.push(entry);
+          }
+        }
+        return results;
+      }
+
+      function ensureSelectOption(select, value, label) {
+        if (!(select instanceof HTMLSelectElement)) {
+          return;
+        }
+        if (typeof value !== "string" || !value) {
+          return;
+        }
+        const exists = Array.from(select.options).some((option) => option.value === value);
+        if (!exists) {
+          const option = new Option(label || value, value, false, false);
+          select.appendChild(option);
+        }
+      }
+
+      function updateFlashRateState() {
+        if (!flashRateInput) {
+          return;
+        }
+        const behaviour = ledBehaviourSelect ? ledBehaviourSelect.value : "";
+        const shouldEnable = behaviour === "flash";
+        flashRateInput.disabled = !shouldEnable;
+        if (shouldEnable) {
+          flashRateInput.required = true;
+        } else {
+          flashRateInput.required = false;
+        }
+      }
+
+      function applySurveillanceSettings(settings, options = {}) {
+        if (!surveillanceForm) {
+          return;
+        }
+        const data = settings && typeof settings === "object" ? { ...settings } : {};
+        surveillanceSettingsCache = data;
+        if (options.clearStatus === true) {
+          setSurveillanceStatus("");
+        }
+        const resolutionSelect = surveillanceForm.querySelector('select[name="resolution"]');
+        const resolutionValue = typeof data.resolution === "string" ? data.resolution : "1280x720";
+        if (resolutionSelect instanceof HTMLSelectElement) {
+          const label = resolutionValue.includes("x")
+            ? resolutionValue
+                .split("x")
+                .map((part) => part.trim())
+                .filter((part) => part)
+                .join(" × ")
+            : resolutionValue;
+          ensureSelectOption(resolutionSelect, resolutionValue, label);
+          resolutionSelect.value = resolutionValue;
+        }
+        const setNumber = (name, value) => {
+          const input = surveillanceForm.querySelector(`[name="${name}"]`);
+          if (input instanceof HTMLInputElement) {
+            if (Number.isFinite(value)) {
+              input.value = Number(value);
+            } else {
+              input.value = "";
+            }
+          }
+        };
+        const setCheckbox = (name, value) => {
+          const input = surveillanceForm.querySelector(`[name="${name}"]`);
+          if (input instanceof HTMLInputElement) {
+            input.checked = value === true;
+          }
+        };
+        const setText = (name, value) => {
+          const field = surveillanceForm.querySelector(`[name="${name}"]`);
+          if (field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement) {
+            field.value = typeof value === "string" ? value : "";
+          } else if (field instanceof HTMLSelectElement && typeof value === "string") {
+            ensureSelectOption(field, value, value);
+            field.value = value;
+          }
+        };
+        const encodingValue =
+          typeof data.encoding === "string" && data.encoding ? data.encoding : "h264";
+        const framerateValue = Number.isFinite(data.framerate) ? data.framerate : 15;
+        setNumber("framerate", framerateValue);
+        setText("encoding", encodingValue);
+        setNumber("clip_max_length_s", data.clip_max_length_s);
+        setNumber("pre_roll_s", data.pre_roll_s);
+        setNumber("post_motion_gap_s", data.post_motion_gap_s);
+        setCheckbox("audio_enabled", data.audio_enabled);
+        setNumber("sensitivity", data.sensitivity);
+        setNumber("min_changed_area_percent", data.min_changed_area_percent);
+        setNumber("min_motion_duration_ms", data.min_motion_duration_ms);
+        setNumber("detection_fps", data.detection_fps);
+        setCheckbox("record_on_motion", data.record_on_motion);
+        const behaviourValue =
+          typeof data.led_behaviour === "string" && data.led_behaviour
+            ? data.led_behaviour
+            : "steady";
+        setText("led_behaviour", behaviourValue);
+        const flashRateValue = Number.isFinite(data.led_flash_rate_hz)
+          ? data.led_flash_rate_hz
+          : 2;
+        setNumber("led_flash_rate_hz", flashRateValue);
+        setText("webhook_url", data.webhook_url);
+        const webhookMethodValue =
+          typeof data.webhook_method === "string" && data.webhook_method
+            ? data.webhook_method
+            : "POST";
+        setText("webhook_method", webhookMethodValue);
+        setText("webhook_payload_template", data.webhook_payload_template);
+        if (typeof data.storage_max_days === "number" && Number.isFinite(data.storage_max_days)) {
+          setNumber("storage_max_days", data.storage_max_days);
+        } else {
+          setNumber("storage_max_days", "");
+        }
+        if (
+          typeof data.storage_max_size_gb === "number" &&
+          Number.isFinite(data.storage_max_size_gb)
+        ) {
+          setNumber("storage_max_size_gb", data.storage_max_size_gb);
+        } else {
+          setNumber("storage_max_size_gb", "");
+        }
+        setText("export_path", data.export_path);
+        renderPrivacyMasks(Array.isArray(data.privacy_masks) ? data.privacy_masks : []);
+        setPrivacyMaskStatus("");
+        updateFlashRateState();
+      }
+
+      function readSurveillanceForm() {
+        if (!surveillanceForm) {
+          return null;
+        }
+        if (!surveillanceForm.reportValidity()) {
+          return null;
+        }
+        const formData = new FormData(surveillanceForm);
+        const getNumber = (name) => {
+          const raw = formData.get(name);
+          if (raw === null || raw === "") {
+            return null;
+          }
+          const value = Number(raw);
+          return Number.isFinite(value) ? value : null;
+        };
+        const getInt = (name, fallback = null) => {
+          const value = getNumber(name);
+          if (value === null) {
+            return fallback;
+          }
+          return Math.round(value);
+        };
+        const masks = getPrivacyMasksFromForm();
+        if (masks === null) {
+          return null;
+        }
+        const resolution = formData.get("resolution");
+        const encoding = formData.get("encoding");
+        const ledBehaviour = formData.get("led_behaviour");
+        const webhookMethod = formData.get("webhook_method") || "POST";
+        let ledFlashRate = getNumber("led_flash_rate_hz");
+        if (
+          (ledFlashRate === null || !Number.isFinite(ledFlashRate)) &&
+          surveillanceSettingsCache &&
+          Number.isFinite(surveillanceSettingsCache.led_flash_rate_hz)
+        ) {
+          ledFlashRate = Number(surveillanceSettingsCache.led_flash_rate_hz);
+        }
+        const webhookUrlRaw = formData.get("webhook_url");
+        const webhookPayloadRaw = formData.get("webhook_payload_template");
+        const exportPathRaw = formData.get("export_path");
+        const payload = {
+          resolution: typeof resolution === "string" && resolution ? resolution : undefined,
+          framerate: getInt("framerate", surveillanceSettingsCache?.framerate ?? 15),
+          encoding: typeof encoding === "string" && encoding ? encoding : "h264",
+          clip_max_length_s: getInt(
+            "clip_max_length_s",
+            surveillanceSettingsCache?.clip_max_length_s ?? 120
+          ),
+          pre_roll_s: getInt("pre_roll_s", surveillanceSettingsCache?.pre_roll_s ?? 3),
+          post_motion_gap_s: getInt(
+            "post_motion_gap_s",
+            surveillanceSettingsCache?.post_motion_gap_s ?? 4
+          ),
+          audio_enabled: surveillanceForm.querySelector('[name="audio_enabled"]')?.checked || false,
+          sensitivity: getNumber("sensitivity") ?? surveillanceSettingsCache?.sensitivity ?? 0.5,
+          min_changed_area_percent:
+            getNumber("min_changed_area_percent") ??
+            surveillanceSettingsCache?.min_changed_area_percent ??
+            1.5,
+          min_motion_duration_ms:
+            getInt("min_motion_duration_ms", surveillanceSettingsCache?.min_motion_duration_ms ?? 750),
+          detection_fps:
+            getInt("detection_fps", surveillanceSettingsCache?.detection_fps ?? 6),
+          privacy_masks: masks,
+          record_on_motion:
+            surveillanceForm.querySelector('[name="record_on_motion"]')?.checked !== false,
+          led_behaviour:
+            typeof ledBehaviour === "string" && ledBehaviour ? ledBehaviour : "steady",
+          led_flash_rate_hz: ledFlashRate ?? 2,
+          webhook_url:
+            typeof webhookUrlRaw === "string" && webhookUrlRaw.trim()
+              ? webhookUrlRaw.trim()
+              : null,
+          webhook_method: typeof webhookMethod === "string" ? webhookMethod : "POST",
+          webhook_payload_template:
+            typeof webhookPayloadRaw === "string" && webhookPayloadRaw.trim()
+              ? webhookPayloadRaw.trim()
+              : null,
+          storage_max_days: getInt("storage_max_days"),
+          storage_max_size_gb: getNumber("storage_max_size_gb"),
+          export_path:
+            typeof exportPathRaw === "string" && exportPathRaw.trim()
+              ? exportPathRaw.trim()
+              : null,
+        };
+        return payload;
+      }
 
       function formatLedPatternName(name) {
         if (typeof name !== "string" || !name) {
@@ -7610,6 +8276,159 @@
         });
       }
 
+      if (addPrivacyMaskButton && privacyMaskList) {
+        addPrivacyMaskButton.addEventListener("click", () => {
+          const count = privacyMaskList.querySelectorAll(".privacy-mask-row").length;
+          if (count >= MAX_PRIVACY_MASKS) {
+            setPrivacyMaskStatus(`Maximum of ${MAX_PRIVACY_MASKS} masks reached.`, {
+              persistent: true,
+            });
+            return;
+          }
+          const row = createPrivacyMaskRow();
+          privacyMaskList.appendChild(row);
+          const firstInput = row.querySelector('input[data-mask-field]');
+          if (firstInput instanceof HTMLInputElement) {
+            firstInput.focus({ preventScroll: true });
+          }
+          setPrivacyMaskStatus("Mask added");
+        });
+      }
+
+      if (ledBehaviourSelect) {
+        ledBehaviourSelect.addEventListener("change", () => {
+          updateFlashRateState();
+        });
+        updateFlashRateState();
+      }
+
+      if (surveillanceForm) {
+        surveillanceForm.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          if (surveillanceSaving) {
+            return;
+          }
+          const payload = readSurveillanceForm();
+          if (!payload) {
+            setSurveillanceStatus("Please fix the highlighted fields.", {
+              persistent: true,
+            });
+            return;
+          }
+          surveillanceSaving = true;
+          if (surveillanceSubmitButton instanceof HTMLButtonElement) {
+            surveillanceSubmitButton.disabled = true;
+          }
+          setSurveillanceStatus("Saving…", { persistent: true });
+          try {
+            const response = await fetch("/api/surv/settings", {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload),
+            });
+            if (!response.ok) {
+              let detail = "Unable to save surveillance settings.";
+              try {
+                const error = await response.json();
+                if (error && typeof error.detail === "string" && error.detail.trim()) {
+                  detail = error.detail.trim();
+                }
+              } catch (err) {
+                console.error(err);
+              }
+              setSurveillanceStatus(`Error: ${detail}`, { persistent: true });
+              return;
+            }
+            const data = await response.json();
+            applySurveillanceSettings(data, { clearStatus: true });
+            setSurveillanceStatus("Surveillance settings updated");
+          } catch (error) {
+            console.error(error);
+            setSurveillanceStatus(
+              error instanceof Error
+                ? error.message
+                : "Unable to save surveillance settings.",
+              { persistent: true }
+            );
+          } finally {
+            surveillanceSaving = false;
+            if (surveillanceSubmitButton instanceof HTMLButtonElement) {
+              surveillanceSubmitButton.disabled = false;
+            }
+          }
+        });
+      }
+
+      if (simulateMotionButton) {
+        simulateMotionButton.addEventListener("click", async () => {
+          setSurveillanceMaintenanceStatus("Simulating motion…");
+          try {
+            const response = await fetch("/api/surv/test-motion", { method: "POST" });
+            if (!response.ok) {
+              let detail = "Motion test failed.";
+              try {
+                const error = await response.json();
+                if (error && typeof error.detail === "string" && error.detail.trim()) {
+                  detail = error.detail.trim();
+                }
+              } catch (err) {
+                console.error(err);
+              }
+              setSurveillanceMaintenanceStatus(detail, { persistent: true });
+              return;
+            }
+            setSurveillanceMaintenanceStatus("Test motion triggered.");
+          } catch (error) {
+            console.error(error);
+            setSurveillanceMaintenanceStatus(
+              error instanceof Error ? error.message : "Unable to trigger motion test.",
+              { persistent: true }
+            );
+          }
+        });
+      }
+
+      if (purgeStorageButton) {
+        purgeStorageButton.addEventListener("click", async () => {
+          const confirmPurge = window.confirm(
+            "Run the retention purge now? Older clips will be deleted."
+          );
+          if (!confirmPurge) {
+            return;
+          }
+          setSurveillanceMaintenanceStatus("Purging storage…", { persistent: true });
+          try {
+            const response = await fetch("/api/surv/purge", { method: "POST" });
+            if (!response.ok) {
+              let detail = "Unable to purge surveillance clips.";
+              try {
+                const error = await response.json();
+                if (error && typeof error.detail === "string" && error.detail.trim()) {
+                  detail = error.detail.trim();
+                }
+              } catch (err) {
+                console.error(err);
+              }
+              setSurveillanceMaintenanceStatus(`Error: ${detail}`, { persistent: true });
+              return;
+            }
+            const data = await response.json();
+            const removed = Number(data?.purged) || 0;
+            setSurveillanceMaintenanceStatus(
+              removed > 0
+                ? `Purged ${removed} clip${removed === 1 ? "" : "s"}.`
+                : "No clips needed purging."
+            );
+          } catch (error) {
+            console.error(error);
+            setSurveillanceMaintenanceStatus(
+              error instanceof Error ? error.message : "Unable to purge storage.",
+              { persistent: true }
+            );
+          }
+        });
+      }
+
       if (wifiRefreshButton) {
         wifiRefreshButton.addEventListener("click", () => {
           refreshWifiStatus().catch((err) => console.error(err));
@@ -7674,12 +8493,14 @@
           distanceResponse,
           reversingResponse,
           ledResponse,
+          surveillanceResponse,
         ] = await Promise.all([
           fetch("/api/orientation"),
           fetch("/api/camera"),
           fetch("/api/distance"),
           fetch("/api/reversing-aids"),
           fetch("/api/led"),
+          fetch("/api/surv/settings"),
         ]);
         if (!orientationResponse.ok) {
           throw new Error("Unable to fetch current orientation");
@@ -7696,18 +8517,23 @@
         if (!ledResponse.ok) {
           throw new Error("Unable to fetch LED configuration");
         }
+        if (!surveillanceResponse.ok) {
+          throw new Error("Unable to fetch surveillance settings");
+        }
         const [
           orientationData,
           cameraData,
           distanceData,
           reversingData,
           ledData,
+          surveillanceData,
         ] = await Promise.all([
           orientationResponse.json(),
           cameraResponse.json(),
           distanceResponse.json(),
           reversingResponse.json(),
           ledResponse.json(),
+          surveillanceResponse.json(),
         ]);
         return {
           orientation: orientationData,
@@ -7715,6 +8541,7 @@
           distance: distanceData,
           reversing: reversingData,
           led: ledData,
+          surveillance: surveillanceData,
         };
       }
 
@@ -7725,6 +8552,7 @@
         ledHasLoaded = true;
         applyDistanceData(data.distance, { updateInputs: true, updateCalibration: true });
         applyReversingAids(data.reversing, { forceUpdate: true });
+        applySurveillanceSettings(data.surveillance, { clearStatus: true });
       }
 
       form.addEventListener("submit", async (event) => {
@@ -7780,11 +8608,12 @@
           statusLabel.textContent = "Error: " + errorDetail;
           try {
             const data = await fetchSettings();
-            applySettings(data.orientation, data.camera, statusLabel.textContent);
-            applyLedStatus(data.led, { forceUpdate: true });
-            ledHasLoaded = true;
-            applyDistanceData(data.distance, { updateInputs: true, updateCalibration: true });
-            applyReversingAids(data.reversing, { forceUpdate: true });
+          applySettings(data.orientation, data.camera, statusLabel.textContent);
+          applyLedStatus(data.led, { forceUpdate: true });
+          ledHasLoaded = true;
+          applyDistanceData(data.distance, { updateInputs: true, updateCalibration: true });
+          applyReversingAids(data.reversing, { forceUpdate: true });
+          applySurveillanceSettings(data.surveillance, { clearStatus: true });
           } catch (err) {
             console.error(err);
           }
@@ -7797,6 +8626,7 @@
           ledHasLoaded = true;
           applyDistanceData(data.distance, { updateInputs: true, updateCalibration: true });
           applyReversingAids(data.reversing, { forceUpdate: true });
+          applySurveillanceSettings(data.surveillance, { clearStatus: true });
         } catch (err) {
           console.error(err);
           statusLabel.textContent = "Settings saved";

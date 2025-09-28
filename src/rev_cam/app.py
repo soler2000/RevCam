@@ -625,6 +625,10 @@ def create_app(
     async def settings() -> str:
         return _load_static("settings.html")
 
+    @app.get("/surveillance", response_class=HTMLResponse)
+    async def surveillance_page() -> str:
+        return _load_static("surveillance.html")
+
     @app.get("/images/{asset}")
     async def get_image(asset: str):
         safe_name = Path(asset).name

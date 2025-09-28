@@ -97,6 +97,11 @@
         border-top: 1px solid var(--border-subtle);
         box-shadow: var(--shadow-top-md);
       }
+      .footer-links {
+        display: flex;
+        gap: var(--space-sm);
+        flex-wrap: wrap;
+      }
       strong.brand {
         font-size: 1.25rem;
         letter-spacing: 0.04em;
@@ -828,7 +833,10 @@
         <button id="reconnect" type="button">Reconnect</button>
         <button id="save-snapshot" type="button">Save snapshot</button>
       </div>
-      <a class="settings-link" href="/settings">Settings</a>
+      <div class="footer-links">
+        <a class="settings-link" href="/surveillance">Surveillance</a>
+        <a class="settings-link" href="/settings">Settings</a>
+      </div>
     </footer>
     <script>
       const statusLabel = document.getElementById("status");
