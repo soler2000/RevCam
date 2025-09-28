@@ -32,6 +32,18 @@ def test_reversing_aids_overlay_disabled() -> None:
     assert not np.any(result)
 
 
+def test_reversing_aids_overlay_respects_enabled_provider() -> None:
+    overlay = create_reversing_aids_overlay(
+        lambda: DEFAULT_REVERSING_AIDS,
+        enabled_provider=lambda: False,
+    )
+    frame = np.zeros((160, 240, 3), dtype=np.uint8)
+
+    result = overlay(frame.copy())
+
+    assert np.array_equal(result, frame)
+
+
 def test_reversing_aids_overlay_handles_non_numpy() -> None:
     overlay = create_reversing_aids_overlay(lambda: DEFAULT_REVERSING_AIDS)
     frame = [[0, 0, 0], [0, 0, 0]]

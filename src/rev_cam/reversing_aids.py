@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Callable
 
 try:  # pragma: no cover - optional dependency on numpy for overlays
@@ -16,6 +17,8 @@ except ImportError:  # pragma: no cover - optional dependency
 
 from .config import ReversingAidsConfig, ReversingAidSegment
 
+logger = logging.getLogger(__name__)
+
 OverlayFn = Callable[[object], object]
 
 _SEGMENT_COLOURS: tuple[tuple[int, int, int], ...] = (
@@ -26,13 +29,22 @@ _SEGMENT_COLOURS: tuple[tuple[int, int, int], ...] = (
 
 
 def create_reversing_aids_overlay(
-    config_provider: Callable[[], ReversingAidsConfig]
+    config_provider: Callable[[], ReversingAidsConfig],
+    *,
+    enabled_provider: Callable[[], bool] | None = None,
 ) -> OverlayFn:
     """Return an overlay function that renders reversing aid guides."""
 
     def _overlay(frame: object) -> object:
         if _np is None or not isinstance(frame, _np.ndarray):  # pragma: no cover - optional path
             return frame
+
+        if enabled_provider is not None:
+            try:
+                if not enabled_provider():
+                    return frame
+            except Exception:  # pragma: no cover - defensive logging
+                logger.debug("Reversing overlay enabled provider failed", exc_info=True)
 
         config = config_provider()
         if not config.enabled:

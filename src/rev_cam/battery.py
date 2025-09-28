@@ -741,10 +741,20 @@ def create_battery_overlay(
     monitor: BatteryMonitor,
     limits_provider: Callable[[], BatteryLimits],
     wifi_status_provider: Callable[[], "WiFiStatus | None"] | None = None,
+    *,
+    enabled_provider: Callable[[], bool] | None = None,
 ):
     """Return an overlay function that renders the current battery status."""
 
     def _overlay(frame):
+        if enabled_provider is not None:
+            try:
+                if not enabled_provider():
+                    if _np is None or not isinstance(frame, _np.ndarray):
+                        monitor.read()
+                    return frame
+            except Exception:  # pragma: no cover - best effort guard
+                logger.debug("Battery overlay enabled provider failed", exc_info=True)
         if _np is None or not isinstance(frame, _np.ndarray):  # pragma: no cover - optional path
             monitor.read()
             return frame

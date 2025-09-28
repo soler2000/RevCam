@@ -49,3 +49,18 @@ def test_overlay_composition():
     pipeline.add_overlay(increment)
     processed = pipeline.process(frame)
     assert processed == increment(frame)
+
+
+def test_master_toggle_disables_overlays():
+    frame = make_frame()
+    pipeline = FramePipeline(lambda: orientation_provider(), overlay_enabled_provider=lambda: False)
+
+    def increment(data):
+        return [
+            [[min(channel + 1, 255) for channel in pixel] for pixel in row]
+            for row in data
+        ]
+
+    pipeline.add_overlay(increment)
+    processed = pipeline.process(frame)
+    assert processed == frame

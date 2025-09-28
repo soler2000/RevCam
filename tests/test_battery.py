@@ -354,6 +354,39 @@ def test_create_battery_overlay_renders_box() -> None:
     assert np.any(result != 0)
 
 
+def test_battery_overlay_respects_enabled_provider() -> None:
+    np = pytest.importorskip("numpy")
+
+    class _OverlayMonitor:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def read(self) -> BatteryReading:
+            self.calls += 1
+            return BatteryReading(
+                available=True,
+                percentage=80.0,
+                voltage=3.9,
+                current_ma=-120.0,
+                charging=False,
+                capacity_mah=900,
+                error=None,
+            )
+
+    monitor = _OverlayMonitor()
+    overlay = create_battery_overlay(
+        monitor,
+        lambda: BatteryLimits(30.0, 10.0),
+        enabled_provider=lambda: False,
+    )
+    frame = np.zeros((60, 80, 3), dtype=np.uint8)
+
+    result = overlay(frame.copy())
+
+    assert np.array_equal(result, frame)
+    assert monitor.calls == 0
+
+
 def test_battery_supervisor_triggers_shutdown_when_low() -> None:
     async def _exercise() -> None:
         reading = BatteryReading(
