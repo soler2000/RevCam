@@ -23,7 +23,7 @@ from .reversing_aids import create_reversing_aids_overlay
 from .pipeline import FramePipeline
 from .streaming import MJPEGStreamer, WebRTCManager, encode_frame_to_jpeg
 from .version import APP_VERSION
-from .wifi import WiFiError, WiFiManager
+from .wifi import WiFiCredentialStore, WiFiError, WiFiManager
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -139,7 +139,8 @@ def create_app(
 
     logger = logging.getLogger(__name__)
 
-    config_manager = ConfigManager(Path(config_path))
+    config_path = Path(config_path)
+    config_manager = ConfigManager(config_path)
 
     CALIBRATION_OFFSET_LIMIT = 5.0
     CALIBRATION_SCALE_MIN = 0.5
@@ -192,7 +193,9 @@ def create_app(
         i2c_bus=i2c_bus_override,
         calibration=config_manager.get_distance_calibration(),
     )
-    wifi_manager = wifi_manager or WiFiManager()
+    if wifi_manager is None:
+        credentials_path = config_path.with_name("wifi_credentials.json")
+        wifi_manager = WiFiManager(credential_store=WiFiCredentialStore(credentials_path))
 
     pipeline = FramePipeline(lambda: config_manager.get_orientation())
     pipeline.add_overlay(

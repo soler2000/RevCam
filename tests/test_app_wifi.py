@@ -8,7 +8,13 @@ pytest.importorskip("httpx")
 from fastapi.testclient import TestClient
 
 from rev_cam.app import create_app
-from rev_cam.wifi import WiFiError, WiFiManager, WiFiNetwork, WiFiStatus
+from rev_cam.wifi import (
+    WiFiCredentialStore,
+    WiFiError,
+    WiFiManager,
+    WiFiNetwork,
+    WiFiStatus,
+)
 
 
 class FakeWiFiBackend:
@@ -197,12 +203,14 @@ def client(
         async def aclose(self) -> None:  # pragma: no cover - used indirectly
             return None
 
+    credentials = WiFiCredentialStore(tmp_path / "wifi_credentials.json")
     manager = WiFiManager(
         backend=wifi_backend,
         rollback_timeout=0.05,
         poll_interval=0.005,
         hotspot_rollback_timeout=0.05,
         mdns_advertiser=mdns_advertiser,
+        credential_store=credentials,
     )
     monkeypatch.setattr("rev_cam.app.BatteryMonitor", lambda *args, **kwargs: _StubBatteryMonitor())
     monkeypatch.setattr("rev_cam.app.BatterySupervisor", lambda *args, **kwargs: _StubSupervisor())
@@ -308,6 +316,35 @@ def test_wifi_hotspot_password_persisted_in_status(client: TestClient) -> None:
     refreshed = client.get("/api/wifi/status")
     assert refreshed.status_code == 200
     assert refreshed.json()["hotspot_password"] is None
+
+
+def test_wifi_hotspot_password_persisted_across_restart(
+    tmp_path: Path,
+    wifi_backend: FakeWiFiBackend,
+    mdns_advertiser: FakeMDNSAdvertiser,
+) -> None:
+    credentials_path = tmp_path / "wifi_credentials.json"
+    manager = WiFiManager(
+        backend=wifi_backend,
+        rollback_timeout=0.05,
+        poll_interval=0.005,
+        hotspot_rollback_timeout=0.05,
+        mdns_advertiser=mdns_advertiser,
+        credential_store=WiFiCredentialStore(credentials_path),
+    )
+    enabled = manager.enable_hotspot("RevCam", "secret123")
+    assert enabled.hotspot_password == "secret123"
+
+    restarted = WiFiManager(
+        backend=wifi_backend,
+        rollback_timeout=0.05,
+        poll_interval=0.005,
+        hotspot_rollback_timeout=0.05,
+        mdns_advertiser=mdns_advertiser,
+        credential_store=WiFiCredentialStore(credentials_path),
+    )
+    status = restarted.get_status()
+    assert status.hotspot_password == "secret123"
 
 
 def test_wifi_hotspot_development_mode_rolls_back(client: TestClient) -> None:
@@ -418,3 +455,28 @@ def test_wifi_log_records_connection_and_hotspot_events(client: TestClient) -> N
     assert "connect_rollback" in events or "connect_success" in events
     assert "hotspot_enable_attempt" in events
     assert "hotspot_disabled" in events
+
+
+def test_wifi_network_password_reused_from_store(tmp_path: Path) -> None:
+    credentials_path = tmp_path / "wifi_credentials.json"
+    backend = FakeWiFiBackend()
+    manager = WiFiManager(
+        backend=backend,
+        rollback_timeout=0.05,
+        poll_interval=0.005,
+        hotspot_rollback_timeout=0.05,
+        credential_store=WiFiCredentialStore(credentials_path),
+    )
+    manager.connect("Cafe", "beanjuice123")
+    assert backend.connect_attempts[-1] == ("Cafe", "beanjuice123")
+
+    new_backend = FakeWiFiBackend()
+    reloaded = WiFiManager(
+        backend=new_backend,
+        rollback_timeout=0.05,
+        poll_interval=0.005,
+        hotspot_rollback_timeout=0.05,
+        credential_store=WiFiCredentialStore(credentials_path),
+    )
+    reloaded.connect("Cafe", None)
+    assert new_backend.connect_attempts[-1] == ("Cafe", "beanjuice123")

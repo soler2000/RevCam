@@ -5,13 +5,109 @@ from __future__ import annotations
 import logging
 from collections import deque
 from dataclasses import dataclass
+import json
 import math
 import subprocess
 import threading
 import time
+from pathlib import Path
 from typing import Deque, Iterable, Sequence
 
 from .mdns import MDNSAdvertiser
+
+
+class WiFiCredentialStore:
+    """Persist Wi-Fi credentials to disk for reuse across restarts."""
+
+    def __init__(self, path: Path | str = Path("data/wifi_credentials.json")) -> None:
+        self._path = Path(path)
+        self._lock = threading.Lock()
+        self._hotspot_password: str | None = None
+        self._network_passwords: dict[str, str] = {}
+        self._ensure_parent()
+        self._load()
+
+    def _ensure_parent(self) -> None:
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+
+    def _load(self) -> None:
+        if not self._path.exists():
+            return
+        try:
+            payload = json.loads(self._path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            logging.getLogger(__name__).warning("Unable to load Wi-Fi credentials: %s", exc)
+            return
+        hotspot_password = payload.get("hotspot_password")
+        if isinstance(hotspot_password, str) and hotspot_password:
+            self._hotspot_password = hotspot_password
+        else:
+            self._hotspot_password = None
+        networks = payload.get("networks")
+        if isinstance(networks, dict):
+            cleaned: dict[str, str] = {}
+            for raw_ssid, raw_password in networks.items():
+                if not isinstance(raw_ssid, str):
+                    continue
+                if not isinstance(raw_password, str) or not raw_password:
+                    continue
+                ssid = raw_ssid.strip()
+                if not ssid:
+                    continue
+                cleaned[ssid] = raw_password
+            self._network_passwords = cleaned
+        else:
+            self._network_passwords = {}
+
+    def _save_locked(self) -> None:
+        payload = {
+            "hotspot_password": self._hotspot_password,
+            "networks": dict(self._network_passwords),
+        }
+        try:
+            self._path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        except OSError as exc:
+            logging.getLogger(__name__).warning("Unable to persist Wi-Fi credentials: %s", exc)
+
+    def get_hotspot_password(self) -> str | None:
+        with self._lock:
+            return self._hotspot_password
+
+    def set_hotspot_password(self, password: str | None) -> None:
+        cleaned = password.strip() if isinstance(password, str) and password.strip() else None
+        with self._lock:
+            self._hotspot_password = cleaned
+            self._save_locked()
+
+    def get_network_password(self, ssid: str) -> str | None:
+        if not isinstance(ssid, str):
+            return None
+        identifier = ssid.strip()
+        if not identifier:
+            return None
+        with self._lock:
+            return self._network_passwords.get(identifier)
+
+    def set_network_password(self, ssid: str, password: str | None) -> None:
+        if not isinstance(ssid, str) or not ssid.strip():
+            raise ValueError("SSID must be a non-empty string")
+        identifier = ssid.strip()
+        cleaned_password = password.strip() if isinstance(password, str) and password.strip() else None
+        with self._lock:
+            if cleaned_password is None:
+                self._network_passwords.pop(identifier, None)
+            else:
+                self._network_passwords[identifier] = cleaned_password
+            self._save_locked()
+
+    def forget_network(self, ssid: str) -> None:
+        if not isinstance(ssid, str) or not ssid.strip():
+            return
+        identifier = ssid.strip()
+        with self._lock:
+            if identifier in self._network_passwords:
+                self._network_passwords.pop(identifier, None)
+                self._save_locked()
 
 
 class WiFiError(RuntimeError):
@@ -590,12 +686,14 @@ class WiFiManager:
         hotspot_rollback_timeout: float | None = 120.0,
         mdns_advertiser: MDNSAdvertiser | None = None,
         default_hotspot_ssid: str = "RevCam",
+        credential_store: WiFiCredentialStore | None = None,
     ) -> None:
         self._backend = backend or NMCLIBackend()
         self._rollback_timeout = rollback_timeout
         self._poll_interval = max(0.1, poll_interval)
         self._hotspot_profile: str | None = None
-        self._hotspot_password: str | None = None
+        self._credentials = credential_store or WiFiCredentialStore()
+        self._hotspot_password: str | None = self._credentials.get_hotspot_password()
         self._hotspot_rollback_timeout = (
             self._rollback_timeout
             if hotspot_rollback_timeout is None
@@ -635,6 +733,7 @@ class WiFiManager:
         self._backend.forget(identifier)
         if identifier == self._hotspot_profile:
             self._hotspot_profile = None
+        self._credentials.forget_network(identifier)
         status = self._fetch_status()
         return status
 
@@ -655,6 +754,11 @@ class WiFiManager:
             cleaned_password = password if password.strip() else None
         else:
             raise WiFiError("Password must be a string or null")
+        supplied_password = cleaned_password if password is not None else None
+        if cleaned_password is None:
+            stored_password = self._credentials.get_network_password(cleaned_ssid)
+            if stored_password:
+                cleaned_password = stored_password
         attempt_metadata: dict[str, object | None] = {
             "target": cleaned_ssid,
             "development_mode": development_mode,
@@ -679,6 +783,11 @@ class WiFiManager:
                 metadata=attempt_metadata,
             )
             raise
+        if supplied_password is not None:
+            try:
+                self._credentials.set_network_password(cleaned_ssid, supplied_password)
+            except ValueError:
+                pass
         status = self._apply_hotspot_password(status)
         self._update_mdns(status)
         rollback_requested = development_mode or (rollback_timeout is not None)
@@ -816,6 +925,7 @@ class WiFiManager:
             )
             raise WiFiError(f"Unable to enable hotspot: {message}") from exc
         self._hotspot_password = cleaned_password
+        self._credentials.set_hotspot_password(cleaned_password)
         status = self._apply_hotspot_password(status)
         self._hotspot_profile = status.profile or self._hotspot_profile
         self._update_mdns(status)
