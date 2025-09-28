@@ -3539,7 +3539,7 @@
         const geometry = getReversingPreviewSegments();
         const widthScale = Math.max(1, width - 1);
         const heightScale = Math.max(1, height - 1);
-        const thickness = Math.max(2, Math.round(Math.min(width, height) * 0.01));
+        const thickness = Math.max(1, Math.round(Math.min(width, height) * 0.01));
         const enabled = reversingAidsEnabledInput ? reversingAidsEnabledInput.checked : true;
         context.save();
         context.lineCap = "round";

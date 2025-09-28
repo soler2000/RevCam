@@ -62,8 +62,39 @@ def _render_reversing_aids(frame: _np.ndarray, config: ReversingAidsConfig) -> _
         _draw_segment(overlay, mask, segment, width, height, thickness, colour)
 
     filled_y, filled_x = mask.nonzero()
-    if filled_y.size:
-        frame[filled_y, filled_x] = overlay[filled_y, filled_x]
+    if not filled_y.size:
+        return frame
+
+    min_y = int(filled_y.min())
+    max_y = int(filled_y.max())
+    min_x = int(filled_x.min())
+    max_x = int(filled_x.max())
+
+    frame_region = frame[min_y : max_y + 1, min_x : max_x + 1]
+    overlay_region = overlay[min_y : max_y + 1, min_x : max_x + 1]
+    mask_region = mask[min_y : max_y + 1, min_x : max_x + 1]
+
+    coverage = mask_region > 0
+    if not _np.any(coverage):
+        return frame
+
+    if _np.all(mask_region[coverage] >= 255):
+        frame_region[coverage] = overlay_region[coverage]
+        return frame
+
+    alpha = (mask_region.astype(_np.float32) / 255.0)[..., None]
+    overlay_float = overlay_region.astype(_np.float32)
+    frame_float = frame_region.astype(_np.float32)
+    blended = overlay_float * alpha + frame_float * (1.0 - alpha)
+
+    if _np.issubdtype(frame.dtype, _np.integer):
+        info = _np.iinfo(frame.dtype)
+        blended = _np.clip(_np.rint(blended), info.min, info.max)
+    else:
+        info = _np.finfo(frame.dtype)
+        blended = _np.clip(blended, info.min, info.max)
+
+    _np.copyto(frame_region, blended.astype(frame.dtype, copy=False), where=coverage[..., None])
 
     return frame
 
