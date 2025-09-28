@@ -91,6 +91,7 @@
       strong.brand {
         font-size: 1.25rem;
         letter-spacing: 0.04em;
+        color: var(--success);
       }
       .pill {
         display: inline-flex;
@@ -273,9 +274,18 @@
         box-shadow: var(--shadow-sm);
         backdrop-filter: blur(22px);
         -webkit-backdrop-filter: blur(22px);
+        min-height: 3.25rem;
+        color: var(--text-primary);
+        transition: color var(--transition), box-shadow var(--transition),
+          border-color var(--transition);
       }
       .illumination-pill.unavailable {
         opacity: 0.6;
+      }
+      .illumination-pill.is-active {
+        color: var(--success);
+        border-color: rgba(74, 222, 128, 0.45);
+        box-shadow: var(--glow-success);
       }
       .illumination-pill button {
         flex: 0 0 auto;
@@ -286,13 +296,86 @@
         height: 2.75rem;
         padding: 0;
         border-radius: 50%;
+        background: var(--surface-1);
+        border: 1px solid transparent;
+        box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
+        transition: transform var(--transition), box-shadow var(--transition),
+          border-color var(--transition), background var(--transition);
+        color: inherit;
+      }
+      .illumination-pill button:not(:disabled):hover,
+      .illumination-pill button:not(:disabled):focus-visible {
+        background: rgba(255, 255, 255, 0.12);
+        border-color: rgba(255, 255, 255, 0.18);
+        box-shadow: 0 14px 32px rgba(0, 0, 0, 0.4);
+        transform: translateY(-1px);
+      }
+      .illumination-pill button:not(:disabled):focus-visible {
+        outline: none;
+        box-shadow: 0 14px 32px rgba(0, 0, 0, 0.4),
+          0 0 0 1px rgba(255, 255, 255, 0.25), 0 0 0 4px rgba(255, 255, 255, 0.08);
+      }
+      .illumination-pill.is-active button {
+        background: rgba(74, 222, 128, 0.12);
+        border-color: rgba(74, 222, 128, 0.45);
+        box-shadow: var(--glow-success);
+      }
+      .illumination-pill.is-active button:not(:disabled):hover,
+      .illumination-pill.is-active button:not(:disabled):focus-visible {
+        background: rgba(74, 222, 128, 0.16);
+        border-color: rgba(74, 222, 128, 0.5);
+        box-shadow: var(--glow-success), 0 0 0 1px rgba(74, 222, 128, 0.55),
+          0 0 0 4px rgba(74, 222, 128, 0.2);
       }
       .illumination-toggle-icon {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 1.4rem;
-        line-height: 1;
+        width: 1.8rem;
+        height: 1.8rem;
+      }
+      .illumination-toggle-icon .bulb-glass {
+        fill: rgba(255, 255, 255, 0.12);
+        stroke: currentColor;
+        stroke-width: 1.2;
+      }
+      .illumination-toggle-icon .bulb-base {
+        fill: currentColor;
+        opacity: 0.85;
+      }
+      .illumination-toggle-icon .bulb-filament {
+        stroke: currentColor;
+        stroke-width: 1.5;
+        stroke-linecap: round;
+      }
+      .illumination-toggle-icon .bulb-rays {
+        stroke: currentColor;
+        stroke-width: 1.4;
+        stroke-linecap: round;
+        opacity: 0;
+        transition: opacity var(--transition);
+      }
+      .illumination-pill.is-active .illumination-toggle-icon .bulb-glass {
+        fill: rgba(74, 222, 128, 0.3);
+      }
+      .illumination-pill.is-active .illumination-toggle-icon .bulb-rays {
+        opacity: 1;
+      }
+      .illumination-pill.is-active .illumination-toggle-icon .bulb-filament {
+        stroke-width: 1.8;
+      }
+      .illumination-pill.is-active .illumination-slider input[type="range"] {
+        background: linear-gradient(
+          90deg,
+          rgba(74, 222, 128, 0.45),
+          rgba(74, 222, 128, 0.2)
+        );
+        box-shadow: inset 0 0 0 1px rgba(74, 222, 128, 0.4);
+      }
+      .illumination-pill.is-active .illumination-slider input[type="range"]::-webkit-slider-thumb {
+        background: var(--success);
+        box-shadow: 0 0 0 2px rgba(74, 222, 128, 0.45);
+      }
+      .illumination-pill.is-active .illumination-slider input[type="range"]::-moz-range-thumb {
+        background: var(--success);
+        box-shadow: 0 0 0 2px rgba(74, 222, 128, 0.45);
       }
       .illumination-slider,
       .illumination-colour {
@@ -301,6 +384,10 @@
         gap: var(--space-xs);
         font-size: 0.9rem;
         color: var(--text-muted);
+      }
+      .illumination-pill.is-active .illumination-slider,
+      .illumination-pill.is-active .illumination-colour {
+        color: inherit;
       }
       .illumination-slider input[type="range"] {
         appearance: none;
@@ -401,9 +488,6 @@
       .status-pill.is-busy {
         color: var(--info);
       }
-      .status-pill.is-charging {
-        box-shadow: var(--glow-success);
-      }
       .status-copy {
         display: flex;
         flex-direction: column;
@@ -434,10 +518,6 @@
       #status,
       #status-subtext:not(:empty) {
         animation: status-reveal var(--transition) ease;
-      }
-      #status-subtext::before {
-        content: "⚡";
-        font-size: 0.8rem;
       }
       #battery-indicator {
         align-items: center;
@@ -501,6 +581,13 @@
         font-size: 0.72rem;
         color: var(--text-muted);
         white-space: nowrap;
+      }
+      .battery-pill.charging #battery-details::before {
+        content: "⚡";
+        display: inline-block;
+        margin-right: 0.35rem;
+        font-size: 0.75rem;
+        vertical-align: middle;
       }
       @keyframes status-busy-track {
         0% {
@@ -648,7 +735,32 @@
           aria-label="Enable illumination"
           title="Enable illumination"
         >
-          <span class="illumination-toggle-icon" aria-hidden="true">💡</span>
+          <svg
+            class="illumination-toggle-icon"
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+            focusable="false"
+          >
+            <path
+              class="bulb-glass"
+              d="M12 3.2a6.3 6.3 0 0 0-3.85 11.32c.18.14.28.36.28.59V17a1 1 0 0 0 1 1h5.14a1 1 0 0 0 1-1v-1.89c0-.23.1-.45.28-.59A6.3 6.3 0 0 0 12 3.2Z"
+            ></path>
+            <path
+              class="bulb-filament"
+              d="M10 13.25h4"
+            ></path>
+            <path
+              class="bulb-base"
+              d="M9.75 17h4.5v1.75a1.25 1.25 0 0 1-1.25 1.25h-2a1.25 1.25 0 0 1-1.25-1.25Z"
+            ></path>
+            <g class="bulb-rays">
+              <path d="M12 2v1.4"></path>
+              <path d="M6.6 4.6l1 1"></path>
+              <path d="M4.5 10.2h1.4"></path>
+              <path d="M17.4 5.6l-1 1"></path>
+              <path d="M18.1 10.2h1.4"></path>
+            </g>
+          </svg>
         </button>
         <label class="illumination-slider" for="illumination-intensity">
           <span>Intensity</span>
@@ -854,20 +966,12 @@
       }
 
       let statusModeText = "";
-      let statusChargingText = "";
 
       function renderStatusSubtext() {
         if (!statusSubtext) {
           return;
         }
-        const parts = [];
-        if (statusModeText) {
-          parts.push(statusModeText);
-        }
-        if (statusChargingText) {
-          parts.push(statusChargingText);
-        }
-        statusSubtext.textContent = parts.join(" · ");
+        statusSubtext.textContent = statusModeText;
       }
 
       function setStatus(message, stateHint) {
@@ -888,13 +992,10 @@
         renderStatusSubtext();
       }
 
-      function setChargingState(isCharging) {
-        const charging = Boolean(isCharging);
+      function setChargingState() {
         if (statusPill) {
-          statusPill.classList.toggle("is-charging", charging);
+          statusPill.classList.remove("is-charging");
         }
-        statusChargingText = charging ? "Charging" : "";
-        renderStatusSubtext();
       }
 
       let reconnectTimer = null;
@@ -1108,7 +1209,7 @@
               : "Battery unavailable";
           batteryDetails.textContent = fallback;
           batteryIndicator.setAttribute("aria-label", fallback);
-          setChargingState(false);
+          setChargingState();
           return;
         }
 
@@ -1120,7 +1221,7 @@
           batteryText.textContent = "—%";
           batteryDetails.textContent = "Battery unavailable";
           batteryIndicator.setAttribute("aria-label", "Battery unavailable");
-          setChargingState(false);
+          setChargingState();
           return;
         }
 
@@ -1148,18 +1249,18 @@
           const magnitude = Math.abs(data.current_ma);
           const decimals = magnitude >= 100 ? 0 : magnitude >= 10 ? 1 : 2;
           const formatted = magnitude.toFixed(decimals);
-          const suffix = data.charging === true ? "charging" : "draw";
-          detailParts.push(`${formatted} mA ${suffix}`);
-        } else if (data.charging === true) {
-          detailParts.push("Charging");
+          const suffix = data.charging === true ? "" : " draw";
+          detailParts.push(`${formatted} mA${suffix}`.trim());
         }
         const detailText = detailParts.join(" · ") || "Battery OK";
         batteryDetails.textContent = detailText;
-        batteryIndicator.setAttribute(
-          "aria-label",
-          `Battery ${rounded}%, ${detailParts.join(", ") || "status"}`,
-        );
-        setChargingState(data.charging === true);
+        const detailDescription = detailParts.join(", ") || "status";
+        const ariaParts = [`Battery ${rounded}%`, detailDescription];
+        if (data.charging === true) {
+          ariaParts.push("charging");
+        }
+        batteryIndicator.setAttribute("aria-label", ariaParts.join(", "));
+        setChargingState();
       }
 
       async function refreshBattery() {
@@ -1303,6 +1404,10 @@
 
         if (illuminationControls) {
           illuminationControls.classList.toggle("unavailable", !available);
+          illuminationControls.classList.toggle(
+            "is-active",
+            available && active,
+          );
         }
 
         if (illuminationToggle instanceof HTMLButtonElement) {
@@ -1311,6 +1416,7 @@
           illuminationToggle.setAttribute("aria-label", toggleLabel);
           illuminationToggle.title = toggleLabel;
           illuminationToggle.setAttribute("aria-pressed", active ? "true" : "false");
+          illuminationToggle.classList.toggle("is-active", available && active);
         }
 
         if (illuminationIntensityInput instanceof HTMLInputElement) {
