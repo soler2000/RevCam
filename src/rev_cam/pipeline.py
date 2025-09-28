@@ -15,12 +15,17 @@ FrameLike = Any
 OverlayFn = Callable[[FrameLike], FrameLike]
 
 
+def _overlays_enabled_default() -> bool:
+    return True
+
+
 @dataclass
 class FramePipeline:
     """Applies orientation and overlay transforms to frames."""
 
     orientation_provider: Callable[[], Orientation]
     overlays: List[OverlayFn] = field(default_factory=list)
+    overlay_enabled_provider: Callable[[], bool] = _overlays_enabled_default
 
     def add_overlay(self, overlay: OverlayFn) -> None:
         self.overlays.append(overlay)
@@ -37,6 +42,15 @@ class FramePipeline:
         return output
 
     def _apply_overlays(self, frame: FrameLike) -> FrameLike:
+        if not self.overlays:
+            return frame
+        overlays_enabled = True
+        try:
+            overlays_enabled = bool(self.overlay_enabled_provider())
+        except Exception:  # pragma: no cover - defensive guard
+            overlays_enabled = True
+        if not overlays_enabled:
+            return frame
         result = frame
         for overlay in self.overlays:
             result = overlay(result)

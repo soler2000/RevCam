@@ -31,6 +31,11 @@ from .distance import (
 DEFAULT_DISTANCE_OVERLAY_ENABLED = True
 DEFAULT_DISTANCE_USE_PROJECTED = False
 
+DEFAULT_OVERLAY_MASTER_ENABLED = True
+DEFAULT_BATTERY_OVERLAY_ENABLED = True
+DEFAULT_WIFI_OVERLAY_ENABLED = True
+DEFAULT_REVERSING_OVERLAY_ENABLED = True
+
 
 @dataclass(frozen=True, slots=True)
 class DistanceMounting:
@@ -239,6 +244,26 @@ def _parse_orientation(data: Mapping[str, Any]) -> Orientation:
     except Exception as exc:
         raise ValueError(str(exc)) from exc
     return Orientation(rotation=rotation, flip_horizontal=flip_horizontal, flip_vertical=flip_vertical)
+
+
+def _parse_overlay_flag(value: Any, *, default: bool) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        if math.isnan(float(value)):
+            raise ValueError("Overlay flags must be boolean values")
+        return bool(value)
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if not text:
+            return default
+        if text in {"true", "1", "yes", "on", "enabled"}:
+            return True
+        if text in {"false", "0", "no", "off", "disabled"}:
+            return False
+    raise ValueError("Overlay flags must be boolean values")
 
 
 def _parse_resolution(value: Any, *, default: Resolution) -> Resolution:
@@ -630,6 +655,10 @@ class ConfigManager:
             self._battery_capacity,
             self._stream_settings,
             self._reversing_aids,
+            self._overlays_master_enabled,
+            self._battery_overlay_enabled,
+            self._wifi_overlay_enabled,
+            self._reversing_overlay_enabled,
         ) = self._load()
 
     def _ensure_parent(self) -> None:
@@ -650,6 +679,10 @@ class ConfigManager:
         int,
         StreamSettings,
         ReversingAidsConfig,
+        bool,
+        bool,
+        bool,
+        bool,
     ]:
         if not self._path.exists():
             return (
@@ -665,6 +698,10 @@ class ConfigManager:
                 DEFAULT_BATTERY_CAPACITY_MAH,
                 DEFAULT_STREAM_SETTINGS,
                 DEFAULT_REVERSING_AIDS,
+                DEFAULT_OVERLAY_MASTER_ENABLED,
+                DEFAULT_BATTERY_OVERLAY_ENABLED,
+                DEFAULT_WIFI_OVERLAY_ENABLED,
+                DEFAULT_REVERSING_OVERLAY_ENABLED,
             )
         try:
             payload = json.loads(self._path.read_text())
@@ -718,6 +755,31 @@ class ConfigManager:
                 reversing_payload, default=DEFAULT_REVERSING_AIDS
             )
 
+            overlays_payload = payload.get("overlays")
+            overlay_master_enabled = DEFAULT_OVERLAY_MASTER_ENABLED
+            battery_overlay_enabled = DEFAULT_BATTERY_OVERLAY_ENABLED
+            wifi_overlay_enabled = DEFAULT_WIFI_OVERLAY_ENABLED
+            reversing_overlay_enabled = (
+                reversing_aids.enabled if isinstance(reversing_aids, ReversingAidsConfig) else DEFAULT_REVERSING_OVERLAY_ENABLED
+            )
+            if isinstance(overlays_payload, Mapping):
+                overlay_master_enabled = _parse_overlay_flag(
+                    overlays_payload.get("master"), default=DEFAULT_OVERLAY_MASTER_ENABLED
+                )
+                battery_overlay_enabled = _parse_overlay_flag(
+                    overlays_payload.get("battery"), default=DEFAULT_BATTERY_OVERLAY_ENABLED
+                )
+                wifi_overlay_enabled = _parse_overlay_flag(
+                    overlays_payload.get("wifi"), default=DEFAULT_WIFI_OVERLAY_ENABLED
+                )
+                if "distance" in overlays_payload:
+                    distance_overlay_enabled = _parse_overlay_flag(
+                        overlays_payload.get("distance"), default=distance_overlay_enabled
+                    )
+                reversing_overlay_enabled = _parse_overlay_flag(
+                    overlays_payload.get("reversing_aids"), default=reversing_overlay_enabled
+                )
+
             return (
                 orientation,
                 camera,
@@ -731,6 +793,10 @@ class ConfigManager:
                 battery_capacity,
                 stream_settings,
                 reversing_aids,
+                overlay_master_enabled,
+                battery_overlay_enabled,
+                wifi_overlay_enabled,
+                reversing_overlay_enabled,
             )
         except (OSError, ValueError) as exc:
             raise RuntimeError(f"Failed to load configuration: {exc}") from exc
@@ -753,6 +819,13 @@ class ConfigManager:
             },
             "stream": self._stream_settings.to_dict(),
             "reversing_aids": self._reversing_aids.to_dict(),
+            "overlays": {
+                "master": self._overlays_master_enabled,
+                "battery": self._battery_overlay_enabled,
+                "wifi": self._wifi_overlay_enabled,
+                "distance": self._distance_overlay_enabled,
+                "reversing_aids": self._reversing_overlay_enabled,
+            },
         }
         self._path.write_text(json.dumps(payload, indent=2))
 
@@ -831,6 +904,56 @@ class ConfigManager:
             self._save()
         return enabled
 
+    def get_overlay_master_enabled(self) -> bool:
+        with self._lock:
+            return self._overlays_master_enabled
+
+    def set_overlay_master_enabled(self, value: Any) -> bool:
+        enabled = _parse_overlay_flag(value, default=self._overlays_master_enabled)
+        with self._lock:
+            self._overlays_master_enabled = enabled
+            self._save()
+        return enabled
+
+    def get_battery_overlay_enabled(self) -> bool:
+        with self._lock:
+            return self._battery_overlay_enabled
+
+    def set_battery_overlay_enabled(self, value: Any) -> bool:
+        enabled = _parse_overlay_flag(value, default=self._battery_overlay_enabled)
+        with self._lock:
+            self._battery_overlay_enabled = enabled
+            self._save()
+        return enabled
+
+    def get_wifi_overlay_enabled(self) -> bool:
+        with self._lock:
+            return self._wifi_overlay_enabled
+
+    def set_wifi_overlay_enabled(self, value: Any) -> bool:
+        enabled = _parse_overlay_flag(value, default=self._wifi_overlay_enabled)
+        with self._lock:
+            self._wifi_overlay_enabled = enabled
+            self._save()
+        return enabled
+
+    def get_reversing_overlay_enabled(self) -> bool:
+        with self._lock:
+            return self._reversing_overlay_enabled
+
+    def set_reversing_overlay_enabled(self, value: Any) -> bool:
+        enabled = _parse_overlay_flag(value, default=self._reversing_overlay_enabled)
+        with self._lock:
+            self._reversing_overlay_enabled = enabled
+            if self._reversing_aids.enabled != enabled:
+                self._reversing_aids = ReversingAidsConfig(
+                    enabled=enabled,
+                    left=self._reversing_aids.left,
+                    right=self._reversing_aids.right,
+                )
+            self._save()
+        return enabled
+
     def get_distance_mounting(self) -> DistanceMounting:
         with self._lock:
             return self._distance_mounting
@@ -898,6 +1021,7 @@ class ConfigManager:
         aids = _parse_reversing_aids(data, default=self._reversing_aids)
         with self._lock:
             self._reversing_aids = aids
+            self._reversing_overlay_enabled = aids.enabled
             self._save()
         return aids
 

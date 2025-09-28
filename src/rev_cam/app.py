@@ -13,7 +13,12 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-from .battery import BatteryMonitor, BatterySupervisor, create_battery_overlay
+from .battery import (
+    BatteryMonitor,
+    BatterySupervisor,
+    create_battery_overlay,
+    create_wifi_overlay,
+)
 from .camera import CAMERA_SOURCES, BaseCamera, CameraError, create_camera, identify_camera
 from .config import (
     ConfigManager,
@@ -163,6 +168,14 @@ class ReversingAidsPayload(BaseModel):
     right: list[ReversingAidSegmentPayload] | None = None
 
 
+class OverlaySettingsPayload(BaseModel):
+    master_enabled: bool | None = Field(default=None)
+    battery_enabled: bool | None = Field(default=None)
+    wifi_enabled: bool | None = Field(default=None)
+    distance_enabled: bool | None = Field(default=None)
+    reversing_aids_enabled: bool | None = Field(default=None)
+
+
 class LedSettingsPayload(BaseModel):
     pattern: str | None = None
     error: bool | None = None
@@ -237,12 +250,21 @@ def create_app(
         credentials_path = config_path.with_name("wifi_credentials.json")
         wifi_manager = WiFiManager(credential_store=WiFiCredentialStore(credentials_path))
 
-    pipeline = FramePipeline(lambda: config_manager.get_orientation())
+    pipeline = FramePipeline(
+        lambda: config_manager.get_orientation(),
+        overlay_enabled_provider=config_manager.get_overlay_master_enabled,
+    )
+    pipeline.add_overlay(
+        create_wifi_overlay(
+            wifi_manager.get_status,
+            enabled_provider=config_manager.get_wifi_overlay_enabled,
+        )
+    )
     pipeline.add_overlay(
         create_battery_overlay(
             battery_monitor,
             config_manager.get_battery_limits,
-            wifi_manager.get_status,
+            enabled_provider=config_manager.get_battery_overlay_enabled,
         )
     )
     pipeline.add_overlay(
@@ -254,7 +276,12 @@ def create_app(
             display_mode_provider=config_manager.get_distance_use_projected,
         )
     )
-    pipeline.add_overlay(create_reversing_aids_overlay(config_manager.get_reversing_aids))
+    pipeline.add_overlay(
+        create_reversing_aids_overlay(
+            config_manager.get_reversing_aids,
+            enabled_provider=config_manager.get_reversing_overlay_enabled,
+        )
+    )
     camera: BaseCamera | None = None
     streamer: MJPEGStreamer | None = None
     webrtc_manager: WebRTCManager | None = None
@@ -935,6 +962,33 @@ def create_app(
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"overlay_enabled": enabled}
+
+    @app.get("/api/overlays")
+    def get_overlay_settings() -> dict[str, bool]:
+        return {
+            "master_enabled": config_manager.get_overlay_master_enabled(),
+            "battery_enabled": config_manager.get_battery_overlay_enabled(),
+            "wifi_enabled": config_manager.get_wifi_overlay_enabled(),
+            "distance_enabled": config_manager.get_distance_overlay_enabled(),
+            "reversing_aids_enabled": config_manager.get_reversing_overlay_enabled(),
+        }
+
+    @app.post("/api/overlays")
+    def update_overlay_settings(payload: OverlaySettingsPayload) -> dict[str, bool]:
+        try:
+            if payload.master_enabled is not None:
+                config_manager.set_overlay_master_enabled(payload.master_enabled)
+            if payload.battery_enabled is not None:
+                config_manager.set_battery_overlay_enabled(payload.battery_enabled)
+            if payload.wifi_enabled is not None:
+                config_manager.set_wifi_overlay_enabled(payload.wifi_enabled)
+            if payload.distance_enabled is not None:
+                config_manager.set_distance_overlay_enabled(payload.distance_enabled)
+            if payload.reversing_aids_enabled is not None:
+                config_manager.set_reversing_overlay_enabled(payload.reversing_aids_enabled)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return get_overlay_settings()
 
     @app.get("/api/reversing-aids")
     def get_reversing_aids() -> dict[str, object]:

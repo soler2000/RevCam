@@ -740,11 +740,20 @@ _BATTERY_COLOURS = {
 def create_battery_overlay(
     monitor: BatteryMonitor,
     limits_provider: Callable[[], BatteryLimits],
-    wifi_status_provider: Callable[[], "WiFiStatus | None"] | None = None,
+    *,
+    enabled_provider: Callable[[], bool] | None = None,
 ):
     """Return an overlay function that renders the current battery status."""
 
     def _overlay(frame):
+        if enabled_provider is not None:
+            try:
+                if not enabled_provider():
+                    if _np is None or not isinstance(frame, _np.ndarray):
+                        monitor.read()
+                    return frame
+            except Exception:  # pragma: no cover - best effort guard
+                logger.debug("Battery overlay enabled provider failed", exc_info=True)
         if _np is None or not isinstance(frame, _np.ndarray):  # pragma: no cover - optional path
             monitor.read()
             return frame
@@ -754,14 +763,7 @@ def create_battery_overlay(
             limits = limits_provider()
         except Exception:  # pragma: no cover - defensive guard
             limits = DEFAULT_BATTERY_LIMITS
-        wifi_status = None
-        if wifi_status_provider is not None:
-            try:
-                wifi_status = wifi_status_provider()
-            except Exception:  # pragma: no cover - best effort logging
-                logger.debug("Wi-Fi status provider failed", exc_info=True)
-                wifi_status = None
-        return _render_battery_overlay(frame, reading, limits, wifi_status)
+        return _render_battery_overlay(frame, reading, limits)
 
     return _overlay
 
@@ -770,7 +772,6 @@ def _render_battery_overlay(
     frame,
     reading: BatteryReading,
     limits: BatteryLimits,
-    wifi_status: "WiFiStatus | None" = None,
 ):
     if _np is None or not isinstance(frame, _np.ndarray):  # pragma: no cover - optional guard
         return frame
@@ -788,8 +789,6 @@ def _render_battery_overlay(
     voltage = reading.voltage if reading.available else None
     if voltage is not None and not math.isfinite(voltage):
         voltage = None
-
-    wifi_level, wifi_text = _prepare_wifi_display(wifi_status)
 
     if percentage is not None:
         percentage_text = f"{percentage:.0f}%"
@@ -813,20 +812,14 @@ def _render_battery_overlay(
     padding = 4 * scale
     text_gap = 2 * scale
 
-    wifi_icon_width, wifi_icon_height = _wifi_icon_dimensions(scale)
     battery_icon_width, battery_icon_height = _battery_icon_dimensions(scale)
 
     bar_height = max(
         glyph_height + padding * 2,
-        wifi_icon_height + padding * 2,
         battery_icon_height + padding * 2,
     )
 
     text_y = max(0, (bar_height - glyph_height) // 2)
-
-    wifi_icon_x = padding
-    wifi_icon_y = max(0, (bar_height - wifi_icon_height) // 2)
-    _draw_wifi_icon(frame, wifi_icon_x, wifi_icon_y, scale, wifi_level)
 
     battery_text_width = _measure_text(battery_text, glyph_width, char_spacing)
     if battery_text_width:
@@ -840,9 +833,74 @@ def _render_battery_overlay(
 
     battery_text_x = battery_icon_x + battery_icon_width + (text_gap if battery_text_width else 0)
 
+    text_colour = (255, 255, 255)
+
+    if battery_text_width:
+        _draw_text(frame, battery_text, battery_text_x, text_y, scale, text_colour)
+
+    return frame
+
+
+def create_wifi_overlay(
+    wifi_status_provider: Callable[[], "WiFiStatus | None"],
+    *,
+    enabled_provider: Callable[[], bool] | None = None,
+):
+    """Return an overlay function that renders the current Wi-Fi status."""
+
+    def _overlay(frame):
+        if enabled_provider is not None:
+            try:
+                if not enabled_provider():
+                    return frame
+            except Exception:  # pragma: no cover - best effort guard
+                logger.debug("Wi-Fi overlay enabled provider failed", exc_info=True)
+        if _np is None or not isinstance(frame, _np.ndarray):  # pragma: no cover - optional path
+            return frame
+
+        try:
+            status = wifi_status_provider()
+        except Exception:  # pragma: no cover - best effort logging
+            logger.debug("Wi-Fi status provider failed", exc_info=True)
+            status = None
+        return _render_wifi_overlay(frame, status)
+
+    return _overlay
+
+
+def _render_wifi_overlay(frame, status: "WiFiStatus | None"):
+    if _np is None or not isinstance(frame, _np.ndarray):  # pragma: no cover - optional guard
+        return frame
+
+    height, width = frame.shape[:2]
+    if height < 24 or width < 60:
+        return frame
+
+    wifi_level, wifi_text = _prepare_wifi_display(status)
+
+    scale = max(2, min(width, height) // 200)
+    glyph_width = _FONT_WIDTH * scale
+    glyph_height = _FONT_HEIGHT * scale
+    char_spacing = 1 * scale
+    padding = 4 * scale
+    text_gap = 2 * scale
+
+    wifi_icon_width, wifi_icon_height = _wifi_icon_dimensions(scale)
+
+    bar_height = max(
+        glyph_height + padding * 2,
+        wifi_icon_height + padding * 2,
+    )
+
+    text_y = max(0, (bar_height - glyph_height) // 2)
+
+    wifi_icon_x = padding
+    wifi_icon_y = max(0, (bar_height - wifi_icon_height) // 2)
+    _draw_wifi_icon(frame, wifi_icon_x, wifi_icon_y, scale, wifi_level)
+
     wifi_text_x = wifi_icon_x + wifi_icon_width + text_gap
     wifi_text_width = _measure_text(wifi_text, glyph_width, char_spacing)
-    max_wifi_width = max(0, battery_icon_x - text_gap - wifi_text_x)
+    max_wifi_width = max(0, width - padding - wifi_text_x)
     if wifi_text_width > max_wifi_width:
         if max_wifi_width >= glyph_width:
             wifi_text = "---"
@@ -852,12 +910,9 @@ def _render_battery_overlay(
             wifi_text_width = 0
 
     text_colour = (255, 255, 255)
-    wifi_colour = text_colour
 
     if wifi_text_width:
-        _draw_text(frame, wifi_text, wifi_text_x, text_y, scale, wifi_colour)
-    if battery_text_width:
-        _draw_text(frame, battery_text, battery_text_x, text_y, scale, text_colour)
+        _draw_text(frame, wifi_text, wifi_text_x, text_y, scale, text_colour)
 
     return frame
 
@@ -1082,4 +1137,5 @@ __all__ = [
     "DEFAULT_BATTERY_LIMITS",
     "BatterySupervisor",
     "create_battery_overlay",
+    "create_wifi_overlay",
 ]
