@@ -692,6 +692,9 @@
     <footer>
       <div class="control-group">
         <button id="toggle-stream" type="button" aria-pressed="false">Pause stream</button>
+        <button id="toggle-fullscreen" type="button" aria-pressed="false">
+          Enter full screen
+        </button>
         <button id="reconnect" type="button">Reconnect</button>
         <button id="save-snapshot" type="button">Save snapshot</button>
       </div>
@@ -703,6 +706,7 @@
       const streamVideo = document.getElementById("stream-video");
       const streamImage = document.getElementById("stream-fallback");
       const toggleButton = document.getElementById("toggle-stream");
+      const fullscreenButton = document.getElementById("toggle-fullscreen");
       const snapshotButton = document.getElementById("save-snapshot");
       const batteryIndicator = document.getElementById("battery-indicator");
       const batteryIcon = document.getElementById("battery-icon");
@@ -718,6 +722,93 @@
       const illuminationColourInput = document.getElementById("illumination-colour");
       const illuminationStatusBox = document.getElementById("illumination-status");
       const BATTERY_LEVEL_MAX = 32;
+      const isFullscreenSupported = () => {
+        if (document.fullscreenEnabled || document.webkitFullscreenEnabled) {
+          return true;
+        }
+        if (typeof streamVideo.webkitSupportsFullscreen === "boolean") {
+          return streamVideo.webkitSupportsFullscreen;
+        }
+        return typeof streamVideo.webkitEnterFullscreen === "function";
+      };
+
+      const isVideoFullscreen = () =>
+        document.fullscreenElement === streamVideo ||
+        document.webkitFullscreenElement === streamVideo ||
+        Boolean(streamVideo.webkitDisplayingFullscreen);
+
+      const updateFullscreenButtonState = () => {
+        if (!fullscreenButton) return;
+        const active = isVideoFullscreen();
+        fullscreenButton.setAttribute("aria-pressed", String(active));
+        fullscreenButton.textContent = active ? "Exit full screen" : "Enter full screen";
+      };
+
+      const requestVideoFullscreen = async () => {
+        if (!isFullscreenSupported()) {
+          return;
+        }
+
+        try {
+          if (streamVideo.requestFullscreen) {
+            await streamVideo.requestFullscreen();
+          } else if (streamVideo.webkitRequestFullscreen) {
+            streamVideo.webkitRequestFullscreen();
+          } else if (streamVideo.webkitEnterFullscreen) {
+            streamVideo.webkitEnterFullscreen();
+          } else if (streamVideo.parentElement && streamVideo.parentElement.requestFullscreen) {
+            await streamVideo.parentElement.requestFullscreen();
+          }
+        } catch (error) {
+          console.error("Unable to enter full screen", error);
+        }
+      };
+
+      const exitVideoFullscreen = async () => {
+        if (document.fullscreenElement === streamVideo || document.webkitFullscreenElement === streamVideo) {
+          if (document.exitFullscreen) {
+            await document.exitFullscreen();
+          } else if (document.webkitExitFullscreen) {
+            document.webkitExitFullscreen();
+          }
+        } else if (streamVideo.webkitDisplayingFullscreen && streamVideo.webkitExitFullscreen) {
+          streamVideo.webkitExitFullscreen();
+        }
+      };
+
+      if (fullscreenButton) {
+        if (!isFullscreenSupported()) {
+          fullscreenButton.disabled = true;
+          fullscreenButton.setAttribute("aria-disabled", "true");
+          fullscreenButton.setAttribute("aria-pressed", "false");
+        } else {
+          fullscreenButton.addEventListener("click", async () => {
+            if (isVideoFullscreen()) {
+              await exitVideoFullscreen();
+            } else {
+              await requestVideoFullscreen();
+            }
+            updateFullscreenButtonState();
+          });
+
+          const fullscreenEvents = [
+            "fullscreenchange",
+            "webkitfullscreenchange",
+            "webkitbeginfullscreen",
+            "webkitendfullscreen",
+          ];
+
+          fullscreenEvents.forEach((eventName) => {
+            const target =
+              eventName === "webkitbeginfullscreen" || eventName === "webkitendfullscreen"
+                ? streamVideo
+                : document;
+            target.addEventListener(eventName, updateFullscreenButtonState);
+          });
+
+          updateFullscreenButtonState();
+        }
+      }
       const STATUS_CLASSES = ["is-live", "is-paused", "is-error", "is-busy"];
       function applyStatusState(reference) {
         if (!statusPill) {
