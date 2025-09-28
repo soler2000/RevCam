@@ -722,6 +722,23 @@
         statusPill.classList.add(targetClass);
       }
 
+      let statusModeText = "";
+      let statusChargingText = "";
+
+      function renderStatusSubtext() {
+        if (!statusSubtext) {
+          return;
+        }
+        const parts = [];
+        if (statusModeText) {
+          parts.push(statusModeText);
+        }
+        if (statusChargingText) {
+          parts.push(statusChargingText);
+        }
+        statusSubtext.textContent = parts.join(" · ");
+      }
+
       function setStatus(message, stateHint) {
         if (statusLabel) {
           statusLabel.textContent = message;
@@ -729,14 +746,24 @@
         applyStatusState(stateHint || message);
       }
 
+      function setStreamModeLabel(mode) {
+        if (mode === "webrtc") {
+          statusModeText = "WebRTC stream";
+        } else if (mode === "mjpeg") {
+          statusModeText = "MJPEG stream";
+        } else {
+          statusModeText = "";
+        }
+        renderStatusSubtext();
+      }
+
       function setChargingState(isCharging) {
         const charging = Boolean(isCharging);
         if (statusPill) {
           statusPill.classList.toggle("is-charging", charging);
         }
-        if (statusSubtext) {
-          statusSubtext.textContent = charging ? "Charging" : "";
-        }
+        statusChargingText = charging ? "Charging" : "";
+        renderStatusSubtext();
       }
 
       let reconnectTimer = null;
@@ -1321,6 +1348,7 @@
           throw new Error("MJPEG stream element unavailable");
         }
         activeStreamMode = "mjpeg";
+        setStreamModeLabel("mjpeg");
         teardownPeerConnection();
         const cacheBuster = Date.now();
         streamImage.hidden = false;
@@ -1336,6 +1364,7 @@
           throw new Error("WebRTC streaming unsupported in this browser");
         }
         activeStreamMode = "webrtc";
+        setStreamModeLabel("webrtc");
         if (streamImage instanceof HTMLImageElement) {
           streamImage.hidden = true;
           streamImage.removeAttribute("src");
@@ -1449,6 +1478,7 @@
         shouldStream = true;
         clearReconnectTimer();
         activeStreamMode = null;
+        setStreamModeLabel(null);
         toggleButton.textContent = "Pause stream";
         toggleButton.setAttribute("aria-pressed", "true");
         setStatus(message, "busy");
@@ -1517,6 +1547,7 @@
       function stopStream(message = "Streaming paused") {
         shouldStream = false;
         activeStreamMode = null;
+        setStreamModeLabel(null);
         clearReconnectTimer();
         teardownPeerConnection();
         if (streamImage instanceof HTMLImageElement) {
