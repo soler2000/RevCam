@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from threading import Lock
@@ -28,6 +29,37 @@ from .distance import (
 )
 
 DEFAULT_DISTANCE_OVERLAY_ENABLED = True
+DEFAULT_DISTANCE_USE_PROJECTED = False
+
+
+@dataclass(frozen=True, slots=True)
+class DistanceMounting:
+    """Represents the physical installation of the distance sensor."""
+
+    mount_height_m: float = 1.5
+    mount_angle_deg: float = 40.0
+
+    def __post_init__(self) -> None:
+        try:
+            height = float(self.mount_height_m)
+            angle = float(self.mount_angle_deg)
+        except (TypeError, ValueError) as exc:  # pragma: no cover - defensive branch
+            raise ValueError("Distance mounting values must be numeric") from exc
+        if not math.isfinite(height) or height <= 0:
+            raise ValueError("Mount height must be a positive finite value")
+        if not math.isfinite(angle) or angle < 0 or angle >= 90:
+            raise ValueError("Mount angle must be between 0 and 90 degrees")
+        object.__setattr__(self, "mount_height_m", height)
+        object.__setattr__(self, "mount_angle_deg", angle)
+
+    def to_dict(self) -> dict[str, float]:
+        return {
+            "mount_height_m": float(self.mount_height_m),
+            "mount_angle_deg": float(self.mount_angle_deg),
+        }
+
+
+DEFAULT_DISTANCE_MOUNTING = DistanceMounting()
 
 
 @dataclass(frozen=True, slots=True)
@@ -440,6 +472,34 @@ def _parse_distance_calibration(
     return DistanceCalibration(offset, scale)
 
 
+def _parse_distance_mounting(
+    value: Any, *, default: DistanceMounting
+) -> DistanceMounting:
+    if value is None:
+        return default
+    if isinstance(value, DistanceMounting):
+        return DistanceMounting(value.mount_height_m, value.mount_angle_deg)
+    if isinstance(value, Mapping):
+        payload = value.get("geometry") if "geometry" in value else value
+        if not isinstance(payload, Mapping):
+            raise ValueError("Distance geometry must provide 'mount_height_m' and 'mount_angle_deg'")
+        height_raw = payload.get("mount_height_m", payload.get("height", default.mount_height_m))
+        angle_raw = payload.get("mount_angle_deg", payload.get("angle", default.mount_angle_deg))
+    elif isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        items = list(value)
+        if len(items) != 2:
+            raise ValueError("Distance geometry sequence must contain two values")
+        height_raw, angle_raw = items
+    else:
+        raise ValueError("Unsupported distance geometry value")
+    try:
+        height = float(height_raw)
+        angle = float(angle_raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Distance geometry values must be numeric") from exc
+    return DistanceMounting(height, angle)
+
+
 def _parse_distance_overlay_enabled(value: Any, *, default: bool) -> bool:
     if value is None:
         return default
@@ -466,6 +526,37 @@ def _parse_distance_overlay_enabled(value: Any, *, default: bool) -> bool:
         if normalised in {"0", "false", "no", "off", "disable", "disabled"}:
             return False
     raise ValueError("Distance overlay flag must be a boolean value")
+
+
+def _parse_distance_use_projected(value: Any, *, default: bool) -> bool:
+    if value is None:
+        return default
+    candidate: Any
+    if isinstance(value, Mapping):
+        if "use_projected_distance" in value:
+            candidate = value.get("use_projected_distance", default)
+        else:
+            distance_payload = value.get("distance") if "distance" in value else None
+            display_payload = value.get("display") if "display" in value else None
+            if isinstance(display_payload, Mapping):
+                candidate = display_payload.get("use_projected", default)
+            elif isinstance(distance_payload, Mapping):
+                candidate = distance_payload.get("use_projected_distance", default)
+            else:
+                candidate = default
+    else:
+        candidate = value
+    if isinstance(candidate, bool):
+        return candidate
+    if isinstance(candidate, (int, float)):
+        return bool(candidate)
+    if isinstance(candidate, str):
+        normalised = candidate.strip().lower()
+        if normalised in {"1", "true", "yes", "on", "projected"}:
+            return True
+        if normalised in {"0", "false", "no", "off", "actual"}:
+            return False
+    raise ValueError("Distance display mode must be a boolean value")
 
 
 def _parse_battery_limits(value: Any, *, default: BatteryLimits) -> BatteryLimits:
@@ -533,6 +624,8 @@ class ConfigManager:
             self._distance_zones,
             self._distance_calibration,
             self._distance_overlay_enabled,
+            self._distance_mounting,
+            self._distance_use_projected,
             self._battery_limits,
             self._battery_capacity,
             self._stream_settings,
@@ -551,6 +644,8 @@ class ConfigManager:
         DistanceZones,
         DistanceCalibration,
         bool,
+        DistanceMounting,
+        bool,
         BatteryLimits,
         int,
         StreamSettings,
@@ -564,6 +659,8 @@ class ConfigManager:
                 DEFAULT_DISTANCE_ZONES,
                 DEFAULT_DISTANCE_CALIBRATION,
                 DEFAULT_DISTANCE_OVERLAY_ENABLED,
+                DEFAULT_DISTANCE_MOUNTING,
+                DEFAULT_DISTANCE_USE_PROJECTED,
                 DEFAULT_BATTERY_LIMITS,
                 DEFAULT_BATTERY_CAPACITY_MAH,
                 DEFAULT_STREAM_SETTINGS,
@@ -596,6 +693,12 @@ class ConfigManager:
             distance_overlay_enabled = _parse_distance_overlay_enabled(
                 distance_payload, default=DEFAULT_DISTANCE_OVERLAY_ENABLED
             )
+            distance_mounting = _parse_distance_mounting(
+                distance_payload, default=DEFAULT_DISTANCE_MOUNTING
+            )
+            distance_use_projected = _parse_distance_use_projected(
+                distance_payload, default=DEFAULT_DISTANCE_USE_PROJECTED
+            )
 
             battery_payload = payload.get("battery")
             battery_limits = _parse_battery_limits(
@@ -622,6 +725,8 @@ class ConfigManager:
                 distance_zones,
                 distance_calibration,
                 distance_overlay_enabled,
+                distance_mounting,
+                distance_use_projected,
                 battery_limits,
                 battery_capacity,
                 stream_settings,
@@ -639,6 +744,8 @@ class ConfigManager:
                 "zones": self._distance_zones.to_dict(),
                 "calibration": self._distance_calibration.to_dict(),
                 "overlay_enabled": self._distance_overlay_enabled,
+                "geometry": self._distance_mounting.to_dict(),
+                "use_projected_distance": self._distance_use_projected,
             },
             "battery": {
                 "limits": self._battery_limits.to_dict(),
@@ -724,6 +831,30 @@ class ConfigManager:
             self._save()
         return enabled
 
+    def get_distance_mounting(self) -> DistanceMounting:
+        with self._lock:
+            return self._distance_mounting
+
+    def set_distance_mounting(
+        self, data: Mapping[str, Any] | Sequence[object] | DistanceMounting
+    ) -> DistanceMounting:
+        mounting = _parse_distance_mounting(data, default=self._distance_mounting)
+        with self._lock:
+            self._distance_mounting = mounting
+            self._save()
+        return mounting
+
+    def get_distance_use_projected(self) -> bool:
+        with self._lock:
+            return self._distance_use_projected
+
+    def set_distance_use_projected(self, value: Any) -> bool:
+        use_projected = _parse_distance_use_projected(value, default=self._distance_use_projected)
+        with self._lock:
+            self._distance_use_projected = use_projected
+            self._save()
+        return use_projected
+
     def get_battery_limits(self) -> BatteryLimits:
         with self._lock:
             return self._battery_limits
@@ -784,4 +915,7 @@ __all__ = [
     "ReversingAidPoint",
     "generate_reversing_segments",
     "DEFAULT_REVERSING_AIDS",
+    "DistanceMounting",
+    "DEFAULT_DISTANCE_MOUNTING",
+    "DEFAULT_DISTANCE_USE_PROJECTED",
 ]

@@ -581,10 +581,33 @@ _ZONE_LABELS = {
     "unavailable": "N/A",
 }
 
+
+def _projected_distance_from_mounting(mounting, measured_distance) -> float | None:
+    if mounting is None:
+        return None
+    try:
+        height = float(getattr(mounting, "mount_height_m"))
+        angle = float(getattr(mounting, "mount_angle_deg"))
+    except (AttributeError, TypeError, ValueError):
+        return None
+    angle_rad = math.radians(angle)
+    projection: float
+    if measured_distance is not None and math.isfinite(measured_distance):
+        try:
+            projection = float(measured_distance) * math.sin(angle_rad)
+        except (TypeError, ValueError):
+            return None
+    else:
+        projection = height * math.tan(angle_rad)
+    return projection if math.isfinite(projection) else None
+
 def create_distance_overlay(
     monitor: DistanceMonitor,
     zonedist_provider: Callable[[], DistanceZones],
     enabled_provider: Callable[[], bool] | None = None,
+    *,
+    geometry_provider: Callable[[], object] | None = None,
+    display_mode_provider: Callable[[], bool] | None = None,
 ):
     """Return an overlay function that renders the current distance reading."""
 
@@ -597,13 +620,39 @@ def create_distance_overlay(
             return frame
 
         zones = zonedist_provider()
-        zone = zones.classify(reading.distance_m)
-        return _render_distance_overlay(frame, reading, zone)
+        mounting = geometry_provider() if geometry_provider is not None else None
+        projection = _projected_distance_from_mounting(mounting, reading.distance_m)
+        use_projected = False
+        if display_mode_provider is not None:
+            try:
+                use_projected = bool(display_mode_provider())
+            except Exception:  # pragma: no cover - defensive guard
+                use_projected = False
+        if use_projected and projection is not None and math.isfinite(projection):
+            display_value = float(projection)
+        elif reading.distance_m is not None and math.isfinite(reading.distance_m):
+            display_value = float(reading.distance_m)
+        else:
+            display_value = None
+        zone_distance = display_value if display_value is not None else reading.distance_m
+        zone = zones.classify(zone_distance)
+        return _render_distance_overlay(
+            frame,
+            reading,
+            zone,
+            display_distance=display_value,
+        )
 
     return _overlay
 
 
-def _render_distance_overlay(frame, reading: DistanceReading, zone: str | None):
+def _render_distance_overlay(
+    frame,
+    reading: DistanceReading,
+    zone: str | None,
+    *,
+    display_distance: float | None = None,
+):
     if _np is None or not isinstance(frame, _np.ndarray):  # pragma: no cover - optional guard
         return frame
 
@@ -615,8 +664,9 @@ def _render_distance_overlay(frame, reading: DistanceReading, zone: str | None):
     colour = _ZONE_COLOURS.get(zone_key, _ZONE_COLOURS["unavailable"])
     label = _ZONE_LABELS.get(zone_key, _ZONE_LABELS["unavailable"])
 
-    if reading.distance_m is not None and math.isfinite(reading.distance_m):
-        distance_text = f"{reading.distance_m:.1f} m"
+    value = display_distance if display_distance is not None else reading.distance_m
+    if value is not None and math.isfinite(value):
+        distance_text = f"{value:.1f} m"
     else:
         distance_text = "---"
 
