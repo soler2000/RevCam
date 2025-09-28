@@ -35,11 +35,11 @@ def test_reversing_aids_overlay_handles_non_numpy() -> None:
 def test_reversing_aids_overlay_refresh_interval(monkeypatch: pytest.MonkeyPatch) -> None:
     import rev_cam.reversing_aids as reversing_aids
 
-    refreshes = 0
+    refreshes: list[int] = []
+    current_frame = 0
 
     def _fake_render(frame: np.ndarray, config: ReversingAidsConfig) -> np.ndarray:
-        nonlocal refreshes
-        refreshes += 1
+        refreshes.append(current_frame)
         frame[...] = 255
         return frame
 
@@ -49,8 +49,34 @@ def test_reversing_aids_overlay_refresh_interval(monkeypatch: pytest.MonkeyPatch
     overlay = create_reversing_aids_overlay(lambda: config)
     frame = np.zeros((120, 160, 3), dtype=np.uint8)
 
-    for _ in range(25):
+    for index in range(1, 26):
+        current_frame = index
         overlay(frame.copy())
 
-    assert refreshes == 3
+    assert refreshes == [1, 11, 21]
+
+
+def test_reversing_aids_overlay_handles_equivalent_instances(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import rev_cam.reversing_aids as reversing_aids
+
+    refreshes: list[int] = []
+    current_frame = 0
+
+    def _fake_render(frame: np.ndarray, config: ReversingAidsConfig) -> np.ndarray:
+        refreshes.append(current_frame)
+        frame[...] = 127
+        return frame
+
+    monkeypatch.setattr(reversing_aids, "_render_reversing_aids", _fake_render)
+
+    overlay = create_reversing_aids_overlay(lambda: ReversingAidsConfig())
+    frame = np.zeros((90, 120, 3), dtype=np.uint8)
+
+    for index in range(1, 16):
+        current_frame = index
+        overlay(frame.copy())
+
+    assert refreshes == [1, 11]
 

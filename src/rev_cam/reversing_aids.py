@@ -28,11 +28,12 @@ def create_reversing_aids_overlay(
     cached_overlay: _np.ndarray | None = None
     cached_mask: _np.ndarray | None = None
     cached_shape: tuple[int, ...] | None = None
-    cached_config: ReversingAidsConfig | None = None
+    cached_signature: tuple[object, ...] | None = None
     frames_since_refresh = 0
+    refresh_interval = 10
 
     def _overlay(frame: object) -> object:
-        nonlocal cached_overlay, cached_mask, cached_shape, cached_config, frames_since_refresh
+        nonlocal cached_overlay, cached_mask, cached_shape, cached_signature, frames_since_refresh
 
         if _np is None or not isinstance(frame, _np.ndarray):  # pragma: no cover - optional path
             return frame
@@ -42,18 +43,22 @@ def create_reversing_aids_overlay(
             cached_overlay = None
             cached_mask = None
             cached_shape = None
-            cached_config = None
+            cached_signature = None
             frames_since_refresh = 0
             return frame
+
+        signature = _config_signature(config)
+
+        frames_since_refresh += 1
 
         needs_refresh = False
         if cached_overlay is None or cached_mask is None:
             needs_refresh = True
         elif frame.shape != cached_shape:
             needs_refresh = True
-        elif cached_config != config:
+        elif cached_signature != signature:
             needs_refresh = True
-        elif frames_since_refresh >= 10:
+        elif frames_since_refresh > refresh_interval:
             needs_refresh = True
 
         if needs_refresh:
@@ -64,10 +69,8 @@ def create_reversing_aids_overlay(
             cached_overlay = overlay
             cached_mask = mask
             cached_shape = frame.shape
-            cached_config = config
-            frames_since_refresh = 0
-        else:
-            frames_since_refresh += 1
+            cached_signature = signature
+            frames_since_refresh = 1
 
         if cached_overlay is None or cached_mask is None:
             return frame
@@ -76,6 +79,30 @@ def create_reversing_aids_overlay(
         return frame
 
     return _overlay
+
+
+def _config_signature(config: ReversingAidsConfig) -> tuple[object, ...]:
+    return (
+        bool(config.enabled),
+        tuple(
+            (
+                float(segment.start.x),
+                float(segment.start.y),
+                float(segment.end.x),
+                float(segment.end.y),
+            )
+            for segment in config.left
+        ),
+        tuple(
+            (
+                float(segment.start.x),
+                float(segment.start.y),
+                float(segment.end.x),
+                float(segment.end.y),
+            )
+            for segment in config.right
+        ),
+    )
 
 
 def _render_reversing_aids(frame: _np.ndarray, config: ReversingAidsConfig) -> _np.ndarray:
