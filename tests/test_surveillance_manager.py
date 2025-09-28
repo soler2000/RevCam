@@ -4,6 +4,8 @@ import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
+
 from rev_cam.surveillance import ClipFilters, SurveillanceManager, SurveillanceSettings
 
 
@@ -46,19 +48,23 @@ def test_manual_record_request_creates_command_file(tmp_path):
     manager = SurveillanceManager(base_path=tmp_path)
 
     request = manager.request_manual_record(duration_s=12)
-    assert request["duration_s"] == 12
+    assert request["duration_s"] == pytest.approx(12, rel=0.01)
     assert isinstance(request["requested_at"], datetime)
+    clip = request["clip"]
+    assert clip.duration_s == pytest.approx(12, rel=0.01)
 
-    command_path = Path(request["path"])
-    assert command_path.exists()
-    payload = json.loads(command_path.read_text(encoding="utf-8"))
+    command_files = list((tmp_path / "manual_requests").glob("manual-*.json"))
+    assert command_files
+    payload = json.loads(command_files[0].read_text(encoding="utf-8"))
     assert payload["id"] == request["id"]
-    assert payload["duration_s"] == 12
+    assert payload["duration_s"] == pytest.approx(clip.duration_s, rel=0.01)
+    assert payload["clip_id"] == clip.id
 
-    # Request without explicit duration defaults to None and writes another file.
+    # Request without explicit duration defaults to a bounded automatic value.
     request2 = manager.request_manual_record()
-    assert request2["duration_s"] is None
-    assert Path(request2["path"]).exists()
+    assert request2["duration_s"] == pytest.approx(request2["clip"].duration_s, rel=0.01)
+    command_files = list((tmp_path / "manual_requests").glob("manual-*.json"))
+    assert len(command_files) >= 2
 
 
 def test_surveillance_retention(tmp_path):

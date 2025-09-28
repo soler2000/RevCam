@@ -1446,14 +1446,18 @@
               throw new Error(detail);
             }
             const payload = await response.json();
-            const durationPart =
-              typeof payload.duration_s === "number" && payload.duration_s > 0
-                ? ` (${payload.duration_s}s)`
-                : "";
-            setPlayerStatus(`Manual recording queued${durationPart}.`);
-            setTimeout(() => {
-              loadClips({ page: 1 });
-            }, 2500);
+            const clip = payload.clip;
+            if (clip && typeof clip === "object") {
+              const rounded =
+                typeof clip.duration_s === "number"
+                  ? Math.round(Number(clip.duration_s))
+                  : null;
+              const suffix = rounded && rounded > 0 ? ` (${rounded}s)` : "";
+              setPlayerStatus(`Manual recording saved${suffix}.`);
+            } else {
+              setPlayerStatus("Manual recording saved.");
+            }
+            await loadClips({ page: 1 });
           } catch (error) {
             console.error(error);
             setPlayerStatus(error instanceof Error ? error.message : "Manual record failed.");

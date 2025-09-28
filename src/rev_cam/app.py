@@ -37,9 +37,11 @@ from .pipeline import FramePipeline
 from .streaming import MJPEGStreamer, WebRTCManager, encode_frame_to_jpeg
 from .surveillance import (
     ClipFilters,
+    ModeController,
     ModeManager,
     ModeSwitchError,
     SurveillanceManager,
+    SurveillanceRuntime,
 )
 from .version import APP_VERSION
 from .wifi import WiFiCredentialStore, WiFiError, WiFiManager
@@ -217,7 +219,30 @@ def create_app(
     config_manager = ConfigManager(config_path)
     surveillance_root = Path(os.environ.get("REVCAM_SURVEILLANCE_ROOT", "data/surveillance"))
     surveillance_manager = surveillance_manager or SurveillanceManager(base_path=surveillance_root)
-    mode_manager = mode_manager or ModeManager()
+    surveillance_runtime = SurveillanceRuntime(surveillance_manager)
+
+    initial_settings = surveillance_manager.load_settings()
+    surveillance_runtime.notify_settings_updated(initial_settings)
+
+    pipeline = FramePipeline(
+        lambda: config_manager.get_orientation(),
+        overlay_enabled_provider=config_manager.get_overlay_master_enabled,
+    )
+    pipeline.add_overlay(surveillance_runtime.ingest_frame)
+
+    runtime_controllers = {
+        "surveillance": ModeController(
+            start=lambda: surveillance_runtime.set_active(True),
+            stop=lambda: surveillance_runtime.set_active(False),
+        ),
+        "reversing": ModeController(start=lambda: surveillance_runtime.set_active(False)),
+        "idle": ModeController(stop=lambda: surveillance_runtime.set_active(False)),
+    }
+    if mode_manager is None:
+        mode_manager = ModeManager(controllers=runtime_controllers, default_mode="reversing")
+    else:
+        mode_manager.update_controllers(runtime_controllers)
+    surveillance_runtime.set_active(mode_manager.current_mode() == "surveillance")
 
     CALIBRATION_OFFSET_LIMIT = 5.0
     CALIBRATION_SCALE_MIN = 0.5
@@ -274,10 +299,6 @@ def create_app(
         credentials_path = config_path.with_name("wifi_credentials.json")
         wifi_manager = WiFiManager(credential_store=WiFiCredentialStore(credentials_path))
 
-    pipeline = FramePipeline(
-        lambda: config_manager.get_orientation(),
-        overlay_enabled_provider=config_manager.get_overlay_master_enabled,
-    )
     pipeline.add_overlay(
         create_wifi_overlay(
             wifi_manager.get_status,
@@ -1319,6 +1340,7 @@ def create_app(
             settings = surveillance_manager.save_settings(payload)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+        surveillance_runtime.notify_settings_updated(settings)
         return settings.to_dict()
 
     @app.get("/api/surv/clips")
@@ -1392,26 +1414,23 @@ def create_app(
     def request_manual_record(
         payload: ManualRecordPayload = Body(default=ManualRecordPayload()),
     ) -> dict[str, Any]:
-        try:
-            request_info = surveillance_manager.request_manual_record(
-                duration_s=payload.duration_s
+        if mode_manager.current_mode() != "surveillance":
+            raise HTTPException(
+                status_code=409,
+                detail="Switch to surveillance mode before starting a manual recording.",
             )
+        try:
+            clip = surveillance_runtime.start_manual_record(duration_s=payload.duration_s)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
-        requested_at = request_info["requested_at"]
-        timestamp = (
-            requested_at.isoformat() if isinstance(requested_at, datetime) else str(requested_at)
-        )
         return {
-            "status": "queued",
-            "request_id": request_info["id"],
-            "duration_s": request_info["duration_s"],
-            "requested_at": timestamp,
+            "status": "recording",
+            "clip": clip.to_dict(),
         }
 
     @app.post("/api/surv/test-motion")
     def trigger_surveillance_test_motion() -> dict[str, Any]:
-        record = surveillance_manager.create_test_clip()
+        record = surveillance_runtime.create_test_clip()
         return {"clip": record.to_dict()}
 
     @app.post("/api/surv/purge")

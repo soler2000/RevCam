@@ -34,7 +34,10 @@ def test_surveillance_endpoints(tmp_path):
     with TestClient(app) as client:
         response = client.get("/api/mode")
         assert response.status_code == 200
-        assert response.json() == {"mode": "idle"}
+        assert response.json() == {"mode": "reversing"}
+
+        response = client.post("/api/surv/manual-record", json={"duration_s": 5})
+        assert response.status_code == 409
 
         response = client.post("/api/mode", json={"mode": "surveillance"})
         assert response.status_code == 200
@@ -52,10 +55,10 @@ def test_surveillance_endpoints(tmp_path):
         response = client.post("/api/surv/manual-record", json={"duration_s": 15})
         assert response.status_code == 200
         payload = response.json()
-        assert payload["status"] == "queued"
-        assert payload["duration_s"] == 15
-        assert payload["request_id"]
-        assert "requested_at" in payload
+        assert payload["status"] == "recording"
+        clip = payload["clip"]
+        assert clip["duration_s"] == pytest.approx(15, rel=0.05)
+        assert clip["id"]
 
         response = client.post("/api/surv/test-motion")
         assert response.status_code == 200

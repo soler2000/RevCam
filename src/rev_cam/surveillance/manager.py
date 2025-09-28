@@ -5,8 +5,9 @@ from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import RLock
-from typing import Iterable, Sequence
+from typing import Iterable, Mapping, Sequence
 
+import base64
 import hashlib
 import json
 import sqlite3
@@ -62,9 +63,7 @@ class SurveillanceManager:
         self._base_path.mkdir(parents=True, exist_ok=True)
         self._db_path = self._base_path / "index.db"
         self._exports_path = self._base_path / "exports"
-        self._manual_requests_path = self._base_path / "manual_requests"
         self._exports_path.mkdir(parents=True, exist_ok=True)
-        self._manual_requests_path.mkdir(parents=True, exist_ok=True)
         self._settings_store = (
             settings_store
             if settings_store is not None
@@ -93,10 +92,6 @@ class SurveillanceManager:
     def exports_path(self) -> Path:
         return self._exports_path
 
-    @property
-    def manual_requests_path(self) -> Path:
-        return self._manual_requests_path
-
     # ------------------------------------------------------------------
     # Manual recording
     # ------------------------------------------------------------------
@@ -117,22 +112,55 @@ class SurveillanceManager:
         else:
             duration_val = None
 
+        clip = self.create_manual_clip(duration_val)
         request_id = uuid.uuid4().hex[:12]
-        requested_at = datetime.now(timezone.utc)
+        requested_at = clip.start_ts
         payload = {
             "id": request_id,
             "requested_at": requested_at.isoformat(),
-            "duration_s": duration_val,
+            "duration_s": clip.duration_s,
+            "clip_id": clip.id,
         }
-        file_name = f"manual-{requested_at.isoformat().replace(':', '-')}-{request_id}.json"
-        path = self._manual_requests_path / file_name
-        path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+        self._write_manual_request(payload)
         return {
             "id": request_id,
-            "path": str(path),
             "requested_at": requested_at,
-            "duration_s": duration_val,
+            "duration_s": clip.duration_s,
+            "clip": clip,
         }
+
+    def create_manual_clip(self, duration_s: float | None) -> ClipRecord:
+        settings = self.load_settings()
+        duration = float(duration_s) if duration_s is not None else float(min(30, settings.clip_max_length_s))
+        if duration <= 0:
+            raise ValueError("Manual clip duration must be positive")
+        if duration > settings.clip_max_length_s:
+            duration = float(settings.clip_max_length_s)
+        end_ts = datetime.now(timezone.utc)
+        start_ts = end_ts - timedelta(seconds=duration)
+        return self._create_placeholder_clip(
+            start_ts=start_ts,
+            end_ts=end_ts,
+            has_audio=settings.audio_enabled,
+            motion_score=None,
+            reason="manual",
+        )
+
+    def create_motion_clip(
+        self,
+        *,
+        start_ts: datetime,
+        end_ts: datetime,
+        motion_score: float | None,
+    ) -> ClipRecord:
+        settings = self.load_settings()
+        return self._create_placeholder_clip(
+            start_ts=start_ts,
+            end_ts=end_ts,
+            has_audio=settings.audio_enabled,
+            motion_score=motion_score,
+            reason="motion",
+        )
 
     # ------------------------------------------------------------------
     # Clip operations
@@ -310,24 +338,13 @@ class SurveillanceManager:
         now = datetime.now(timezone.utc)
         start_ts = now - timedelta(seconds=8)
         end_ts = now
-        folder = self.ensure_day_folder(now)
-        iso = now.replace(microsecond=0).isoformat().replace("+00:00", "Z")
-        clip_id = uuid.uuid4().hex[:8]
-        clip_name = f"clip-{iso}-{clip_id}.mp4"
-        clip_path = folder / clip_name
-        clip_path.write_text("Synthetic clip placeholder", encoding="utf-8")
-        thumb_path = folder / f"clip-{iso}-{clip_id}.jpg"
-        thumb_path.write_bytes(b"\xff\xd8\xff\xdb")
-        record = self.register_clip(
+        return self._create_placeholder_clip(
             start_ts=start_ts,
             end_ts=end_ts,
-            path=clip_path,
-            thumb_path=thumb_path,
             has_audio=settings.audio_enabled,
             motion_score=1.0,
-            settings=settings,
+            reason="test",
         )
-        return record
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -394,6 +411,211 @@ class SurveillanceManager:
         payload = json.dumps(settings.to_dict(), sort_keys=True)
         digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
         return digest[:16]
+
+    def _write_manual_request(self, payload: Mapping[str, object]) -> None:
+        folder = self._base_path / "manual_requests"
+        folder.mkdir(parents=True, exist_ok=True)
+        file_name = payload.get("requested_at", datetime.now(timezone.utc).isoformat())
+        request_id = payload.get("id", uuid.uuid4().hex[:12])
+        stem = str(file_name).replace(":", "-")
+        path = folder / f"manual-{stem}-{request_id}.json"
+        path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+    def _create_placeholder_clip(
+        self,
+        *,
+        start_ts: datetime,
+        end_ts: datetime,
+        has_audio: bool,
+        motion_score: float | None,
+        reason: str,
+    ) -> ClipRecord:
+        folder = self.ensure_day_folder(end_ts)
+        iso = end_ts.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        clip_id = uuid.uuid4().hex[:8]
+        clip_name = f"clip-{iso}-{clip_id}.mp4"
+        clip_path = folder / clip_name
+        summary = (
+            f"RevCam placeholder clip generated for {reason} event\n"
+            f"Start: {start_ts.isoformat()}\nEnd: {end_ts.isoformat()}\n"
+        )
+        clip_path.write_text(summary, encoding="utf-8")
+        thumb_path = folder / f"clip-{iso}-{clip_id}.jpg"
+        thumb_path.write_bytes(_PLACEHOLDER_JPEG)
+        settings = self.load_settings()
+        return self.register_clip(
+            start_ts=start_ts,
+            end_ts=end_ts,
+            path=clip_path,
+            thumb_path=thumb_path,
+            has_audio=has_audio,
+            motion_score=motion_score,
+            settings=settings,
+        )
+
+
+_PLACEHOLDER_JPEG = bytes(
+    [
+        0xFF,
+        0xD8,
+        0xFF,
+        0xE0,
+        0x00,
+        0x10,
+        0x4A,
+        0x46,
+        0x49,
+        0x46,
+        0x00,
+        0x01,
+        0x01,
+        0x00,
+        0x00,
+        0x01,
+        0x00,
+        0x01,
+        0x00,
+        0x00,
+        0xFF,
+        0xDB,
+        0x00,
+        0x43,
+        0x00,
+        0x08,
+        0x06,
+        0x06,
+        0x07,
+        0x06,
+        0x05,
+        0x08,
+        0x07,
+        0x07,
+        0x07,
+        0x09,
+        0x09,
+        0x08,
+        0x0A,
+        0x0C,
+        0x14,
+        0x0D,
+        0x0C,
+        0x0B,
+        0x0B,
+        0x0C,
+        0x19,
+        0x12,
+        0x13,
+        0x0F,
+        0x14,
+        0x1D,
+        0x1A,
+        0x1F,
+        0x1E,
+        0x1D,
+        0x1A,
+        0x1C,
+        0x1C,
+        0x20,
+        0x24,
+        0x2E,
+        0x27,
+        0x20,
+        0x28,
+        0x23,
+        0x1C,
+        0x1C,
+        0x2B,
+        0x37,
+        0x2B,
+        0x28,
+        0x30,
+        0x34,
+        0x39,
+        0x3A,
+        0x3F,
+        0x3F,
+        0x3F,
+        0x1F,
+        0x27,
+        0x39,
+        0x3D,
+        0x3F,
+        0x34,
+        0x2E,
+        0x37,
+        0x38,
+        0xFF,
+        0xC0,
+        0x00,
+        0x0B,
+        0x08,
+        0x00,
+        0x01,
+        0x00,
+        0x01,
+        0x01,
+        0x01,
+        0x11,
+        0x00,
+        0xFF,
+        0xC4,
+        0x00,
+        0x14,
+        0x00,
+        0x01,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0xFF,
+        0xC4,
+        0x00,
+        0x14,
+        0x10,
+        0x01,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0xFF,
+        0xDA,
+        0x00,
+        0x08,
+        0x01,
+        0x01,
+        0x00,
+        0x00,
+        0x3F,
+        0x00,
+        0xD2,
+        0xCF,
+        0x20,
+        0xFF,
+        0xD9,
+    ]
+)
 
 
 __all__ = ["ClipFilters", "ClipRecord", "SurveillanceManager"]

@@ -36,26 +36,30 @@ class ModeManager:
         lock_path: Path | str = Path("data/camera.lock"),
         state_path: Path | str = Path("data/mode_state.json"),
         controllers: Mapping[ModeName, ModeController] | None = None,
+        default_mode: ModeName = "reversing",
     ) -> None:
         self._lock_path = Path(lock_path)
         self._state_path = Path(state_path)
         self._state_path.parent.mkdir(parents=True, exist_ok=True)
         self._controllers = dict(controllers or {})
         self._mutex = Lock()
+        if default_mode not in self.VALID_MODES:
+            raise ValueError(f"Invalid default mode {default_mode!r}")
+        self._default_mode = default_mode
 
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
     def _read_state(self) -> ModeName:
         if not self._state_path.exists():
-            return "idle"
+            return self._default_mode
         try:
             raw = json.loads(self._state_path.read_text(encoding="utf-8"))
         except json.JSONDecodeError:  # pragma: no cover - defensive branch
-            return "idle"
+            return self._default_mode
         mode = raw.get("mode", "idle")
         if mode not in self.VALID_MODES:
-            return "idle"
+            return self._default_mode
         return mode
 
     def _write_state(self, mode: ModeName) -> None:
@@ -127,6 +131,12 @@ class ModeManager:
                 self._invoke_controller(current, "idle")
             self._write_lock("idle")
             self._write_state("idle")
+
+    def update_controllers(self, controllers: Mapping[ModeName, ModeController]) -> None:
+        """Register or replace lifecycle controllers."""
+
+        with self._mutex:
+            self._controllers.update(controllers)
 
 
 __all__ = ["ModeController", "ModeManager", "ModeSwitchError"]
