@@ -4122,29 +4122,16 @@
           return;
         }
         const displayValue = getDisplayDistance(data);
-        const actualValue =
-          typeof data.distance_m === "number" && Number.isFinite(data.distance_m)
-            ? data.distance_m
-            : null;
-        const projectedValue =
-          typeof data.projected_distance_m === "number" &&
-          Number.isFinite(data.projected_distance_m)
-            ? data.projected_distance_m
-            : null;
         const zoneKey =
           typeof data.zone === "string" ? data.zone.toLowerCase() : "clear";
         const label = DISTANCE_ZONE_LABELS[zoneKey] || DISTANCE_ZONE_LABELS.clear;
         const parts = [];
-        const actualLabel = actualValue !== null ? formatDistance(actualValue) : "—";
-        const projectedLabel =
-          projectedValue !== null ? formatDistance(projectedValue) : "—";
-        parts.push(`Actual ${actualLabel}`);
-        parts.push(`Projected ${projectedLabel}`);
         if (displayValue !== null) {
-          const modeLabel = getDistanceModeLabel(data);
-          if (modeLabel) {
-            parts.push(`${modeLabel} shown`);
-          }
+          parts.push(formatDistance(displayValue));
+        }
+        const modeLabel = getDistanceModeLabel(data);
+        if (modeLabel) {
+          parts.push(`${modeLabel} shown`);
         }
         parts.push(label);
         distanceSummary.textContent = parts.join(" • ");
