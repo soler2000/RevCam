@@ -88,6 +88,12 @@ class WiFiCredentialStore:
         with self._lock:
             return self._network_passwords.get(identifier)
 
+    def list_networks(self) -> list[str]:
+        """Return the SSIDs with stored credentials."""
+
+        with self._lock:
+            return sorted(self._network_passwords)
+
     def set_network_password(self, ssid: str, password: str | None) -> None:
         if not isinstance(ssid, str) or not ssid.strip():
             raise ValueError("SSID must be a non-empty string")
@@ -725,6 +731,118 @@ class WiFiManager:
 
     def scan_networks(self) -> Sequence[WiFiNetwork]:
         return self._backend.scan()
+
+    def auto_connect_known_networks(self, *, start_hotspot: bool = True) -> WiFiStatus:
+        """Join the strongest known network or fall back to hotspot mode."""
+
+        def _signal_value(network: WiFiNetwork) -> float:
+            if network.signal is None:
+                return float("-inf")
+            return float(network.signal)
+
+        try:
+            initial_status = self._fetch_status()
+        except WiFiError as exc:
+            initial_status = None
+            self._record_log(
+                "auto_connect_status_error",
+                f"Unable to refresh Wi-Fi status before auto-connect: {exc}.",
+            )
+        else:
+            if initial_status.connected and not initial_status.hotspot_active:
+                self._record_log(
+                    "auto_connect_skip",
+                    "Wi-Fi already connected; skipping automatic network selection.",
+                    status=initial_status,
+                )
+                return initial_status
+
+        self._record_log(
+            "auto_connect_start",
+            "Scanning for known Wi-Fi networks.",
+        )
+        try:
+            scan_results = list(self.scan_networks())
+        except WiFiError as exc:
+            scan_results = []
+            self._record_log(
+                "auto_connect_scan_error",
+                f"Unable to scan Wi-Fi networks: {exc}.",
+            )
+        known_ssids = {ssid.strip() for ssid in self._credentials.list_networks() if ssid.strip()}
+        candidates: dict[str, WiFiNetwork] = {}
+        for network in scan_results:
+            ssid = network.ssid.strip()
+            if not ssid or network.hidden:
+                continue
+            if not (network.known or ssid in known_ssids):
+                continue
+            existing = candidates.get(ssid)
+            if existing is None or _signal_value(network) > _signal_value(existing):
+                candidates[ssid] = network
+
+        if not candidates:
+            self._record_log(
+                "auto_connect_no_candidates",
+                "No known Wi-Fi networks detected during automatic selection.",
+            )
+        last_status = initial_status
+        for ssid, network in sorted(
+            candidates.items(),
+            key=lambda item: _signal_value(item[1]),
+            reverse=True,
+        ):
+            metadata = {
+                "signal": network.signal,
+                "known": network.known,
+                "security": network.security,
+            }
+            self._record_log(
+                "auto_connect_candidate",
+                f"Attempting automatic connection to {ssid}.",
+                metadata=metadata,
+            )
+            try:
+                status = self.connect(ssid)
+            except WiFiError as exc:
+                self._record_log(
+                    "auto_connect_error",
+                    f"Automatic connection to {ssid} failed: {exc}.",
+                    metadata=metadata,
+                )
+                continue
+            last_status = status
+            if status.connected and not status.hotspot_active and (status.ssid == ssid or status.profile == ssid):
+                self._record_log(
+                    "auto_connect_success",
+                    f"Automatically connected to {status.ssid or ssid}.",
+                    status=status,
+                    metadata=metadata,
+                )
+                return status
+            self._record_log(
+                "auto_connect_incomplete",
+                f"{ssid} did not report an active connection; continuing to next candidate.",
+                status=status,
+                metadata=metadata,
+            )
+
+        if not start_hotspot:
+            return last_status or self._fetch_status()
+
+        self._record_log(
+            "auto_connect_hotspot_fallback",
+            "No known networks reachable; enabling hotspot mode.",
+        )
+        try:
+            status = self.enable_hotspot()
+        except WiFiError as exc:
+            self._record_log(
+                "auto_connect_hotspot_error",
+                f"Unable to enable hotspot as a fallback: {exc}.",
+            )
+            raise
+        return status
 
     def forget_network(self, profile_or_ssid: str) -> WiFiStatus:
         if not isinstance(profile_or_ssid, str) or not profile_or_ssid.strip():

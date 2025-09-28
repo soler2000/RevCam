@@ -507,6 +507,12 @@ def create_app(
         nonlocal camera, active_camera_choice, streamer, webrtc_manager, active_resolution
         nonlocal stream_error, webrtc_error
         await led_ring.set_pattern("boot")
+        try:
+            await run_in_threadpool(wifi_manager.auto_connect_known_networks)
+        except WiFiError as exc:
+            logger.warning("Automatic Wi-Fi selection failed: %s", exc)
+        except Exception:  # pragma: no cover - defensive logging
+            logger.exception("Unexpected error while selecting Wi-Fi network")
         selection = config_manager.get_camera()
         resolution = config_manager.get_resolution()
         camera, active_camera_choice = _build_camera(

@@ -103,9 +103,15 @@ diagnostics report the device as available.
 
 7. Optional: enable the service on boot
 --------------------------------------
-Follow the instructions in `README.md` to create a systemd service or use a
-process manager of your choice. Ensure the service activates the virtual
-environment before launching `uvicorn`.
+Install the bundled systemd unit and start RevCam immediately:
+
+```bash
+./scripts/install_service.sh
+```
+
+Use `./scripts/revcamctl.sh stop` to pause the managed instance while updating
+code, then `./scripts/revcamctl.sh start` (or `restart`) once you're ready to
+test again.
 
 Troubleshooting
 ---------------

@@ -20,6 +20,8 @@ that future driver-assistance overlays can be injected on the server without maj
   control.
 - Built-in mDNS advertisement so `motion.local:9000` resolves on iOS clients
   even when the RevCam hotspot is active.
+- Automatic Wi-Fi selection on boot with hotspot fallback when no saved
+  networks are reachable.
 
 ## Project layout
 
@@ -309,6 +311,32 @@ EOF
 After reloading the service (or rebooting) `nmcli general permissions` should
 list `yes` for the `org.freedesktop.NetworkManager.*` capabilities and RevCam's
 hotspot toggle will succeed.
+
+### Installing the RevCam service
+
+RevCam ships with helper scripts for managing a systemd service on Raspberry Pi
+OS. Run the installer once to create `/etc/systemd/system/revcam.service`, start
+the application immediately, and enable it for future boots:
+
+```bash
+./scripts/install_service.sh
+```
+
+By default the service launches `scripts/run_with_sudo.sh --host 0.0.0.0 --port
+9000` from the current checkout. Set `REVCAM_SERVICE_NAME` before running the
+installer to use a custom unit name (for example `REVCAM_SERVICE_NAME=revcam-dev`).
+
+During development you can stop the managed instance without disabling the unit
+entirely:
+
+```bash
+./scripts/revcamctl.sh stop
+```
+
+When you're ready to resume testing, restart the service with
+`./scripts/revcamctl.sh start` (or `restart`). The helper also exposes `status`,
+`enable`, and `disable` subcommands which forward to `systemctl` for quick
+inspection and lifecycle management.
 
 ### Hotspot hostname and development-mode rollback
 
