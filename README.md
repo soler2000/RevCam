@@ -547,6 +547,28 @@ Another RevCam instance is already bound to the requested port. Stop the
 existing process (`Ctrl+C` in the other terminal or `pkill -f uvicorn`) or use a
 different port with `--port`.
 
+#### Video stream shows high latency, lossy images, or dropped frames
+
+Several factors influence the stream quality:
+
+- **Prefer WebRTC when possible.** After installing the optional `aiortc` and
+  PyAV dependencies RevCam automatically negotiates a WebRTC session, which
+  delivers full frames with lower end-to-end latency than MJPEG. Use the
+  [WebRTC requirements](#webrtc-requirements) instructions above to ensure the
+  native libraries and Python wheels are available.
+- **Reduce the amount of data each frame carries.** The settings panel exposes
+  capture resolution presets as well as stream frame-rate and JPEG quality
+  sliders. Lower values reduce the bits that need to cross the network, often
+  eliminating stutter on congested wireless links.
+- **Stabilise the network path.** A reliable Wi-Fi link (ideally 5 GHz, clear
+  line of sight) or a wired Ethernet adapter reduces retransmissions that cause
+  visible macroblocking and frame drops, especially when multiple clients are
+  viewing the stream simultaneously.
+- **Avoid overloading the Pi.** Disable unused overlays and background services
+  that compete for CPU time with the encoder. Keeping the Pi cool and powered by
+  a stable supply prevents thermal throttling, which otherwise increases frame
+  latency.
+
 ## Future work
 
 - Integrate computer-vision overlays (parking guidelines, obstacle detection).
