@@ -81,43 +81,42 @@ def _draw_line(
     thickness: int,
     colour: tuple[int, int, int],
 ) -> None:
-    dx = abs(x1 - x0)
-    sx = 1 if x0 < x1 else -1
-    dy = -abs(y1 - y0)
-    sy = 1 if y0 < y1 else -1
-    err = dx + dy
-
-    radius = max(0, thickness // 2)
-
-    while True:
-        _stamp_disc(frame, x0, y0, radius, colour)
-        if x0 == x1 and y0 == y1:
-            break
-        e2 = 2 * err
-        if e2 >= dy:
-            err += dy
-            x0 += sx
-        if e2 <= dx:
-            err += dx
-            y0 += sy
-
-
-def _stamp_disc(
-    frame: _np.ndarray,
-    cx: int,
-    cy: int,
-    radius: int,
-    colour: tuple[int, int, int],
-) -> None:
     height, width = frame.shape[:2]
-    for y in range(cy - radius, cy + radius + 1):
-        if y < 0 or y >= height:
-            continue
-        for x in range(cx - radius, cx + radius + 1):
-            if x < 0 or x >= width:
-                continue
-            if radius == 0 or (x - cx) ** 2 + (y - cy) ** 2 <= radius**2:
-                frame[y, x] = colour
+    if height == 0 or width == 0:
+        return
+
+    base_radius = max(0, thickness // 2)
+    effective_radius = max(base_radius, 0.5)
+    padding = int(_np.ceil(effective_radius)) + 2
+
+    min_x = max(0, min(x0, x1) - padding)
+    max_x = min(width - 1, max(x0, x1) + padding)
+    min_y = max(0, min(y0, y1) - padding)
+    max_y = min(height - 1, max(y0, y1) + padding)
+
+    if min_x > max_x or min_y > max_y:
+        return
+
+    grid_y, grid_x = _np.mgrid[min_y : max_y + 1, min_x : max_x + 1]
+    dx = x1 - x0
+    dy = y1 - y0
+    seg_len_sq = dx * dx + dy * dy
+
+    if seg_len_sq == 0:
+        dist_sq = (grid_x - x0) ** 2 + (grid_y - y0) ** 2
+    else:
+        t = ((grid_x - x0) * dx + (grid_y - y0) * dy) / seg_len_sq
+        t = _np.clip(t, 0.0, 1.0)
+        nearest_x = x0 + t * dx
+        nearest_y = y0 + t * dy
+        dist_sq = (grid_x - nearest_x) ** 2 + (grid_y - nearest_y) ** 2
+
+    mask = dist_sq <= effective_radius**2
+    if not _np.any(mask):
+        return
+
+    region = frame[min_y : max_y + 1, min_x : max_x + 1]
+    region[mask] = colour
 
 
 __all__ = ["create_reversing_aids_overlay"]
