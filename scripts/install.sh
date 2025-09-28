@@ -71,6 +71,65 @@ pip_install_package() {
     return 0
 }
 
+ensure_send2trash_override() {
+    set +e
+    "$VENV_DIR/bin/python" - <<'PY'
+import importlib.metadata as metadata
+import sys
+
+try:
+    dist = metadata.distribution("send2trash")
+except metadata.PackageNotFoundError:
+    sys.exit(1)
+
+requires = dist.requires or []
+if any("sys-platform" in req for req in requires):
+    sys.exit(2)
+
+sys.exit(0)
+PY
+    local status=$?
+    set -e
+
+    case "$status" in
+        0)
+            return 0
+            ;;
+        1)
+            echo "Installing Send2Trash inside the virtual environment to avoid broken system metadata"
+            ;;
+        2)
+            echo "Replacing system-provided Send2Trash metadata that triggers pip warnings"
+            ;;
+        *)
+            echo "Unable to inspect Send2Trash metadata (exit $status)." >&2
+            return 1
+            ;;
+    esac
+
+    if pip_install_package "Send2Trash>=1.8.3" true; then
+        echo "Send2Trash installed from PyPI with corrected dependency metadata."
+        return 0
+    fi
+
+    cat >&2 <<'WARN'
+Warning: Failed to install Send2Trash from PyPI.
+The Raspberry Pi OS package ships metadata that triggers pip's
+"Error parsing dependencies of send2trash" warning. If the warning
+appears during installation, manually install a recent Send2Trash
+release inside the virtual environment once network access is
+available:
+
+  source .venv/bin/activate
+  pip install --upgrade Send2Trash>=1.8.3
+
+The warning is harmless for RevCam, but installing the updated wheel
+keeps future pip runs quiet.
+WARN
+
+    return 1
+}
+
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --python)
@@ -185,6 +244,8 @@ trap 'popd >/dev/null' EXIT
 set -x
 "$VENV_DIR/bin/python" -m pip install "${PIP_FLAGS[@]}" -e "$INSTALL_TARGET"
 set +x
+
+ensure_send2trash_override || true
 
 # Ensure critical runtime dependencies that are imported at module load time are
 # present in the environment even when the editable install is reused.

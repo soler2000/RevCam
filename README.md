@@ -98,6 +98,13 @@ building everything from PyPI. Follow these steps on the Pi:
    pip install --prefer-binary --extra-index-url https://www.piwheels.org/simple -e .
    ```
 
+   > **Note:** Older Raspberry Pi OS images bundle a `Send2Trash` build whose
+   > metadata confuses modern versions of `pip`, yielding a warning such as
+   > `Error parsing dependencies of send2trash`. The install helper now
+   > replaces that wheel inside the virtual environment automatically. If
+   > network access is unavailable, rerun `pip install --upgrade
+   > Send2Trash>=1.8.3` once a connection is restored to silence the warning.
+
 The `--prefer-binary` flag asks `pip` to fetch pre-built wheels when
 available, and the PiWheels index provides ARM builds for most dependencies.
 
