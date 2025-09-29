@@ -12,32 +12,53 @@
           BlinkMacSystemFont, sans-serif;
         --line-height: 1.65;
         --transition: 200ms ease;
-        --surface-0: rgba(14, 16, 22, 0.8);
-        --surface-1: rgba(26, 28, 36, 0.72);
-        --surface-2: rgba(39, 42, 52, 0.7);
+        --surface-0: rgba(14, 16, 22, 0.82);
+        --surface-1: rgba(26, 28, 36, 0.78);
+        --surface-muted: rgba(255, 255, 255, 0.08);
+        --surface-soft: rgba(255, 255, 255, 0.04);
+        --surface-panel: rgba(30, 33, 44, 0.82);
+        --surface-primary: rgba(38, 42, 55, 0.85);
+        --surface-secondary: rgba(24, 27, 38, 0.88);
         --border-subtle: rgba(255, 255, 255, 0.08);
-        --border-muted: rgba(255, 255, 255, 0.14);
+        --border-muted: rgba(255, 255, 255, 0.12);
         --text-primary: #f5f7fb;
         --text-muted: rgba(245, 247, 250, 0.72);
+        --text-on-accent: #ffffff;
         --accent: #0a84ff;
         --accent-hover: #2f95ff;
         --accent-active: #55adff;
         --accent-soft: rgba(10, 132, 255, 0.16);
+        --accent-soft-hover: rgba(10, 132, 255, 0.24);
+        --accent-ring: rgba(10, 132, 255, 0.45);
         --success: #4ade80;
+        --success-soft: rgba(74, 222, 128, 0.16);
         --warning: #ff9f0a;
         --danger: #ff453a;
+        --danger-soft: rgba(255, 69, 58, 0.2);
         --radius-sm: 0.5rem;
-        --radius-md: 0.8rem;
-        --radius-lg: 1.1rem;
+        --radius-md: 0.75rem;
+        --radius-lg: 1rem;
+        --radius-xl: 1.5rem;
+        --radius-pill: 999px;
+        --shell-padding-y: clamp(2rem, 7vh, 3.5rem);
+        --shell-padding-x: clamp(1.25rem, 5vw, 3.5rem);
+        --rhythm: 1.5rem;
         --space-xs: 0.25rem;
         --space-sm: 0.5rem;
         --space-md: 0.75rem;
         --space-lg: 1.25rem;
         --space-xl: 1.75rem;
-        --shadow-sm: 0 12px 26px rgba(0, 0, 0, 0.35);
-        --shadow-md: 0 24px 48px rgba(0, 0, 0, 0.45);
-        --shadow-lg: 0 42px 96px rgba(0, 0, 0, 0.55);
+        --space-2xl: 2.5rem;
+        --control-padding-y: 0.6rem;
+        --control-padding-x: 1.25rem;
+        --card-padding: calc(var(--rhythm) + 0.25rem);
+        --stack-gap: calc(var(--rhythm) / 2);
+        --stack-gap-lg: var(--rhythm);
+        --shadow-sm: 0 18px 44px rgba(0, 0, 0, 0.45);
+        --shadow-md: 0 26px 60px rgba(0, 0, 0, 0.5);
+        --shadow-lg: 0 40px 120px rgba(0, 0, 0, 0.55);
         --page-gradient: radial-gradient(120% 140% at top, #1b1e26 0%, #10131a 60%, #050609 100%);
+        --panel-max-width: 1100px;
       }
 
       * {
@@ -52,32 +73,45 @@
         color: var(--text-primary);
         min-height: 100vh;
         display: flex;
+        justify-content: center;
+        align-items: flex-start;
+        padding: var(--shell-padding-y) var(--shell-padding-x);
+      }
+
+      .shell {
+        width: 100%;
+        max-width: var(--panel-max-width);
+        display: flex;
         flex-direction: column;
+        gap: var(--rhythm);
       }
 
       header,
       footer {
-        padding: calc(var(--space-sm) + 0.35rem) var(--space-xl);
-        background: var(--surface-0);
-        backdrop-filter: blur(18px) saturate(125%);
-        -webkit-backdrop-filter: blur(18px) saturate(125%);
         display: flex;
         align-items: center;
         justify-content: space-between;
         gap: var(--space-md);
         flex-wrap: wrap;
-        border-bottom: 1px solid var(--border-subtle);
+        background: var(--surface-panel);
+        border-radius: var(--radius-lg);
+        padding: 1rem calc(var(--space-lg) + 0.25rem);
         box-shadow: var(--shadow-sm);
+        border: 1px solid var(--border-muted);
+      }
+
+      header {
+        backdrop-filter: blur(18px) saturate(125%);
+        -webkit-backdrop-filter: blur(18px) saturate(125%);
       }
 
       footer {
-        border-top: 1px solid var(--border-subtle);
-        border-bottom: none;
-        box-shadow: 0 -18px 48px rgba(0, 0, 0, 0.45);
+        font-size: 0.95rem;
+        justify-content: space-between;
       }
 
       strong.brand {
-        font-size: 1.25rem;
+        font-size: 1.35rem;
         letter-spacing: 0.04em;
         color: var(--success);
       }
@@ -92,9 +126,10 @@
         color: var(--text-muted);
         text-decoration: none;
         font-weight: 600;
-        padding: 0.45rem 1rem;
+        padding: 0.45rem 1.15rem;
         border-radius: var(--radius-pill);
         border: 1px solid transparent;
+        background: transparent;
         transition: color var(--transition), border-color var(--transition),
           background var(--transition), transform var(--transition);
       }
@@ -103,7 +138,7 @@
       nav a:focus-visible {
         color: var(--accent-active);
         border-color: var(--accent-active);
-        background: rgba(10, 132, 255, 0.12);
+        background: var(--accent-soft-hover);
         outline: none;
         transform: translateY(-1px);
       }
@@ -111,33 +146,31 @@
       nav a[aria-current="page"] {
         color: var(--text-primary);
         border-color: var(--accent-active);
-        background: rgba(10, 132, 255, 0.18);
-        box-shadow: 0 16px 32px rgba(10, 132, 255, 0.25);
+        background: var(--accent-soft);
+        box-shadow: 0 16px 40px rgba(10, 132, 255, 0.25);
       }
 
       main {
-        flex: 1 1 auto;
-        padding: clamp(var(--space-lg), 4vw, var(--space-2xl));
         display: grid;
-        gap: var(--space-xl);
+        gap: var(--stack-gap-lg);
       }
 
-      .layout {
+      .panel-grid {
         display: grid;
-        gap: var(--space-xl);
-        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        gap: var(--stack-gap-lg);
+        grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
         align-items: start;
       }
 
       .card {
-        background: var(--surface-1);
-        border-radius: var(--radius-lg);
-        border: 1px solid var(--border-subtle);
+        background: var(--surface-panel);
+        border-radius: var(--radius-xl);
+        border: 1px solid var(--border-muted);
         box-shadow: var(--shadow-md);
-        padding: var(--space-xl);
+        padding: var(--card-padding);
         display: flex;
         flex-direction: column;
-        gap: var(--space-md);
+        gap: var(--stack-gap);
       }
 
       .card h2,
@@ -164,7 +197,7 @@
 
       .field-row {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
         gap: var(--space-md);
       }
 
@@ -176,18 +209,20 @@
 
       input[type="number"] {
         width: 100%;
-        padding: 0.55rem 0.75rem;
+        padding: var(--control-padding-y) var(--control-padding-x);
         border-radius: var(--radius-sm);
-        border: 1px solid var(--border-muted);
-        background: var(--surface-2);
+        border: 1px solid transparent;
+        background: var(--surface-soft);
+        box-shadow: inset 0 0 0 1px var(--border-subtle);
         color: var(--text-primary);
-        transition: border-color var(--transition), box-shadow var(--transition);
+        transition: border-color var(--transition), box-shadow var(--transition),
+          background var(--transition);
       }
 
       input[type="number"]:focus-visible {
         outline: none;
-        border-color: var(--accent-active);
-        box-shadow: 0 0 0 3px var(--accent-soft);
+        background: var(--surface-secondary);
+        box-shadow: inset 0 0 0 1px var(--accent), 0 0 0 4px var(--accent-soft);
       }
 
       input[type="range"] {
@@ -197,10 +232,10 @@
       button {
         align-self: flex-start;
         background: linear-gradient(135deg, var(--accent), var(--accent-hover));
-        color: white;
+        color: var(--text-on-accent);
         border: none;
         border-radius: var(--radius-pill);
-        padding: 0.65rem 1.75rem;
+        padding: 0.7rem 1.9rem;
         font-weight: 600;
         cursor: pointer;
         box-shadow: 0 18px 42px rgba(10, 132, 255, 0.35);
@@ -211,7 +246,7 @@
       button:focus-visible {
         outline: none;
         transform: translateY(-1px);
-        box-shadow: 0 24px 52px rgba(10, 132, 255, 0.4);
+        box-shadow: 0 24px 52px rgba(10, 132, 255, 0.45);
       }
 
       .sensor-grid {
@@ -220,11 +255,11 @@
       }
 
       .sensor-group {
-        background: rgba(255, 255, 255, 0.03);
-        border-radius: var(--radius-md);
+        background: var(--surface-secondary);
+        border-radius: var(--radius-lg);
         padding: var(--space-lg);
         border: 1px solid var(--border-subtle);
-        box-shadow: var(--shadow-sm);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
       }
 
       .sensor-group h3 {
@@ -281,11 +316,11 @@
       }
 
       .analysis-section section {
-        background: rgba(255, 255, 255, 0.03);
-        border-radius: var(--radius-md);
+        background: var(--surface-secondary);
+        border-radius: var(--radius-lg);
         border: 1px solid var(--border-subtle);
         padding: var(--space-lg);
-        box-shadow: var(--shadow-sm);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
       }
 
       .analysis-section h3 {
@@ -313,12 +348,13 @@
       #viewer {
         position: relative;
         width: 100%;
-        padding-bottom: 56.25%;
-        background: rgba(10, 12, 18, 0.6);
-        border-radius: var(--radius-lg);
-        border: 1px solid var(--border-subtle);
+        aspect-ratio: 16 / 10;
+        min-height: clamp(320px, 45vh, 520px);
+        background: radial-gradient(circle at top, rgba(70, 80, 110, 0.32), rgba(9, 11, 18, 0.9));
+        border-radius: var(--radius-xl);
+        border: 1px solid var(--border-muted);
         overflow: hidden;
-        box-shadow: var(--shadow-md);
+        box-shadow: var(--shadow-lg);
       }
 
       #viewer canvas {
@@ -339,28 +375,33 @@
         color: var(--success);
       }
 
+      .status.live {
+        color: var(--info, #38bdf8);
+      }
+
       @media (max-width: 720px) {
+        body {
+          padding: var(--space-xl);
+        }
         header,
         footer {
-          padding-inline: var(--space-lg);
-        }
-        main {
           padding-inline: var(--space-lg);
         }
       }
     </style>
   </head>
   <body>
-    <header>
-      <strong class="brand">RevCam</strong>
-      <nav>
-        <a href="/" >Live View</a>
-        <a href="/settings">Settings</a>
-        <a href="/leveling" aria-current="page">Trailer Leveling</a>
-      </nav>
-    </header>
-    <main>
-      <div class="layout">
+    <div class="shell">
+      <header>
+        <strong class="brand">RevCam</strong>
+        <nav>
+          <a href="/">Live View</a>
+          <a href="/settings">Settings</a>
+          <a href="/leveling" aria-current="page">Trailer Leveling</a>
+        </nav>
+      </header>
+      <main>
+        <div class="panel-grid">
         <article class="card" id="configuration-card">
           <h2>Trailer &amp; Ramp Settings</h2>
           <p>Configure the trailer geometry and leveling ramp dimensions. All values are stored on the RevCam.</p>
@@ -370,15 +411,15 @@
               <div class="field-row">
                 <label>
                   Axle width (m)
-                  <input type="number" step="0.01" min="0.1" name="axle_width_m" required />
+                  <input type="number" step="0.01" min="0.1" name="axle_width_m" value="2.4" required />
                 </label>
                 <label>
                   Hitch to axle (m)
-                  <input type="number" step="0.01" min="0.1" name="hitch_to_axle_m" required />
+                  <input type="number" step="0.01" min="0.1" name="hitch_to_axle_m" value="4.8" required />
                 </label>
                 <label>
                   Trailer length (m)
-                  <input type="number" step="0.01" min="0.1" name="length_m" required />
+                  <input type="number" step="0.01" min="0.1" name="length_m" value="7.0" required />
                 </label>
               </div>
             </div>
@@ -387,11 +428,11 @@
               <div class="field-row">
                 <label>
                   Ramp length (m)
-                  <input type="number" step="0.01" min="0.1" name="ramp_length_m" required />
+                  <input type="number" step="0.01" min="0.1" name="ramp_length_m" value="0.8" required />
                 </label>
                 <label>
                   Ramp height (m)
-                  <input type="number" step="0.01" min="0.05" name="ramp_height_m" required />
+                  <input type="number" step="0.01" min="0.05" name="ramp_height_m" value="0.12" required />
                 </label>
               </div>
             </div>
@@ -458,7 +499,7 @@
 
         <article class="card">
           <h2>Leveling Analysis</h2>
-          <p class="status" id="analysis-status">Waiting for sensor data…</p>
+          <p class="status" id="analysis-status">Awaiting sensor data…</p>
           <div class="orientation-readout">
             <div>
               <span>Roll</span>
@@ -512,12 +553,25 @@
       <span>&copy; RevCam – Trailer leveling preview</span>
       <span id="sample-rate" class="status"></span>
     </footer>
-    <script type="module">
-      import * as THREE from "https://unpkg.com/three@0.158.0/build/three.module.js";
-      import { OrbitControls } from "https://unpkg.com/three@0.158.0/examples/jsm/controls/OrbitControls.js";
-      import { STLLoader } from "https://unpkg.com/three@0.158.0/examples/jsm/loaders/STLLoader.js";
+  </div>
+  <script type="module">
+      import * as THREE from "https://unpkg.com/three@0.158.0/build/three.module.js?module";
+      import { OrbitControls } from "https://unpkg.com/three@0.158.0/examples/jsm/controls/OrbitControls.js?module";
+      import { STLLoader } from "https://unpkg.com/three@0.158.0/examples/jsm/loaders/STLLoader.js?module";
 
       const SAMPLE_INTERVAL = 300;
+      const DEFAULT_SETTINGS = {
+        geometry: {
+          axle_width_m: 2.4,
+          hitch_to_axle_m: 4.8,
+          length_m: 7.0,
+        },
+        ramp: {
+          length_m: 0.8,
+          height_m: 0.12,
+        },
+      };
+
       const sampleRateDisplay = document.getElementById("sample-rate");
       const analysisStatus = document.getElementById("analysis-status");
       const rollDisplay = document.getElementById("roll-display");
@@ -532,6 +586,7 @@
       const unhitchedRaise = document.getElementById("unhitched-raise");
       const unhitchedHitch = document.getElementById("unhitched-hitch");
       const configStatus = document.getElementById("config-status");
+      const configForm = document.getElementById("leveling-config");
 
       const sensorState = {
         accelerometer: { x: 0, y: 1, z: 0 },
@@ -541,6 +596,7 @@
       let currentMode = "hitched";
       let lastSampleTime = performance.now();
       let inFlight = false;
+      let pendingSample = false;
       let latestOrientation = { roll: 0, pitch: 0, yaw: 0 };
       let scene, renderer, camera, controls, trailer;
 
@@ -558,7 +614,26 @@
         return `${value.toFixed(2)}°`;
       }
 
-      function updateDisplays(evaluation) {
+      function formatSide(value) {
+        if (!value) return "—";
+        if (value === "level") return "Level";
+        return value.charAt(0).toUpperCase() + value.slice(1);
+      }
+
+      function applyConfig(settings = DEFAULT_SETTINGS) {
+        if (!configForm) {
+          return;
+        }
+        const geometry = settings.geometry ?? DEFAULT_SETTINGS.geometry;
+        const ramp = settings.ramp ?? DEFAULT_SETTINGS.ramp;
+        configForm.axle_width_m.value = geometry.axle_width_m ?? DEFAULT_SETTINGS.geometry.axle_width_m;
+        configForm.hitch_to_axle_m.value = geometry.hitch_to_axle_m ?? DEFAULT_SETTINGS.geometry.hitch_to_axle_m;
+        configForm.length_m.value = geometry.length_m ?? DEFAULT_SETTINGS.geometry.length_m;
+        configForm.ramp_length_m.value = ramp.length_m ?? DEFAULT_SETTINGS.ramp.length_m;
+        configForm.ramp_height_m.value = ramp.height_m ?? DEFAULT_SETTINGS.ramp.height_m;
+      }
+
+      function updateDisplays(evaluation, meta) {
         const { orientation, hitched, unhitched } = evaluation;
         latestOrientation = orientation;
         rollDisplay.textContent = formatAngle(orientation.roll);
@@ -566,7 +641,7 @@
         yawDisplay.textContent = formatAngle(orientation.yaw);
 
         hitchedMessage.textContent = hitched.message;
-        hitchedSide.textContent = hitched.side_to_raise;
+        hitchedSide.textContent = formatSide(hitched.side_to_raise);
         hitchedRaise.textContent = formatDistance(hitched.required_raise_m);
         if (hitched.ramp) {
           const travel = hitched.ramp.travel_m ?? 0;
@@ -581,11 +656,24 @@
         }
 
         unhitchedMessage.textContent = unhitched.message;
-        unhitchedSide.textContent = unhitched.side_to_raise;
+        unhitchedSide.textContent = formatSide(unhitched.side_to_raise);
         unhitchedRaise.textContent = formatDistance(unhitched.required_raise_m);
         const hitchDir = unhitched.hitch_direction;
         const hitchAmount = formatDistance(unhitched.hitch_adjustment_m);
-        unhitchedHitch.textContent = hitchDir === "level" ? "Level" : `${hitchDir} ${hitchAmount}`;
+        if (hitchDir === "level") {
+          unhitchedHitch.textContent = "Level";
+        } else {
+          const direction = formatSide(hitchDir);
+          unhitchedHitch.textContent = `${direction} ${hitchAmount}`;
+        }
+
+        if (meta) {
+          const { modeLabel, analysisMessage } = meta;
+          const message = analysisMessage ? `${modeLabel} • ${analysisMessage}` : modeLabel;
+          analysisStatus.textContent = message;
+          analysisStatus.classList.remove("error");
+          analysisStatus.classList.add("live");
+        }
 
         if (trailer) {
           const rollRad = THREE.MathUtils.degToRad(orientation.roll);
@@ -597,11 +685,19 @@
         }
       }
 
-      async function sendSample() {
+      function requestSample() {
         if (inFlight) {
+          pendingSample = true;
           return;
         }
+        pendingSample = false;
+        void sendSample();
+      }
+
+      async function sendSample() {
         inFlight = true;
+        analysisStatus.textContent = "Updating…";
+        analysisStatus.classList.remove("error", "live");
         const payload = {
           accelerometer: sensorState.accelerometer,
           gyroscope: sensorState.gyroscope,
@@ -619,23 +715,30 @@
             throw new Error(`HTTP ${response.status}`);
           }
           const data = await response.json();
+          const modeLabel = data.mode === "hitched" ? "Hitched mode" : "Unhitched mode";
+          const analysisMessage = data.analysis?.message ?? "";
           updateDisplays({
             orientation: data.orientation,
             hitched: data.hitched,
             unhitched: data.unhitched,
-          });
+          }, { modeLabel, analysisMessage });
           const now = performance.now();
           const delta = now - lastSampleTime;
           lastSampleTime = now;
-          sampleRateDisplay.textContent = `Update interval: ${Math.round(delta)} ms`;
-          analysisStatus.textContent = `Mode: ${data.mode}`;
-          analysisStatus.classList.remove("error");
+          const timestamp = new Date();
+          sampleRateDisplay.textContent = `Last update ${timestamp.toLocaleTimeString()} • Δ ${Math.round(delta)} ms`;
         } catch (error) {
           console.error(error);
           analysisStatus.textContent = "Unable to reach leveling API";
+          analysisStatus.classList.remove("live");
           analysisStatus.classList.add("error");
+          sampleRateDisplay.textContent = "Waiting for connection…";
         } finally {
           inFlight = false;
+          if (pendingSample) {
+            pendingSample = false;
+            requestSample();
+          }
         }
       }
 
@@ -645,13 +748,16 @@
         if (!input || !display) {
           throw new Error(`Missing slider ${id}`);
         }
-        const update = () => {
+        const update = (triggerSample = true) => {
           const value = parseFloat(input.value);
           display.textContent = formatter(value);
           target(value);
+          if (triggerSample) {
+            requestSample();
+          }
         };
-        input.addEventListener("input", update);
-        update();
+        input.addEventListener("input", () => update(true));
+        update(false);
       }
 
       function initSliders() {
@@ -671,6 +777,7 @@
           radio.addEventListener("change", (event) => {
             if (event.target instanceof HTMLInputElement && event.target.checked) {
               currentMode = event.target.value;
+              requestSample();
             }
           });
         }
@@ -683,34 +790,38 @@
             throw new Error(`HTTP ${response.status}`);
           }
           const data = await response.json();
-          const form = document.getElementById("leveling-config");
-          form.axle_width_m.value = data.geometry.axle_width_m;
-          form.hitch_to_axle_m.value = data.geometry.hitch_to_axle_m;
-          form.length_m.value = data.geometry.length_m;
-          form.ramp_length_m.value = data.ramp.length_m;
-          form.ramp_height_m.value = data.ramp.height_m;
+          applyConfig(data);
+          requestSample();
         } catch (error) {
           console.error(error);
-          configStatus.textContent = "Unable to load current settings";
-          configStatus.classList.add("error");
+          if (configStatus) {
+            configStatus.textContent = "Unable to load current settings";
+            configStatus.classList.add("error");
+          }
+          applyConfig(DEFAULT_SETTINGS);
+          requestSample();
         }
       }
 
       function initConfigForm() {
-        const form = document.getElementById("leveling-config");
-        form.addEventListener("submit", async (event) => {
+        if (!configForm) {
+          return;
+        }
+        configForm.addEventListener("submit", async (event) => {
           event.preventDefault();
-          configStatus.textContent = "Saving…";
-          configStatus.classList.remove("error", "success");
+          if (configStatus) {
+            configStatus.textContent = "Saving…";
+            configStatus.classList.remove("error", "success");
+          }
           const payload = {
             geometry: {
-              axle_width_m: parseFloat(form.axle_width_m.value),
-              hitch_to_axle_m: parseFloat(form.hitch_to_axle_m.value),
-              length_m: parseFloat(form.length_m.value),
+              axle_width_m: parseFloat(configForm.axle_width_m.value),
+              hitch_to_axle_m: parseFloat(configForm.hitch_to_axle_m.value),
+              length_m: parseFloat(configForm.length_m.value),
             },
             ramp: {
-              length_m: parseFloat(form.ramp_length_m.value),
-              height_m: parseFloat(form.ramp_height_m.value),
+              length_m: parseFloat(configForm.ramp_length_m.value),
+              height_m: parseFloat(configForm.ramp_height_m.value),
             },
           };
           try {
@@ -723,12 +834,21 @@
               const error = await response.json().catch(() => ({ detail: "Invalid data" }));
               throw new Error(error.detail || "Invalid data");
             }
-            configStatus.textContent = "Settings saved";
-            configStatus.classList.add("success");
+            if (configStatus) {
+              configStatus.textContent = "Settings saved";
+              configStatus.classList.add("success");
+            }
+            const data = await response.json().catch(() => null);
+            if (data) {
+              applyConfig(data);
+            }
+            requestSample();
           } catch (error) {
             console.error(error);
-            configStatus.textContent = `Error: ${error.message}`;
-            configStatus.classList.add("error");
+            if (configStatus) {
+              configStatus.textContent = `Error: ${error.message}`;
+              configStatus.classList.add("error");
+            }
           }
         });
       }
@@ -810,13 +930,14 @@
         animate();
       }
 
+      applyConfig(DEFAULT_SETTINGS);
       initSliders();
       initModeToggle();
       initConfigForm();
       loadConfig();
       initThree();
-      setInterval(sendSample, SAMPLE_INTERVAL);
-      sendSample();
+      setInterval(requestSample, SAMPLE_INTERVAL);
+      requestSample();
     </script>
   </body>
 </html>
