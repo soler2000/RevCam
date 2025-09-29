@@ -194,42 +194,6 @@
         grid-column: 1 / -1;
       }
 
-      .profile-grid {
-        display: grid;
-        gap: var(--space-lg);
-        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-      }
-
-      .profile-stats {
-        margin: 0;
-        display: grid;
-        gap: var(--space-sm);
-      }
-
-      .profile-stats div {
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-xs);
-        padding: 0.6rem 0.8rem;
-        border-radius: var(--radius-md);
-        border: 1px solid var(--border-subtle);
-        background: var(--surface-soft);
-      }
-
-      .profile-stats dt {
-        font-size: 0.85rem;
-        color: var(--text-muted);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-      }
-
-      .profile-stats dd {
-        margin: 0;
-        font-size: 1.15rem;
-        font-weight: 600;
-        color: var(--text-primary);
-      }
-
       form label {
         display: block;
         font-weight: 600;
@@ -519,52 +483,6 @@
       </header>
       <main>
         <div class="panel-grid">
-        <article class="card" id="profile-card">
-          <h2>Trailer profile</h2>
-          <p>
-            Update geometry and ramp specifications from the
-            <a href="/settings#trailer">settings page</a>. Values shown here are read-only and
-            reflect the latest stored configuration.
-          </p>
-          <div class="profile-grid">
-            <section>
-              <h3>Geometry</h3>
-              <dl class="profile-stats">
-                <div>
-                  <dt>Axle width</dt>
-                  <dd id="profile-axle">2.40 m</dd>
-                </div>
-                <div>
-                  <dt>Hitch to axle</dt>
-                  <dd id="profile-hitch">4.80 m</dd>
-                </div>
-                <div>
-                  <dt>Overall length</dt>
-                  <dd id="profile-length">7.00 m</dd>
-                </div>
-              </dl>
-            </section>
-            <section>
-              <h3>Ramp</h3>
-              <dl class="profile-stats">
-                <div>
-                  <dt>Ramp length</dt>
-                  <dd id="profile-ramp-length">0.80 m</dd>
-                </div>
-                <div>
-                  <dt>Ramp height</dt>
-                  <dd id="profile-ramp-height">0.12 m</dd>
-                </div>
-                <div>
-                  <dt>Maximum travel (90%)</dt>
-                  <dd id="profile-ramp-travel">0.72 m</dd>
-                </div>
-              </dl>
-            </section>
-          </div>
-          <p class="status" id="profile-status" role="status"></p>
-        </article>
-
         <article class="card">
           <h2>Sensor Simulator</h2>
           <p>Use sliders to emulate the GY-85 outputs until the hardware is connected. Values are fed through a Kalman filter to estimate orientation.</p>
@@ -717,18 +635,6 @@
       import { STLLoader } from "https://unpkg.com/three@0.158.0/examples/jsm/loaders/STLLoader.js?module";
 
       const SAMPLE_INTERVAL = 300;
-      const DEFAULT_SETTINGS = {
-        geometry: {
-          axle_width_m: 2.4,
-          hitch_to_axle_m: 4.8,
-          length_m: 7.0,
-        },
-        ramp: {
-          length_m: 0.8,
-          height_m: 0.12,
-        },
-      };
-
       const sampleRateDisplay = document.getElementById("sample-rate");
       const analysisStatus = document.getElementById("analysis-status");
       const rollDisplay = document.getElementById("roll-display");
@@ -742,15 +648,6 @@
       const unhitchedSide = document.getElementById("unhitched-side");
       const unhitchedRaise = document.getElementById("unhitched-raise");
       const unhitchedHitch = document.getElementById("unhitched-hitch");
-      const profileStatus = document.getElementById("profile-status");
-      const profileFields = {
-        axle: document.getElementById("profile-axle"),
-        hitch: document.getElementById("profile-hitch"),
-        length: document.getElementById("profile-length"),
-        rampLength: document.getElementById("profile-ramp-length"),
-        rampHeight: document.getElementById("profile-ramp-height"),
-        rampTravel: document.getElementById("profile-ramp-travel"),
-      };
       const supportElements = new Map();
       const supportRoot = document.getElementById("support-points");
       if (supportRoot) {
@@ -796,13 +693,6 @@
         return value.charAt(0).toUpperCase() + value.slice(1);
       }
 
-      function formatMetres(value, fractionDigits = 2) {
-        if (!Number.isFinite(value)) return "—";
-        const digits = Math.max(0, Math.min(3, Math.round(fractionDigits)));
-        const magnitude = Math.abs(value);
-        return `${magnitude.toFixed(digits)} m`;
-      }
-
       function formatOffset(value) {
         if (!Number.isFinite(value)) {
           return "Offset: —";
@@ -810,35 +700,6 @@
         const centimetres = value * 100;
         const sign = centimetres >= 0 ? "+" : "−";
         return `Offset: ${sign}${Math.abs(centimetres).toFixed(1)} cm`;
-      }
-
-      function applyProfile(settings = DEFAULT_SETTINGS) {
-        const geometry = settings?.geometry ?? DEFAULT_SETTINGS.geometry;
-        const ramp = settings?.ramp ?? DEFAULT_SETTINGS.ramp;
-        if (profileFields.axle) {
-          const value = geometry?.axle_width_m ?? DEFAULT_SETTINGS.geometry.axle_width_m;
-          profileFields.axle.textContent = formatMetres(value);
-        }
-        if (profileFields.hitch) {
-          const value = geometry?.hitch_to_axle_m ?? DEFAULT_SETTINGS.geometry.hitch_to_axle_m;
-          profileFields.hitch.textContent = formatMetres(value);
-        }
-        if (profileFields.length) {
-          const value = geometry?.length_m ?? DEFAULT_SETTINGS.geometry.length_m;
-          profileFields.length.textContent = formatMetres(value);
-        }
-        if (profileFields.rampLength) {
-          const value = ramp?.length_m ?? DEFAULT_SETTINGS.ramp.length_m;
-          profileFields.rampLength.textContent = formatMetres(value);
-        }
-        if (profileFields.rampHeight) {
-          const value = ramp?.height_m ?? DEFAULT_SETTINGS.ramp.height_m;
-          profileFields.rampHeight.textContent = formatMetres(value);
-        }
-        if (profileFields.rampTravel) {
-          const rampLength = ramp?.length_m ?? DEFAULT_SETTINGS.ramp.length_m;
-          profileFields.rampTravel.textContent = formatMetres(rampLength * 0.9);
-        }
       }
 
       function updateSupportPoints(points) {
@@ -974,13 +835,6 @@
             unhitched: data.unhitched,
             support_points: data.support_points,
           }, { modeLabel, analysisMessage });
-          if (data.settings) {
-            applyProfile(data.settings);
-            if (profileStatus) {
-              profileStatus.textContent = "";
-              profileStatus.classList.remove("error");
-            }
-          }
           const now = performance.now();
           const delta = now - lastSampleTime;
           lastSampleTime = now;
@@ -1041,31 +895,6 @@
               requestSample();
             }
           });
-        }
-      }
-
-      async function loadProfile() {
-        try {
-          const response = await fetch("/api/leveling/config");
-          if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
-          }
-          const data = await response.json();
-          applyProfile(data);
-          if (profileStatus) {
-            profileStatus.textContent = "";
-            profileStatus.classList.remove("error");
-          }
-        } catch (error) {
-          console.error(error);
-          applyProfile(DEFAULT_SETTINGS);
-          if (profileStatus) {
-            const message = error instanceof Error ? error.message : "Unable to load trailer profile";
-            profileStatus.textContent = `Error: ${message}`;
-            profileStatus.classList.add("error");
-          }
-        } finally {
-          requestSample();
         }
       }
 
@@ -1148,10 +977,8 @@
         animate();
       }
 
-      applyProfile(DEFAULT_SETTINGS);
       initSliders();
       initModeToggle();
-      loadProfile();
       initThree();
       setInterval(requestSample, SAMPLE_INTERVAL);
       requestSample();
