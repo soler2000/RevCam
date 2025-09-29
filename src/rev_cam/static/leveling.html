@@ -363,8 +363,12 @@
       }
 
       .status {
+        position: relative;
         font-size: 0.9rem;
         color: var(--text-muted);
+        padding-right: 1.5rem;
+        min-height: calc(2 * 1em);
+        display: block;
       }
 
       .status.error {
@@ -377,6 +381,30 @@
 
       .status.live {
         color: var(--info, #38bdf8);
+      }
+
+      .status.loading::after {
+        content: "";
+        position: absolute;
+        top: 50%;
+        right: 0.1rem;
+        width: 0.75rem;
+        height: 0.75rem;
+        border-radius: 50%;
+        border: 2px solid rgba(255, 255, 255, 0.28);
+        border-top-color: var(--accent);
+        transform: translateY(-50%);
+        animation: spin 900ms linear infinite;
+      }
+
+      @keyframes spin {
+        from {
+          transform: translateY(-50%) rotate(0deg);
+        }
+
+        to {
+          transform: translateY(-50%) rotate(360deg);
+        }
       }
 
       @media (max-width: 720px) {
@@ -634,6 +662,9 @@
       }
 
       function updateDisplays(evaluation, meta) {
+        if (!evaluation) {
+          return;
+        }
         const { orientation, hitched, unhitched } = evaluation;
         latestOrientation = orientation;
         rollDisplay.textContent = formatAngle(orientation.roll);
@@ -675,6 +706,9 @@
           analysisStatus.classList.add("live");
         }
 
+        analysisStatus.classList.remove("loading");
+        analysisStatus.removeAttribute("aria-busy");
+
         if (trailer) {
           const rollRad = THREE.MathUtils.degToRad(orientation.roll);
           const pitchRad = THREE.MathUtils.degToRad(orientation.pitch);
@@ -696,8 +730,9 @@
 
       async function sendSample() {
         inFlight = true;
-        analysisStatus.textContent = "Updating…";
-        analysisStatus.classList.remove("error", "live");
+        analysisStatus.classList.add("loading");
+        analysisStatus.setAttribute("aria-busy", "true");
+        analysisStatus.classList.remove("error");
         const payload = {
           accelerometer: sensorState.accelerometer,
           gyroscope: sensorState.gyroscope,
@@ -732,6 +767,8 @@
           analysisStatus.textContent = "Unable to reach leveling API";
           analysisStatus.classList.remove("live");
           analysisStatus.classList.add("error");
+          analysisStatus.classList.remove("loading");
+          analysisStatus.removeAttribute("aria-busy");
           sampleRateDisplay.textContent = "Waiting for connection…";
         } finally {
           inFlight = false;
