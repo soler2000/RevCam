@@ -693,6 +693,9 @@ class WiFiManager:
         mdns_advertiser: MDNSAdvertiser | None = None,
         default_hotspot_ssid: str = "RevCam",
         credential_store: WiFiCredentialStore | None = None,
+        watchdog_boot_delay: float = 30.0,
+        watchdog_interval: float = 30.0,
+        watchdog_retry_delay: float = 5.0,
     ) -> None:
         self._backend = backend or NMCLIBackend()
         self._rollback_timeout = rollback_timeout
@@ -718,6 +721,11 @@ class WiFiManager:
                 self._mdns = None
         self._log: Deque[WiFiLogEntry] = deque(maxlen=200)
         self._log_lock = threading.Lock()
+        self._watchdog_thread: threading.Thread | None = None
+        self._watchdog_stop_event: threading.Event | None = None
+        self._watchdog_boot_delay = max(0.0, watchdog_boot_delay)
+        self._watchdog_interval = max(0.0, watchdog_interval)
+        self._watchdog_retry_delay = max(0.0, watchdog_retry_delay)
         try:
             initial_status = self._backend.get_status()
         except WiFiError:
@@ -1192,6 +1200,7 @@ class WiFiManager:
         return status
 
     def close(self) -> None:
+        self.stop_hotspot_watchdog()
         if self._mdns is not None:
             try:
                 self._mdns.close()
@@ -1201,6 +1210,154 @@ class WiFiManager:
                 self._mdns = None
 
     # ------------------------------ helpers -----------------------------
+    def start_hotspot_watchdog(self) -> None:
+        """Begin monitoring connectivity for hotspot fallback."""
+
+        if self._watchdog_thread and self._watchdog_thread.is_alive():
+            return
+        stop_event = threading.Event()
+        self._watchdog_stop_event = stop_event
+
+        def _run() -> None:
+            deadline = time.monotonic() + self._watchdog_boot_delay
+            first_cycle = True
+            while not stop_event.is_set():
+                if first_cycle:
+                    wait_time = max(0.0, deadline - time.monotonic())
+                else:
+                    wait_time = self._watchdog_interval
+                if wait_time and stop_event.wait(wait_time):
+                    break
+                try:
+                    self._watchdog_cycle(initial_boot_check=first_cycle)
+                except Exception:  # pragma: no cover - defensive logging
+                    logging.getLogger(__name__).exception("Wi-Fi hotspot watchdog error")
+                first_cycle = False
+
+        thread = threading.Thread(target=_run, name="wifi-hotspot-watchdog", daemon=True)
+        self._watchdog_thread = thread
+        thread.start()
+
+    def stop_hotspot_watchdog(self) -> None:
+        """Stop the hotspot watchdog thread if running."""
+
+        stop_event = self._watchdog_stop_event
+        thread = self._watchdog_thread
+        if stop_event is None or thread is None:
+            return
+        stop_event.set()
+        thread.join(timeout=5.0)
+        self._watchdog_thread = None
+        self._watchdog_stop_event = None
+
+    def _watchdog_cycle(self, *, initial_boot_check: bool) -> None:
+        known_ssids = {
+            ssid.strip()
+            for ssid in self._credentials.list_networks()
+            if isinstance(ssid, str) and ssid.strip()
+        }
+        try:
+            status = self._fetch_status()
+        except WiFiError as exc:
+            status = None
+            self._record_log(
+                "hotspot_watchdog_status_error",
+                f"Unable to refresh Wi-Fi status during watchdog cycle: {exc}.",
+            )
+        else:
+            if self._status_on_known_network(status, known_ssids):
+                event = "hotspot_watchdog_boot_connected" if initial_boot_check else "hotspot_watchdog_connected"
+                self._record_log(
+                    event,
+                    "Watchdog confirms connection to a known network.",
+                    status=status,
+                )
+                return
+            if status.hotspot_active:
+                self._record_log(
+                    "hotspot_watchdog_hotspot_active",
+                    "Watchdog detected active hotspot; skipping checks.",
+                    status=status,
+                )
+                return
+
+        self._record_log(
+            "hotspot_watchdog_start",
+            "Watchdog attempting to recover connectivity to a known network.",
+            status=status,
+        )
+        attempts = 0
+        last_status = status
+        while attempts < 2:
+            attempts += 1
+            try:
+                last_status = self.auto_connect_known_networks(start_hotspot=False)
+            except WiFiError as exc:
+                self._record_log(
+                    "hotspot_watchdog_connect_error",
+                    f"Watchdog auto-connect attempt {attempts} failed: {exc}.",
+                    status=last_status,
+                )
+                last_status = None
+            else:
+                if self._status_on_known_network(last_status, known_ssids):
+                    self._record_log(
+                        "hotspot_watchdog_recovered",
+                        "Watchdog restored connection to a known network.",
+                        status=last_status,
+                    )
+                    return
+            if attempts < 2 and self._watchdog_stop_event is not None:
+                retry_wait = self._watchdog_retry_delay
+                self._record_log(
+                    "hotspot_watchdog_retry",
+                    f"Retrying known network connection in {retry_wait:.1f}s.",
+                    status=last_status,
+                )
+                if retry_wait and self._watchdog_stop_event.wait(retry_wait):
+                    return
+
+        if last_status and last_status.hotspot_active:
+            self._record_log(
+                "hotspot_watchdog_hotspot_already_enabled",
+                "Hotspot already active after auto-connect attempts.",
+                status=last_status,
+            )
+            return
+
+        self._record_log(
+            "hotspot_watchdog_enable_hotspot",
+            "Starting hotspot after watchdog auto-connect attempts failed.",
+            status=last_status,
+        )
+        try:
+            enabled = self.enable_hotspot()
+        except WiFiError as exc:
+            self._record_log(
+                "hotspot_watchdog_hotspot_error",
+                f"Unable to enable hotspot after watchdog attempts: {exc}.",
+                status=last_status,
+            )
+        else:
+            self._record_log(
+                "hotspot_watchdog_hotspot_enabled",
+                "Hotspot enabled by watchdog after failed reconnection attempts.",
+                status=enabled,
+            )
+
+    @staticmethod
+    def _status_on_known_network(status: WiFiStatus, known_ssids: set[str]) -> bool:
+        if not isinstance(status, WiFiStatus):
+            return False
+        if not status.connected or status.hotspot_active:
+            return False
+        identifiers = {
+            value.strip()
+            for value in (status.ssid, status.profile)
+            if isinstance(value, str) and value.strip()
+        }
+        return bool(identifiers & known_ssids)
+
     def _fetch_status(self) -> WiFiStatus:
         status = self._backend.get_status()
         status = self._apply_hotspot_password(status)

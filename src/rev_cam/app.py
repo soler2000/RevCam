@@ -576,6 +576,11 @@ def create_app(
             logger.warning("Automatic Wi-Fi selection failed: %s", exc)
         except Exception:  # pragma: no cover - defensive logging
             logger.exception("Unexpected error while selecting Wi-Fi network")
+        finally:
+            try:
+                await run_in_threadpool(wifi_manager.start_hotspot_watchdog)
+            except AttributeError:
+                pass
         selection = config_manager.get_camera()
         resolution = config_manager.get_resolution()
         camera, active_camera_choice = _build_camera(
