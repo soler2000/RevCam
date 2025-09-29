@@ -7,6 +7,7 @@ import math
 import os
 import string
 from pathlib import Path
+from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.concurrency import run_in_threadpool
@@ -31,10 +32,12 @@ from .diagnostics import collect_diagnostics
 from .distance import DistanceCalibration, DistanceMonitor, create_distance_overlay
 from .led_matrix import LedRing
 from .reversing_aids import create_reversing_aids_overlay
+from .sensor_fusion import Gy85KalmanFilter, SensorSample, Vector3
 from .pipeline import FramePipeline
 from .streaming import MJPEGStreamer, WebRTCManager, encode_frame_to_jpeg
 from .version import APP_VERSION
 from .wifi import WiFiCredentialStore, WiFiError, WiFiManager
+from .trailer_leveling import evaluate_leveling
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -183,6 +186,36 @@ class LedSettingsPayload(BaseModel):
     illumination_intensity: float | int | None = None
 
 
+class VectorPayload(BaseModel):
+    x: float
+    y: float
+    z: float
+
+
+class LevelingGeometryPayload(BaseModel):
+    axle_width_m: float | None = None
+    hitch_to_axle_m: float | None = None
+    length_m: float | None = None
+
+
+class LevelingRampPayload(BaseModel):
+    length_m: float | None = None
+    height_m: float | None = None
+
+
+class LevelingConfigPayload(BaseModel):
+    geometry: LevelingGeometryPayload | None = None
+    ramp: LevelingRampPayload | None = None
+
+
+class LevelingSamplePayload(BaseModel):
+    accelerometer: VectorPayload
+    gyroscope: VectorPayload
+    magnetometer: VectorPayload
+    dt: float | None = Field(default=None, gt=0.0)
+    mode: Literal["hitched", "unhitched"] = "hitched"
+
+
 def create_app(
     config_path: Path | str = Path("data/config.json"),
     *,
@@ -194,6 +227,9 @@ def create_app(
 
     config_path = Path(config_path)
     config_manager = ConfigManager(config_path)
+
+    level_filter = Gy85KalmanFilter()
+    level_filter_lock = asyncio.Lock()
 
     CALIBRATION_OFFSET_LIMIT = 5.0
     CALIBRATION_SCALE_MIN = 0.5
@@ -604,6 +640,10 @@ def create_app(
     async def settings() -> str:
         return _load_static("settings.html")
 
+    @app.get("/leveling", response_class=HTMLResponse)
+    async def leveling_page() -> str:
+        return _load_static("leveling.html")
+
     @app.get("/images/{asset}")
     async def get_image(asset: str):
         safe_name = Path(asset).name
@@ -613,6 +653,17 @@ def create_app(
         if not path.exists() or path.is_dir():
             raise HTTPException(status_code=404, detail="Asset not found")
         media_type = "image/svg+xml" if path.suffix.lower() == ".svg" else None
+        return FileResponse(path, media_type=media_type)
+
+    @app.get("/models/{asset}")
+    async def get_model(asset: str):
+        safe_name = Path(asset).name
+        if safe_name != asset:
+            raise HTTPException(status_code=404, detail="Asset not found")
+        path = STATIC_DIR / "models" / safe_name
+        if not path.exists() or path.is_dir():
+            raise HTTPException(status_code=404, detail="Asset not found")
+        media_type = "model/stl" if path.suffix.lower() == ".stl" else None
         return FileResponse(path, media_type=media_type)
 
     @app.get("/api/led")
@@ -690,6 +741,59 @@ def create_app(
             "rotation": orientation.rotation,
             "flip_horizontal": orientation.flip_horizontal,
             "flip_vertical": orientation.flip_vertical,
+        }
+
+    @app.get("/api/leveling/config")
+    async def get_leveling_config() -> dict[str, object]:
+        settings = config_manager.get_leveling_settings()
+        return settings.to_dict()
+
+    @app.post("/api/leveling/config")
+    async def update_leveling_config(payload: LevelingConfigPayload) -> dict[str, object]:
+        update_payload: dict[str, object] = {}
+        if payload.geometry is not None:
+            geometry_data = {
+                key: value
+                for key, value in payload.geometry.model_dump().items()
+                if value is not None
+            }
+            if geometry_data:
+                update_payload["geometry"] = geometry_data
+        if payload.ramp is not None:
+            ramp_data = {
+                key: value
+                for key, value in payload.ramp.model_dump().items()
+                if value is not None
+            }
+            if ramp_data:
+                update_payload["ramp"] = ramp_data
+        if not update_payload:
+            raise HTTPException(status_code=400, detail="No levelling values provided")
+        try:
+            settings = config_manager.set_leveling_settings(update_payload)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return settings.to_dict()
+
+    @app.post("/api/leveling/sample")
+    async def process_leveling_sample(payload: LevelingSamplePayload) -> dict[str, object]:
+        sample = SensorSample(
+            accelerometer=Vector3(**payload.accelerometer.model_dump()),
+            gyroscope=Vector3(**payload.gyroscope.model_dump()),
+            magnetometer=Vector3(**payload.magnetometer.model_dump()),
+        )
+        async with level_filter_lock:
+            orientation = level_filter.update(sample, dt=payload.dt)
+        settings = config_manager.get_leveling_settings()
+        evaluation = evaluate_leveling(orientation, settings)
+        mode_key = "hitched" if payload.mode == "hitched" else "unhitched"
+        return {
+            "mode": payload.mode,
+            "orientation": evaluation["orientation"],
+            "analysis": evaluation[mode_key],
+            "hitched": evaluation["hitched"],
+            "unhitched": evaluation["unhitched"],
+            "settings": settings.to_dict(),
         }
 
     @app.get("/api/camera")

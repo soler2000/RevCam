@@ -1,0 +1,822 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>RevCam Trailer Leveling</title>
+    <link rel="icon" type="image/svg+xml" href="images/favicon.svg" />
+    <style>
+      :root {
+        color-scheme: dark;
+        --font-family: "Inter", "Manrope", "Segoe UI", system-ui, -apple-system,
+          BlinkMacSystemFont, sans-serif;
+        --line-height: 1.65;
+        --transition: 200ms ease;
+        --surface-0: rgba(14, 16, 22, 0.8);
+        --surface-1: rgba(26, 28, 36, 0.72);
+        --surface-2: rgba(39, 42, 52, 0.7);
+        --border-subtle: rgba(255, 255, 255, 0.08);
+        --border-muted: rgba(255, 255, 255, 0.14);
+        --text-primary: #f5f7fb;
+        --text-muted: rgba(245, 247, 250, 0.72);
+        --accent: #0a84ff;
+        --accent-hover: #2f95ff;
+        --accent-active: #55adff;
+        --accent-soft: rgba(10, 132, 255, 0.16);
+        --success: #4ade80;
+        --warning: #ff9f0a;
+        --danger: #ff453a;
+        --radius-sm: 0.5rem;
+        --radius-md: 0.8rem;
+        --radius-lg: 1.1rem;
+        --space-xs: 0.25rem;
+        --space-sm: 0.5rem;
+        --space-md: 0.75rem;
+        --space-lg: 1.25rem;
+        --space-xl: 1.75rem;
+        --shadow-sm: 0 12px 26px rgba(0, 0, 0, 0.35);
+        --shadow-md: 0 24px 48px rgba(0, 0, 0, 0.45);
+        --shadow-lg: 0 42px 96px rgba(0, 0, 0, 0.55);
+        --page-gradient: radial-gradient(120% 140% at top, #1b1e26 0%, #10131a 60%, #050609 100%);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: var(--font-family);
+        line-height: var(--line-height);
+        background: var(--page-gradient);
+        color: var(--text-primary);
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+      }
+
+      header,
+      footer {
+        padding: calc(var(--space-sm) + 0.35rem) var(--space-xl);
+        background: var(--surface-0);
+        backdrop-filter: blur(18px) saturate(125%);
+        -webkit-backdrop-filter: blur(18px) saturate(125%);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-md);
+        flex-wrap: wrap;
+        border-bottom: 1px solid var(--border-subtle);
+        box-shadow: var(--shadow-sm);
+      }
+
+      footer {
+        border-top: 1px solid var(--border-subtle);
+        border-bottom: none;
+        box-shadow: 0 -18px 48px rgba(0, 0, 0, 0.45);
+      }
+
+      strong.brand {
+        font-size: 1.25rem;
+        letter-spacing: 0.04em;
+        color: var(--success);
+      }
+
+      nav {
+        display: inline-flex;
+        gap: var(--space-sm);
+        flex-wrap: wrap;
+      }
+
+      nav a {
+        color: var(--text-muted);
+        text-decoration: none;
+        font-weight: 600;
+        padding: 0.45rem 1rem;
+        border-radius: var(--radius-pill);
+        border: 1px solid transparent;
+        transition: color var(--transition), border-color var(--transition),
+          background var(--transition), transform var(--transition);
+      }
+
+      nav a:hover,
+      nav a:focus-visible {
+        color: var(--accent-active);
+        border-color: var(--accent-active);
+        background: rgba(10, 132, 255, 0.12);
+        outline: none;
+        transform: translateY(-1px);
+      }
+
+      nav a[aria-current="page"] {
+        color: var(--text-primary);
+        border-color: var(--accent-active);
+        background: rgba(10, 132, 255, 0.18);
+        box-shadow: 0 16px 32px rgba(10, 132, 255, 0.25);
+      }
+
+      main {
+        flex: 1 1 auto;
+        padding: clamp(var(--space-lg), 4vw, var(--space-2xl));
+        display: grid;
+        gap: var(--space-xl);
+      }
+
+      .layout {
+        display: grid;
+        gap: var(--space-xl);
+        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        align-items: start;
+      }
+
+      .card {
+        background: var(--surface-1);
+        border-radius: var(--radius-lg);
+        border: 1px solid var(--border-subtle);
+        box-shadow: var(--shadow-md);
+        padding: var(--space-xl);
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-md);
+      }
+
+      .card h2,
+      .card h3 {
+        margin: 0;
+        font-weight: 600;
+      }
+
+      .card p {
+        margin: 0;
+        color: var(--text-muted);
+      }
+
+      form label {
+        display: block;
+        font-weight: 600;
+        margin-bottom: var(--space-xs);
+      }
+
+      .field-group {
+        display: grid;
+        gap: var(--space-md);
+      }
+
+      .field-row {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+        gap: var(--space-md);
+      }
+
+      input[type="number"],
+      input[type="range"],
+      button {
+        font: inherit;
+      }
+
+      input[type="number"] {
+        width: 100%;
+        padding: 0.55rem 0.75rem;
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--border-muted);
+        background: var(--surface-2);
+        color: var(--text-primary);
+        transition: border-color var(--transition), box-shadow var(--transition);
+      }
+
+      input[type="number"]:focus-visible {
+        outline: none;
+        border-color: var(--accent-active);
+        box-shadow: 0 0 0 3px var(--accent-soft);
+      }
+
+      input[type="range"] {
+        width: 100%;
+      }
+
+      button {
+        align-self: flex-start;
+        background: linear-gradient(135deg, var(--accent), var(--accent-hover));
+        color: white;
+        border: none;
+        border-radius: var(--radius-pill);
+        padding: 0.65rem 1.75rem;
+        font-weight: 600;
+        cursor: pointer;
+        box-shadow: 0 18px 42px rgba(10, 132, 255, 0.35);
+        transition: transform var(--transition), box-shadow var(--transition);
+      }
+
+      button:hover,
+      button:focus-visible {
+        outline: none;
+        transform: translateY(-1px);
+        box-shadow: 0 24px 52px rgba(10, 132, 255, 0.4);
+      }
+
+      .sensor-grid {
+        display: grid;
+        gap: var(--space-lg);
+      }
+
+      .sensor-group {
+        background: rgba(255, 255, 255, 0.03);
+        border-radius: var(--radius-md);
+        padding: var(--space-lg);
+        border: 1px solid var(--border-subtle);
+        box-shadow: var(--shadow-sm);
+      }
+
+      .sensor-group h3 {
+        margin-top: 0;
+        margin-bottom: var(--space-md);
+      }
+
+      .slider-row {
+        display: grid;
+        gap: var(--space-xs);
+      }
+
+      .slider-row span {
+        display: flex;
+        justify-content: space-between;
+        font-size: 0.9rem;
+        color: var(--text-muted);
+      }
+
+      .mode-toggle {
+        display: inline-flex;
+        gap: var(--space-md);
+        align-items: center;
+        flex-wrap: wrap;
+      }
+
+      .mode-toggle label {
+        font-weight: 500;
+        cursor: pointer;
+      }
+
+      .mode-toggle input {
+        margin-right: var(--space-xs);
+      }
+
+      .orientation-readout {
+        display: flex;
+        gap: var(--space-xl);
+        flex-wrap: wrap;
+      }
+
+      .orientation-readout div {
+        min-width: 120px;
+      }
+
+      .orientation-readout strong {
+        display: block;
+        font-size: 2rem;
+      }
+
+      .analysis-section {
+        display: grid;
+        gap: var(--space-md);
+      }
+
+      .analysis-section section {
+        background: rgba(255, 255, 255, 0.03);
+        border-radius: var(--radius-md);
+        border: 1px solid var(--border-subtle);
+        padding: var(--space-lg);
+        box-shadow: var(--shadow-sm);
+      }
+
+      .analysis-section h3 {
+        margin-top: 0;
+        margin-bottom: var(--space-sm);
+      }
+
+      dl.stats {
+        margin: 0;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+        gap: var(--space-sm) var(--space-lg);
+      }
+
+      dl.stats dt {
+        font-weight: 600;
+        color: var(--text-muted);
+      }
+
+      dl.stats dd {
+        margin: 0;
+        font-size: 1.05rem;
+      }
+
+      #viewer {
+        position: relative;
+        width: 100%;
+        padding-bottom: 56.25%;
+        background: rgba(10, 12, 18, 0.6);
+        border-radius: var(--radius-lg);
+        border: 1px solid var(--border-subtle);
+        overflow: hidden;
+        box-shadow: var(--shadow-md);
+      }
+
+      #viewer canvas {
+        position: absolute;
+        inset: 0;
+      }
+
+      .status {
+        font-size: 0.9rem;
+        color: var(--text-muted);
+      }
+
+      .status.error {
+        color: var(--danger);
+      }
+
+      .status.success {
+        color: var(--success);
+      }
+
+      @media (max-width: 720px) {
+        header,
+        footer {
+          padding-inline: var(--space-lg);
+        }
+        main {
+          padding-inline: var(--space-lg);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <strong class="brand">RevCam</strong>
+      <nav>
+        <a href="/" >Live View</a>
+        <a href="/settings">Settings</a>
+        <a href="/leveling" aria-current="page">Trailer Leveling</a>
+      </nav>
+    </header>
+    <main>
+      <div class="layout">
+        <article class="card" id="configuration-card">
+          <h2>Trailer &amp; Ramp Settings</h2>
+          <p>Configure the trailer geometry and leveling ramp dimensions. All values are stored on the RevCam.</p>
+          <form id="leveling-config">
+            <div class="field-group">
+              <h3>Trailer Geometry</h3>
+              <div class="field-row">
+                <label>
+                  Axle width (m)
+                  <input type="number" step="0.01" min="0.1" name="axle_width_m" required />
+                </label>
+                <label>
+                  Hitch to axle (m)
+                  <input type="number" step="0.01" min="0.1" name="hitch_to_axle_m" required />
+                </label>
+                <label>
+                  Trailer length (m)
+                  <input type="number" step="0.01" min="0.1" name="length_m" required />
+                </label>
+              </div>
+            </div>
+            <div class="field-group">
+              <h3>Ramp Specification</h3>
+              <div class="field-row">
+                <label>
+                  Ramp length (m)
+                  <input type="number" step="0.01" min="0.1" name="ramp_length_m" required />
+                </label>
+                <label>
+                  Ramp height (m)
+                  <input type="number" step="0.01" min="0.05" name="ramp_height_m" required />
+                </label>
+              </div>
+            </div>
+            <button type="submit">Save settings</button>
+            <p class="status" id="config-status" role="status"></p>
+          </form>
+        </article>
+
+        <article class="card">
+          <h2>Sensor Simulator</h2>
+          <p>Use sliders to emulate the GY-85 outputs until the hardware is connected. Values are fed through a Kalman filter to estimate orientation.</p>
+          <div class="mode-toggle" role="radiogroup" aria-label="Operating mode">
+            <label><input type="radio" name="mode" value="hitched" checked /> Hitched</label>
+            <label><input type="radio" name="mode" value="unhitched" /> Unhitched</label>
+          </div>
+          <div class="sensor-grid">
+            <section class="sensor-group">
+              <h3>Accelerometer (g)</h3>
+              <div class="slider-row">
+                <span><span>X axis</span><span id="accel-x-display">0.00 g</span></span>
+                <input type="range" min="-2" max="2" step="0.01" value="0" id="accel-x" />
+              </div>
+              <div class="slider-row">
+                <span><span>Y axis</span><span id="accel-y-display">1.00 g</span></span>
+                <input type="range" min="-2" max="2" step="0.01" value="1" id="accel-y" />
+              </div>
+              <div class="slider-row">
+                <span><span>Z axis</span><span id="accel-z-display">0.00 g</span></span>
+                <input type="range" min="-2" max="2" step="0.01" value="0" id="accel-z" />
+              </div>
+            </section>
+            <section class="sensor-group">
+              <h3>Gyroscope (°/s)</h3>
+              <div class="slider-row">
+                <span><span>Roll</span><span id="gyro-x-display">0 °/s</span></span>
+                <input type="range" min="-250" max="250" step="1" value="0" id="gyro-x" />
+              </div>
+              <div class="slider-row">
+                <span><span>Pitch</span><span id="gyro-y-display">0 °/s</span></span>
+                <input type="range" min="-250" max="250" step="1" value="0" id="gyro-y" />
+              </div>
+              <div class="slider-row">
+                <span><span>Yaw</span><span id="gyro-z-display">0 °/s</span></span>
+                <input type="range" min="-250" max="250" step="1" value="0" id="gyro-z" />
+              </div>
+            </section>
+            <section class="sensor-group">
+              <h3>Magnetometer (µT)</h3>
+              <div class="slider-row">
+                <span><span>X axis</span><span id="mag-x-display">20 µT</span></span>
+                <input type="range" min="-100" max="100" step="1" value="20" id="mag-x" />
+              </div>
+              <div class="slider-row">
+                <span><span>Y axis</span><span id="mag-y-display">0 µT</span></span>
+                <input type="range" min="-100" max="100" step="1" value="0" id="mag-y" />
+              </div>
+              <div class="slider-row">
+                <span><span>Z axis</span><span id="mag-z-display">-5 µT</span></span>
+                <input type="range" min="-100" max="100" step="1" value="-5" id="mag-z" />
+              </div>
+            </section>
+          </div>
+        </article>
+
+        <article class="card">
+          <h2>Leveling Analysis</h2>
+          <p class="status" id="analysis-status">Waiting for sensor data…</p>
+          <div class="orientation-readout">
+            <div>
+              <span>Roll</span>
+              <strong id="roll-display">0°</strong>
+            </div>
+            <div>
+              <span>Pitch</span>
+              <strong id="pitch-display">0°</strong>
+            </div>
+            <div>
+              <span>Yaw</span>
+              <strong id="yaw-display">0°</strong>
+            </div>
+          </div>
+          <div class="analysis-section">
+            <section>
+              <h3>Hitched guidance</h3>
+              <p id="hitched-message">—</p>
+              <dl class="stats">
+                <dt>Side to raise</dt>
+                <dd id="hitched-side">—</dd>
+                <dt>Raise amount</dt>
+                <dd id="hitched-raise">—</dd>
+                <dt>Ramp travel</dt>
+                <dd id="hitched-travel">—</dd>
+              </dl>
+            </section>
+            <section>
+              <h3>Unhitched guidance</h3>
+              <p id="unhitched-message">—</p>
+              <dl class="stats">
+                <dt>Side to raise</dt>
+                <dd id="unhitched-side">—</dd>
+                <dt>Raise amount</dt>
+                <dd id="unhitched-raise">—</dd>
+                <dt>Hitch adjustment</dt>
+                <dd id="unhitched-hitch">—</dd>
+              </dl>
+            </section>
+          </div>
+        </article>
+
+        <article class="card">
+          <h2>3D Trailer Visualiser</h2>
+          <p>Orientation estimates drive this rendering. Adjust the sliders to see how the trailer shifts relative to level ground.</p>
+          <div id="viewer" aria-label="3D rendering of trailer"></div>
+        </article>
+      </div>
+    </main>
+    <footer>
+      <span>&copy; RevCam – Trailer leveling preview</span>
+      <span id="sample-rate" class="status"></span>
+    </footer>
+    <script type="module">
+      import * as THREE from "https://unpkg.com/three@0.158.0/build/three.module.js";
+      import { OrbitControls } from "https://unpkg.com/three@0.158.0/examples/jsm/controls/OrbitControls.js";
+      import { STLLoader } from "https://unpkg.com/three@0.158.0/examples/jsm/loaders/STLLoader.js";
+
+      const SAMPLE_INTERVAL = 300;
+      const sampleRateDisplay = document.getElementById("sample-rate");
+      const analysisStatus = document.getElementById("analysis-status");
+      const rollDisplay = document.getElementById("roll-display");
+      const pitchDisplay = document.getElementById("pitch-display");
+      const yawDisplay = document.getElementById("yaw-display");
+      const hitchedMessage = document.getElementById("hitched-message");
+      const hitchedSide = document.getElementById("hitched-side");
+      const hitchedRaise = document.getElementById("hitched-raise");
+      const hitchedTravel = document.getElementById("hitched-travel");
+      const unhitchedMessage = document.getElementById("unhitched-message");
+      const unhitchedSide = document.getElementById("unhitched-side");
+      const unhitchedRaise = document.getElementById("unhitched-raise");
+      const unhitchedHitch = document.getElementById("unhitched-hitch");
+      const configStatus = document.getElementById("config-status");
+
+      const sensorState = {
+        accelerometer: { x: 0, y: 1, z: 0 },
+        gyroscope: { x: 0, y: 0, z: 0 },
+        magnetometer: { x: 20, y: 0, z: -5 },
+      };
+      let currentMode = "hitched";
+      let lastSampleTime = performance.now();
+      let inFlight = false;
+      let latestOrientation = { roll: 0, pitch: 0, yaw: 0 };
+      let scene, renderer, camera, controls, trailer;
+
+      function formatDistance(value) {
+        if (!Number.isFinite(value)) return "—";
+        const absValue = Math.abs(value);
+        if (absValue >= 1) {
+          return `${value.toFixed(2)} m`;
+        }
+        return `${(value * 100).toFixed(1)} cm`;
+      }
+
+      function formatAngle(value) {
+        if (!Number.isFinite(value)) return "—";
+        return `${value.toFixed(2)}°`;
+      }
+
+      function updateDisplays(evaluation) {
+        const { orientation, hitched, unhitched } = evaluation;
+        latestOrientation = orientation;
+        rollDisplay.textContent = formatAngle(orientation.roll);
+        pitchDisplay.textContent = formatAngle(orientation.pitch);
+        yawDisplay.textContent = formatAngle(orientation.yaw);
+
+        hitchedMessage.textContent = hitched.message;
+        hitchedSide.textContent = hitched.side_to_raise;
+        hitchedRaise.textContent = formatDistance(hitched.required_raise_m);
+        if (hitched.ramp) {
+          const travel = hitched.ramp.travel_m ?? 0;
+          const percent = hitched.ramp.travel_percent ?? 0;
+          const limited = hitched.ramp.limited;
+          const travelText = `${formatDistance(travel)} (${percent.toFixed(1)}%)`;
+          hitchedTravel.textContent = limited
+            ? `${travelText} – limited`
+            : travelText;
+        } else {
+          hitchedTravel.textContent = "—";
+        }
+
+        unhitchedMessage.textContent = unhitched.message;
+        unhitchedSide.textContent = unhitched.side_to_raise;
+        unhitchedRaise.textContent = formatDistance(unhitched.required_raise_m);
+        const hitchDir = unhitched.hitch_direction;
+        const hitchAmount = formatDistance(unhitched.hitch_adjustment_m);
+        unhitchedHitch.textContent = hitchDir === "level" ? "Level" : `${hitchDir} ${hitchAmount}`;
+
+        if (trailer) {
+          const rollRad = THREE.MathUtils.degToRad(orientation.roll);
+          const pitchRad = THREE.MathUtils.degToRad(orientation.pitch);
+          const yawRad = THREE.MathUtils.degToRad(orientation.yaw);
+          trailer.rotation.x = rollRad;
+          trailer.rotation.y = yawRad;
+          trailer.rotation.z = pitchRad;
+        }
+      }
+
+      async function sendSample() {
+        if (inFlight) {
+          return;
+        }
+        inFlight = true;
+        const payload = {
+          accelerometer: sensorState.accelerometer,
+          gyroscope: sensorState.gyroscope,
+          magnetometer: sensorState.magnetometer,
+          dt: SAMPLE_INTERVAL / 1000,
+          mode: currentMode,
+        };
+        try {
+          const response = await fetch("/api/leveling/sample", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+          const data = await response.json();
+          updateDisplays({
+            orientation: data.orientation,
+            hitched: data.hitched,
+            unhitched: data.unhitched,
+          });
+          const now = performance.now();
+          const delta = now - lastSampleTime;
+          lastSampleTime = now;
+          sampleRateDisplay.textContent = `Update interval: ${Math.round(delta)} ms`;
+          analysisStatus.textContent = `Mode: ${data.mode}`;
+          analysisStatus.classList.remove("error");
+        } catch (error) {
+          console.error(error);
+          analysisStatus.textContent = "Unable to reach leveling API";
+          analysisStatus.classList.add("error");
+        } finally {
+          inFlight = false;
+        }
+      }
+
+      function handleSlider(id, formatter, target) {
+        const input = document.getElementById(id);
+        const display = document.getElementById(`${id}-display`);
+        if (!input || !display) {
+          throw new Error(`Missing slider ${id}`);
+        }
+        const update = () => {
+          const value = parseFloat(input.value);
+          display.textContent = formatter(value);
+          target(value);
+        };
+        input.addEventListener("input", update);
+        update();
+      }
+
+      function initSliders() {
+        handleSlider("accel-x", (v) => `${v.toFixed(2)} g`, (v) => (sensorState.accelerometer.x = v));
+        handleSlider("accel-y", (v) => `${v.toFixed(2)} g`, (v) => (sensorState.accelerometer.y = v));
+        handleSlider("accel-z", (v) => `${v.toFixed(2)} g`, (v) => (sensorState.accelerometer.z = v));
+        handleSlider("gyro-x", (v) => `${v.toFixed(0)} °/s`, (v) => (sensorState.gyroscope.x = v));
+        handleSlider("gyro-y", (v) => `${v.toFixed(0)} °/s`, (v) => (sensorState.gyroscope.y = v));
+        handleSlider("gyro-z", (v) => `${v.toFixed(0)} °/s`, (v) => (sensorState.gyroscope.z = v));
+        handleSlider("mag-x", (v) => `${v.toFixed(0)} µT`, (v) => (sensorState.magnetometer.x = v));
+        handleSlider("mag-y", (v) => `${v.toFixed(0)} µT`, (v) => (sensorState.magnetometer.y = v));
+        handleSlider("mag-z", (v) => `${v.toFixed(0)} µT`, (v) => (sensorState.magnetometer.z = v));
+      }
+
+      function initModeToggle() {
+        for (const radio of document.querySelectorAll('input[name="mode"]')) {
+          radio.addEventListener("change", (event) => {
+            if (event.target instanceof HTMLInputElement && event.target.checked) {
+              currentMode = event.target.value;
+            }
+          });
+        }
+      }
+
+      async function loadConfig() {
+        try {
+          const response = await fetch("/api/leveling/config");
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+          const data = await response.json();
+          const form = document.getElementById("leveling-config");
+          form.axle_width_m.value = data.geometry.axle_width_m;
+          form.hitch_to_axle_m.value = data.geometry.hitch_to_axle_m;
+          form.length_m.value = data.geometry.length_m;
+          form.ramp_length_m.value = data.ramp.length_m;
+          form.ramp_height_m.value = data.ramp.height_m;
+        } catch (error) {
+          console.error(error);
+          configStatus.textContent = "Unable to load current settings";
+          configStatus.classList.add("error");
+        }
+      }
+
+      function initConfigForm() {
+        const form = document.getElementById("leveling-config");
+        form.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          configStatus.textContent = "Saving…";
+          configStatus.classList.remove("error", "success");
+          const payload = {
+            geometry: {
+              axle_width_m: parseFloat(form.axle_width_m.value),
+              hitch_to_axle_m: parseFloat(form.hitch_to_axle_m.value),
+              length_m: parseFloat(form.length_m.value),
+            },
+            ramp: {
+              length_m: parseFloat(form.ramp_length_m.value),
+              height_m: parseFloat(form.ramp_height_m.value),
+            },
+          };
+          try {
+            const response = await fetch("/api/leveling/config", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload),
+            });
+            if (!response.ok) {
+              const error = await response.json().catch(() => ({ detail: "Invalid data" }));
+              throw new Error(error.detail || "Invalid data");
+            }
+            configStatus.textContent = "Settings saved";
+            configStatus.classList.add("success");
+          } catch (error) {
+            console.error(error);
+            configStatus.textContent = `Error: ${error.message}`;
+            configStatus.classList.add("error");
+          }
+        });
+      }
+
+      function initThree() {
+        const container = document.getElementById("viewer");
+        const width = container.clientWidth;
+        const height = container.clientHeight;
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x0b0d13);
+
+        camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 100);
+        camera.position.set(2.8, 1.8, 2.8);
+
+        renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.setSize(width, height);
+        container.appendChild(renderer.domElement);
+
+        controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.08;
+        controls.target.set(0, 0.4, 0);
+
+        const ambient = new THREE.AmbientLight(0xffffff, 0.5);
+        scene.add(ambient);
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        dirLight.position.set(5, 10, 7);
+        scene.add(dirLight);
+
+        const planeGeometry = new THREE.PlaneGeometry(6, 6);
+        const planeMaterial = new THREE.MeshStandardMaterial({
+          color: 0x1a1d24,
+          roughness: 0.9,
+          metalness: 0.1,
+        });
+        const plane = new THREE.Mesh(planeGeometry, planeMaterial);
+        plane.rotation.x = -Math.PI / 2;
+        scene.add(plane);
+
+        const loader = new STLLoader();
+        loader.load(
+          "/models/airstream_trailer.stl",
+          (geometry) => {
+            const material = new THREE.MeshStandardMaterial({
+              color: 0xbcc9d6,
+              metalness: 0.65,
+              roughness: 0.35,
+            });
+            trailer = new THREE.Mesh(geometry, material);
+            geometry.computeBoundingBox();
+            const box = geometry.boundingBox;
+            const center = box.getCenter(new THREE.Vector3());
+            geometry.translate(-center.x, -center.y, -center.z);
+            trailer.position.y = 0.35;
+            scene.add(trailer);
+          },
+          undefined,
+          (error) => {
+            console.error(error);
+            analysisStatus.textContent = "Unable to load trailer model";
+            analysisStatus.classList.add("error");
+          }
+        );
+
+        window.addEventListener("resize", () => {
+          const w = container.clientWidth;
+          const h = container.clientHeight;
+          camera.aspect = w / h;
+          camera.updateProjectionMatrix();
+          renderer.setSize(w, h);
+        });
+
+        function animate() {
+          requestAnimationFrame(animate);
+          controls.update();
+          renderer.render(scene, camera);
+        }
+        animate();
+      }
+
+      initSliders();
+      initModeToggle();
+      initConfigForm();
+      loadConfig();
+      initThree();
+      setInterval(sendSample, SAMPLE_INTERVAL);
+      sendSample();
+    </script>
+  </body>
+</html>
