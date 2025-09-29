@@ -258,6 +258,7 @@ def evaluate_leveling(orientation: OrientationAngles, settings: LevelingSettings
     orientation = orientation.normalised()
     hitched = compute_hitched_leveling(orientation, settings)
     unhitched = compute_unhitched_leveling(orientation, settings)
+    support_points = _compute_support_point_adjustments(orientation, settings)
     return {
         "orientation": {
             "roll": orientation.roll,
@@ -266,5 +267,45 @@ def evaluate_leveling(orientation: OrientationAngles, settings: LevelingSettings
         },
         "hitched": hitched,
         "unhitched": unhitched,
+        "support_points": support_points,
+    }
+
+
+def _compute_support_point_adjustments(
+    orientation: OrientationAngles, settings: LevelingSettings
+) -> dict[str, dict[str, float | str]]:
+    """Return the raise/lower amount for key support locations."""
+
+    geometry = settings.geometry
+    half_width = geometry.axle_width_m / 2.0
+    rear_offset = max(geometry.length_m - geometry.hitch_to_axle_m, 0.0)
+    roll_rad = math.radians(orientation.roll)
+    pitch_rad = math.radians(orientation.pitch)
+    tan_roll = math.tan(roll_rad)
+    tan_pitch = math.tan(pitch_rad)
+
+    def analyse_point(x_offset: float, y_offset: float) -> dict[str, float | str]:
+        elevation = tan_roll * x_offset + tan_pitch * y_offset
+        threshold = 1e-4
+        if abs(elevation) <= threshold:
+            action = "level"
+            adjustment = 0.0
+        elif elevation < 0:
+            action = "raise"
+            adjustment = abs(elevation)
+        else:
+            action = "lower"
+            adjustment = abs(elevation)
+        return {
+            "offset_m": elevation,
+            "action": action,
+            "adjustment_m": adjustment,
+        }
+
+    return {
+        "left_wheel": analyse_point(-half_width, 0.0),
+        "right_wheel": analyse_point(half_width, 0.0),
+        "hitch": analyse_point(0.0, geometry.hitch_to_axle_m),
+        "rear_stabilizer": analyse_point(0.0, -rear_offset),
     }
 

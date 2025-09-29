@@ -158,8 +158,14 @@
       .panel-grid {
         display: grid;
         gap: var(--stack-gap-lg);
-        grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
         align-items: start;
+      }
+
+      @media (min-width: 1100px) {
+        .panel-grid {
+          grid-template-columns: minmax(340px, 420px) minmax(520px, 1fr);
+        }
       }
 
       .card {
@@ -182,6 +188,46 @@
       .card p {
         margin: 0;
         color: var(--text-muted);
+      }
+
+      #viewer-card {
+        grid-column: 1 / -1;
+      }
+
+      .profile-grid {
+        display: grid;
+        gap: var(--space-lg);
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      }
+
+      .profile-stats {
+        margin: 0;
+        display: grid;
+        gap: var(--space-sm);
+      }
+
+      .profile-stats div {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-xs);
+        padding: 0.6rem 0.8rem;
+        border-radius: var(--radius-md);
+        border: 1px solid var(--border-subtle);
+        background: var(--surface-soft);
+      }
+
+      .profile-stats dt {
+        font-size: 0.85rem;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+
+      .profile-stats dd {
+        margin: 0;
+        font-size: 1.15rem;
+        font-weight: 600;
+        color: var(--text-primary);
       }
 
       form label {
@@ -313,6 +359,7 @@
       .analysis-section {
         display: grid;
         gap: var(--space-md);
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
       }
 
       .analysis-section section {
@@ -345,11 +392,53 @@
         font-size: 1.05rem;
       }
 
+      .support-stats {
+        margin: 0;
+        display: grid;
+        gap: var(--space-sm);
+      }
+
+      .support-stats div {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-xs);
+        padding: 0.55rem 0.75rem;
+        border-radius: var(--radius-md);
+        border: 1px solid var(--border-subtle);
+        background: rgba(255, 255, 255, 0.02);
+      }
+
+      .support-stats dt {
+        font-size: 0.85rem;
+        font-weight: 600;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+
+      .support-stats dd {
+        margin: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 0.2rem;
+      }
+
+      .support-primary {
+        font-size: 1.1rem;
+        font-weight: 600;
+        color: var(--text-primary);
+      }
+
+      .support-secondary {
+        font-size: 0.85rem;
+        color: var(--text-muted);
+      }
+
       #viewer {
         position: relative;
         width: 100%;
-        aspect-ratio: 16 / 10;
-        min-height: clamp(320px, 45vh, 520px);
+        aspect-ratio: 16 / 9;
+        min-height: clamp(420px, 60vh, 720px);
         background: radial-gradient(circle at top, rgba(70, 80, 110, 0.32), rgba(9, 11, 18, 0.9));
         border-radius: var(--radius-xl);
         border: 1px solid var(--border-muted);
@@ -430,43 +519,50 @@
       </header>
       <main>
         <div class="panel-grid">
-        <article class="card" id="configuration-card">
-          <h2>Trailer &amp; Ramp Settings</h2>
-          <p>Configure the trailer geometry and leveling ramp dimensions. All values are stored on the RevCam.</p>
-          <form id="leveling-config">
-            <div class="field-group">
-              <h3>Trailer Geometry</h3>
-              <div class="field-row">
-                <label>
-                  Axle width (m)
-                  <input type="number" step="0.01" min="0.1" name="axle_width_m" value="2.4" required />
-                </label>
-                <label>
-                  Hitch to axle (m)
-                  <input type="number" step="0.01" min="0.1" name="hitch_to_axle_m" value="4.8" required />
-                </label>
-                <label>
-                  Trailer length (m)
-                  <input type="number" step="0.01" min="0.1" name="length_m" value="7.0" required />
-                </label>
-              </div>
-            </div>
-            <div class="field-group">
-              <h3>Ramp Specification</h3>
-              <div class="field-row">
-                <label>
-                  Ramp length (m)
-                  <input type="number" step="0.01" min="0.1" name="ramp_length_m" value="0.8" required />
-                </label>
-                <label>
-                  Ramp height (m)
-                  <input type="number" step="0.01" min="0.05" name="ramp_height_m" value="0.12" required />
-                </label>
-              </div>
-            </div>
-            <button type="submit">Save settings</button>
-            <p class="status" id="config-status" role="status"></p>
-          </form>
+        <article class="card" id="profile-card">
+          <h2>Trailer profile</h2>
+          <p>
+            Update geometry and ramp specifications from the
+            <a href="/settings#trailer">settings page</a>. Values shown here are read-only and
+            reflect the latest stored configuration.
+          </p>
+          <div class="profile-grid">
+            <section>
+              <h3>Geometry</h3>
+              <dl class="profile-stats">
+                <div>
+                  <dt>Axle width</dt>
+                  <dd id="profile-axle">2.40 m</dd>
+                </div>
+                <div>
+                  <dt>Hitch to axle</dt>
+                  <dd id="profile-hitch">4.80 m</dd>
+                </div>
+                <div>
+                  <dt>Overall length</dt>
+                  <dd id="profile-length">7.00 m</dd>
+                </div>
+              </dl>
+            </section>
+            <section>
+              <h3>Ramp</h3>
+              <dl class="profile-stats">
+                <div>
+                  <dt>Ramp length</dt>
+                  <dd id="profile-ramp-length">0.80 m</dd>
+                </div>
+                <div>
+                  <dt>Ramp height</dt>
+                  <dd id="profile-ramp-height">0.12 m</dd>
+                </div>
+                <div>
+                  <dt>Maximum travel (90%)</dt>
+                  <dd id="profile-ramp-travel">0.72 m</dd>
+                </div>
+              </dl>
+            </section>
+          </div>
+          <p class="status" id="profile-status" role="status"></p>
         </article>
 
         <article class="card">
@@ -567,10 +663,43 @@
                 <dd id="unhitched-hitch">—</dd>
               </dl>
             </section>
+            <section class="support-section">
+              <h3>Support adjustments</h3>
+              <dl class="support-stats" id="support-points">
+                <div data-point="left_wheel">
+                  <dt>Left wheel</dt>
+                  <dd>
+                    <span class="support-primary">—</span>
+                    <span class="support-secondary">Offset: —</span>
+                  </dd>
+                </div>
+                <div data-point="right_wheel">
+                  <dt>Right wheel</dt>
+                  <dd>
+                    <span class="support-primary">—</span>
+                    <span class="support-secondary">Offset: —</span>
+                  </dd>
+                </div>
+                <div data-point="hitch">
+                  <dt>Hitch jack</dt>
+                  <dd>
+                    <span class="support-primary">—</span>
+                    <span class="support-secondary">Offset: —</span>
+                  </dd>
+                </div>
+                <div data-point="rear_stabilizer">
+                  <dt>Rear stabilizer</dt>
+                  <dd>
+                    <span class="support-primary">—</span>
+                    <span class="support-secondary">Offset: —</span>
+                  </dd>
+                </div>
+              </dl>
+            </section>
           </div>
         </article>
 
-        <article class="card">
+        <article class="card" id="viewer-card">
           <h2>3D Trailer Visualiser</h2>
           <p>Orientation estimates drive this rendering. Adjust the sliders to see how the trailer shifts relative to level ground.</p>
           <div id="viewer" aria-label="3D rendering of trailer"></div>
@@ -613,8 +742,27 @@
       const unhitchedSide = document.getElementById("unhitched-side");
       const unhitchedRaise = document.getElementById("unhitched-raise");
       const unhitchedHitch = document.getElementById("unhitched-hitch");
-      const configStatus = document.getElementById("config-status");
-      const configForm = document.getElementById("leveling-config");
+      const profileStatus = document.getElementById("profile-status");
+      const profileFields = {
+        axle: document.getElementById("profile-axle"),
+        hitch: document.getElementById("profile-hitch"),
+        length: document.getElementById("profile-length"),
+        rampLength: document.getElementById("profile-ramp-length"),
+        rampHeight: document.getElementById("profile-ramp-height"),
+        rampTravel: document.getElementById("profile-ramp-travel"),
+      };
+      const supportElements = new Map();
+      const supportRoot = document.getElementById("support-points");
+      if (supportRoot) {
+        for (const element of supportRoot.querySelectorAll("[data-point]")) {
+          const key = element.dataset.point;
+          if (!key) continue;
+          supportElements.set(key, {
+            primary: element.querySelector(".support-primary"),
+            secondary: element.querySelector(".support-secondary"),
+          });
+        }
+      }
 
       const sensorState = {
         accelerometer: { x: 0, y: 1, z: 0 },
@@ -648,24 +796,90 @@
         return value.charAt(0).toUpperCase() + value.slice(1);
       }
 
-      function applyConfig(settings = DEFAULT_SETTINGS) {
-        if (!configForm) {
+      function formatMetres(value, fractionDigits = 2) {
+        if (!Number.isFinite(value)) return "—";
+        const digits = Math.max(0, Math.min(3, Math.round(fractionDigits)));
+        const magnitude = Math.abs(value);
+        return `${magnitude.toFixed(digits)} m`;
+      }
+
+      function formatOffset(value) {
+        if (!Number.isFinite(value)) {
+          return "Offset: —";
+        }
+        const centimetres = value * 100;
+        const sign = centimetres >= 0 ? "+" : "−";
+        return `Offset: ${sign}${Math.abs(centimetres).toFixed(1)} cm`;
+      }
+
+      function applyProfile(settings = DEFAULT_SETTINGS) {
+        const geometry = settings?.geometry ?? DEFAULT_SETTINGS.geometry;
+        const ramp = settings?.ramp ?? DEFAULT_SETTINGS.ramp;
+        if (profileFields.axle) {
+          const value = geometry?.axle_width_m ?? DEFAULT_SETTINGS.geometry.axle_width_m;
+          profileFields.axle.textContent = formatMetres(value);
+        }
+        if (profileFields.hitch) {
+          const value = geometry?.hitch_to_axle_m ?? DEFAULT_SETTINGS.geometry.hitch_to_axle_m;
+          profileFields.hitch.textContent = formatMetres(value);
+        }
+        if (profileFields.length) {
+          const value = geometry?.length_m ?? DEFAULT_SETTINGS.geometry.length_m;
+          profileFields.length.textContent = formatMetres(value);
+        }
+        if (profileFields.rampLength) {
+          const value = ramp?.length_m ?? DEFAULT_SETTINGS.ramp.length_m;
+          profileFields.rampLength.textContent = formatMetres(value);
+        }
+        if (profileFields.rampHeight) {
+          const value = ramp?.height_m ?? DEFAULT_SETTINGS.ramp.height_m;
+          profileFields.rampHeight.textContent = formatMetres(value);
+        }
+        if (profileFields.rampTravel) {
+          const rampLength = ramp?.length_m ?? DEFAULT_SETTINGS.ramp.length_m;
+          profileFields.rampTravel.textContent = formatMetres(rampLength * 0.9);
+        }
+      }
+
+      function updateSupportPoints(points) {
+        if (!supportElements.size) {
           return;
         }
-        const geometry = settings.geometry ?? DEFAULT_SETTINGS.geometry;
-        const ramp = settings.ramp ?? DEFAULT_SETTINGS.ramp;
-        configForm.axle_width_m.value = geometry.axle_width_m ?? DEFAULT_SETTINGS.geometry.axle_width_m;
-        configForm.hitch_to_axle_m.value = geometry.hitch_to_axle_m ?? DEFAULT_SETTINGS.geometry.hitch_to_axle_m;
-        configForm.length_m.value = geometry.length_m ?? DEFAULT_SETTINGS.geometry.length_m;
-        configForm.ramp_length_m.value = ramp.length_m ?? DEFAULT_SETTINGS.ramp.length_m;
-        configForm.ramp_height_m.value = ramp.height_m ?? DEFAULT_SETTINGS.ramp.height_m;
+        for (const [key, refs] of supportElements.entries()) {
+          const primary = refs.primary;
+          const secondary = refs.secondary;
+          if (!(primary instanceof HTMLElement) || !(secondary instanceof HTMLElement)) {
+            continue;
+          }
+          const entry = points && typeof points === "object" ? points[key] : null;
+          if (!entry) {
+            primary.textContent = "—";
+            secondary.textContent = "Offset: —";
+            continue;
+          }
+          const action = entry.action;
+          const adjustment = Number(entry.adjustment_m);
+          const offset = Number(entry.offset_m);
+          let primaryText = "—";
+          if (action === "level" || !Number.isFinite(adjustment) || Math.abs(adjustment) < 1e-4) {
+            primaryText = "Level";
+          } else if (action === "raise") {
+            primaryText = `Raise ${formatDistance(adjustment)}`;
+          } else if (action === "lower") {
+            primaryText = `Lower ${formatDistance(adjustment)}`;
+          } else {
+            primaryText = formatSide(action);
+          }
+          primary.textContent = primaryText;
+          secondary.textContent = Number.isFinite(offset) ? formatOffset(offset) : "Offset: —";
+        }
       }
 
       function updateDisplays(evaluation, meta) {
         if (!evaluation) {
           return;
         }
-        const { orientation, hitched, unhitched } = evaluation;
+        const { orientation, hitched, unhitched, support_points: supportPoints } = evaluation;
         latestOrientation = orientation;
         rollDisplay.textContent = formatAngle(orientation.roll);
         pitchDisplay.textContent = formatAngle(orientation.pitch);
@@ -697,6 +911,8 @@
           const direction = formatSide(hitchDir);
           unhitchedHitch.textContent = `${direction} ${hitchAmount}`;
         }
+
+        updateSupportPoints(supportPoints);
 
         if (meta) {
           const { modeLabel, analysisMessage } = meta;
@@ -756,7 +972,15 @@
             orientation: data.orientation,
             hitched: data.hitched,
             unhitched: data.unhitched,
+            support_points: data.support_points,
           }, { modeLabel, analysisMessage });
+          if (data.settings) {
+            applyProfile(data.settings);
+            if (profileStatus) {
+              profileStatus.textContent = "";
+              profileStatus.classList.remove("error");
+            }
+          }
           const now = performance.now();
           const delta = now - lastSampleTime;
           lastSampleTime = now;
@@ -820,74 +1044,29 @@
         }
       }
 
-      async function loadConfig() {
+      async function loadProfile() {
         try {
           const response = await fetch("/api/leveling/config");
           if (!response.ok) {
             throw new Error(`HTTP ${response.status}`);
           }
           const data = await response.json();
-          applyConfig(data);
-          requestSample();
+          applyProfile(data);
+          if (profileStatus) {
+            profileStatus.textContent = "";
+            profileStatus.classList.remove("error");
+          }
         } catch (error) {
           console.error(error);
-          if (configStatus) {
-            configStatus.textContent = "Unable to load current settings";
-            configStatus.classList.add("error");
+          applyProfile(DEFAULT_SETTINGS);
+          if (profileStatus) {
+            const message = error instanceof Error ? error.message : "Unable to load trailer profile";
+            profileStatus.textContent = `Error: ${message}`;
+            profileStatus.classList.add("error");
           }
-          applyConfig(DEFAULT_SETTINGS);
+        } finally {
           requestSample();
         }
-      }
-
-      function initConfigForm() {
-        if (!configForm) {
-          return;
-        }
-        configForm.addEventListener("submit", async (event) => {
-          event.preventDefault();
-          if (configStatus) {
-            configStatus.textContent = "Saving…";
-            configStatus.classList.remove("error", "success");
-          }
-          const payload = {
-            geometry: {
-              axle_width_m: parseFloat(configForm.axle_width_m.value),
-              hitch_to_axle_m: parseFloat(configForm.hitch_to_axle_m.value),
-              length_m: parseFloat(configForm.length_m.value),
-            },
-            ramp: {
-              length_m: parseFloat(configForm.ramp_length_m.value),
-              height_m: parseFloat(configForm.ramp_height_m.value),
-            },
-          };
-          try {
-            const response = await fetch("/api/leveling/config", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(payload),
-            });
-            if (!response.ok) {
-              const error = await response.json().catch(() => ({ detail: "Invalid data" }));
-              throw new Error(error.detail || "Invalid data");
-            }
-            if (configStatus) {
-              configStatus.textContent = "Settings saved";
-              configStatus.classList.add("success");
-            }
-            const data = await response.json().catch(() => null);
-            if (data) {
-              applyConfig(data);
-            }
-            requestSample();
-          } catch (error) {
-            console.error(error);
-            if (configStatus) {
-              configStatus.textContent = `Error: ${error.message}`;
-              configStatus.classList.add("error");
-            }
-          }
-        });
       }
 
       function initThree() {
@@ -940,7 +1119,9 @@
             const box = geometry.boundingBox;
             const center = box.getCenter(new THREE.Vector3());
             geometry.translate(-center.x, -center.y, -center.z);
-            trailer.position.y = 0.35;
+            geometry.computeBoundingBox();
+            const adjustedBox = geometry.boundingBox;
+            trailer.position.y = -adjustedBox.min.y;
             scene.add(trailer);
           },
           undefined,
@@ -967,11 +1148,10 @@
         animate();
       }
 
-      applyConfig(DEFAULT_SETTINGS);
+      applyProfile(DEFAULT_SETTINGS);
       initSliders();
       initModeToggle();
-      initConfigForm();
-      loadConfig();
+      loadProfile();
       initThree();
       setInterval(requestSample, SAMPLE_INTERVAL);
       requestSample();

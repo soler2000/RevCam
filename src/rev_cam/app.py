@@ -793,6 +793,7 @@ def create_app(
             "analysis": evaluation[mode_key],
             "hitched": evaluation["hitched"],
             "unhitched": evaluation["unhitched"],
+            "support_points": evaluation["support_points"],
             "settings": settings.to_dict(),
         }
 
