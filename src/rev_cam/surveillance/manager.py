@@ -7,16 +7,18 @@ from pathlib import Path
 from threading import RLock
 from typing import Iterable, Mapping, Sequence
 
-import base64
 import hashlib
 import json
 import sqlite3
 import uuid
 import zipfile
 
+import numpy as np
+
 from fastapi import HTTPException
 
 from .settings import SurveillanceSettings, SurveillanceSettingsStore
+from .video import encode_frames_to_mp4, ensure_rgb_frame, write_thumbnail
 
 
 @dataclass(slots=True)
@@ -112,9 +114,26 @@ class SurveillanceManager:
         else:
             duration_val = None
 
-        clip = self.create_manual_clip(duration_val)
+        settings = self.load_settings()
+        end_ts = datetime.now(timezone.utc)
+        duration = (
+            float(duration_val)
+            if duration_val is not None
+            else float(min(30, settings.clip_max_length_s))
+        )
+        if duration <= 0:
+            raise ValueError("Manual clip duration must be positive")
+        start_ts = end_ts - timedelta(seconds=duration)
+        clip = self.create_clip_entry(
+            start_ts=start_ts,
+            end_ts=end_ts,
+            has_audio=settings.audio_enabled,
+            motion_score=None,
+            settings=settings,
+            reason="manual",
+        )
         request_id = uuid.uuid4().hex[:12]
-        requested_at = clip.start_ts
+        requested_at = start_ts
         payload = {
             "id": request_id,
             "requested_at": requested_at.isoformat(),
@@ -129,38 +148,123 @@ class SurveillanceManager:
             "clip": clip,
         }
 
-    def create_manual_clip(self, duration_s: float | None) -> ClipRecord:
-        settings = self.load_settings()
-        duration = float(duration_s) if duration_s is not None else float(min(30, settings.clip_max_length_s))
-        if duration <= 0:
-            raise ValueError("Manual clip duration must be positive")
-        if duration > settings.clip_max_length_s:
-            duration = float(settings.clip_max_length_s)
-        end_ts = datetime.now(timezone.utc)
-        start_ts = end_ts - timedelta(seconds=duration)
-        return self._create_placeholder_clip(
-            start_ts=start_ts,
-            end_ts=end_ts,
-            has_audio=settings.audio_enabled,
-            motion_score=None,
-            reason="manual",
-        )
-
-    def create_motion_clip(
+    def create_clip_entry(
         self,
         *,
         start_ts: datetime,
         end_ts: datetime,
+        has_audio: bool,
         motion_score: float | None,
+        settings: SurveillanceSettings,
+        reason: str,
     ) -> ClipRecord:
-        settings = self.load_settings()
-        return self._create_placeholder_clip(
+        folder = self.ensure_day_folder(end_ts)
+        iso = end_ts.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        clip_id = uuid.uuid4().hex[:8]
+        clip_path = folder / f"clip-{iso}-{clip_id}.mp4"
+        thumb_path = folder / f"clip-{iso}-{clip_id}.jpg"
+        record = ClipRecord(
+            id=-1,
+            path=str(clip_path),
             start_ts=start_ts,
             end_ts=end_ts,
-            has_audio=settings.audio_enabled,
+            duration_s=(end_ts - start_ts).total_seconds(),
+            size_bytes=0,
+            has_audio=has_audio,
+            thumb_path=str(thumb_path),
             motion_score=motion_score,
-            reason="motion",
+            settings_hash=self._hash_settings(settings),
         )
+        with self._mutex:
+            with self._connect() as conn:
+                cursor = conn.execute(
+                    """
+                    INSERT INTO clips (
+                        path, start_ts, end_ts, duration_s, size_bytes,
+                        has_audio, thumb_path, motion_score, settings_hash
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        record.path,
+                        record.start_ts.isoformat(),
+                        record.end_ts.isoformat(),
+                        record.duration_s,
+                        0,
+                        1 if record.has_audio else 0,
+                        record.thumb_path,
+                        record.motion_score,
+                        record.settings_hash,
+                    ),
+                )
+                conn.commit()
+                record = ClipRecord(
+                    id=int(cursor.lastrowid),
+                    path=record.path,
+                    start_ts=record.start_ts,
+                    end_ts=record.end_ts,
+                    duration_s=record.duration_s,
+                    size_bytes=0,
+                    has_audio=record.has_audio,
+                    thumb_path=record.thumb_path,
+                    motion_score=record.motion_score,
+                    settings_hash=record.settings_hash,
+                )
+        return record
+
+    def update_clip_entry(
+        self,
+        clip_id: int,
+        *,
+        start_ts: datetime,
+        end_ts: datetime,
+        size_bytes: int,
+        has_audio: bool,
+        thumb_path: Path | None,
+        motion_score: float | None,
+        settings: SurveillanceSettings | None = None,
+    ) -> ClipRecord:
+        if settings is None:
+            settings = self.load_settings()
+        duration = (end_ts - start_ts).total_seconds()
+        with self._mutex:
+            with self._connect() as conn:
+                conn.execute(
+                    """
+                    UPDATE clips
+                    SET start_ts = ?,
+                        end_ts = ?,
+                        duration_s = ?,
+                        size_bytes = ?,
+                        has_audio = ?,
+                        thumb_path = ?,
+                        motion_score = ?,
+                        settings_hash = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        start_ts.isoformat(),
+                        end_ts.isoformat(),
+                        duration,
+                        int(size_bytes),
+                        1 if has_audio else 0,
+                        str(thumb_path) if thumb_path else None,
+                        motion_score,
+                        self._hash_settings(settings),
+                        int(clip_id),
+                    ),
+                )
+                conn.commit()
+                row = conn.execute(
+                    """
+                    SELECT id, path, start_ts, end_ts, duration_s, size_bytes,
+                           has_audio, thumb_path, motion_score, settings_hash
+                    FROM clips WHERE id = ?
+                    """,
+                    (int(clip_id),),
+                ).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="Clip not found")
+        return self._row_to_clip(row)
 
     # ------------------------------------------------------------------
     # Clip operations
@@ -332,18 +436,54 @@ class SurveillanceManager:
         return folder
 
     def create_test_clip(self) -> ClipRecord:
-        """Create a placeholder clip for development and testing."""
+        """Create a short synthetic clip for development and testing."""
 
         settings = self.load_settings()
         now = datetime.now(timezone.utc)
         start_ts = now - timedelta(seconds=8)
         end_ts = now
-        return self._create_placeholder_clip(
+        clip = self.create_clip_entry(
             start_ts=start_ts,
             end_ts=end_ts,
             has_audio=settings.audio_enabled,
             motion_score=1.0,
+            settings=settings,
             reason="test",
+        )
+        width, height = (640, 360)
+        if "x" in settings.resolution:
+            try:
+                width, height = [int(part) for part in settings.resolution.split("x", 1)]
+            except ValueError:
+                width, height = (640, 360)
+        frame_count = max(1, int(settings.framerate * 2))
+        frames: list[np.ndarray] = []
+        for index in range(frame_count):
+            progress = index / max(1, frame_count - 1)
+            frame = np.zeros((height, width, 3), dtype=np.uint8)
+            frame[..., 0] = int(255 * progress)
+            frame[..., 1] = int(255 * (1.0 - progress))
+            frame[..., 2] = 128
+            frames.append(frame)
+        clip_path = Path(clip.path)
+        encode_frames_to_mp4(
+            clip_path,
+            frames,
+            fps=max(1, settings.framerate),
+            encoding=settings.encoding,
+        )
+        thumb_path = Path(clip.thumb_path) if clip.thumb_path else None
+        if thumb_path is not None:
+            write_thumbnail(thumb_path, frames[len(frames) // 2])
+        return self.update_clip_entry(
+            clip.id,
+            start_ts=start_ts,
+            end_ts=end_ts,
+            size_bytes=clip_path.stat().st_size,
+            has_audio=settings.audio_enabled,
+            thumb_path=thumb_path,
+            motion_score=1.0,
+            settings=settings,
         )
 
     # ------------------------------------------------------------------
@@ -420,202 +560,5 @@ class SurveillanceManager:
         stem = str(file_name).replace(":", "-")
         path = folder / f"manual-{stem}-{request_id}.json"
         path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
-
-    def _create_placeholder_clip(
-        self,
-        *,
-        start_ts: datetime,
-        end_ts: datetime,
-        has_audio: bool,
-        motion_score: float | None,
-        reason: str,
-    ) -> ClipRecord:
-        folder = self.ensure_day_folder(end_ts)
-        iso = end_ts.replace(microsecond=0).isoformat().replace("+00:00", "Z")
-        clip_id = uuid.uuid4().hex[:8]
-        clip_name = f"clip-{iso}-{clip_id}.mp4"
-        clip_path = folder / clip_name
-        summary = (
-            f"RevCam placeholder clip generated for {reason} event\n"
-            f"Start: {start_ts.isoformat()}\nEnd: {end_ts.isoformat()}\n"
-        )
-        clip_path.write_text(summary, encoding="utf-8")
-        thumb_path = folder / f"clip-{iso}-{clip_id}.jpg"
-        thumb_path.write_bytes(_PLACEHOLDER_JPEG)
-        settings = self.load_settings()
-        return self.register_clip(
-            start_ts=start_ts,
-            end_ts=end_ts,
-            path=clip_path,
-            thumb_path=thumb_path,
-            has_audio=has_audio,
-            motion_score=motion_score,
-            settings=settings,
-        )
-
-
-_PLACEHOLDER_JPEG = bytes(
-    [
-        0xFF,
-        0xD8,
-        0xFF,
-        0xE0,
-        0x00,
-        0x10,
-        0x4A,
-        0x46,
-        0x49,
-        0x46,
-        0x00,
-        0x01,
-        0x01,
-        0x00,
-        0x00,
-        0x01,
-        0x00,
-        0x01,
-        0x00,
-        0x00,
-        0xFF,
-        0xDB,
-        0x00,
-        0x43,
-        0x00,
-        0x08,
-        0x06,
-        0x06,
-        0x07,
-        0x06,
-        0x05,
-        0x08,
-        0x07,
-        0x07,
-        0x07,
-        0x09,
-        0x09,
-        0x08,
-        0x0A,
-        0x0C,
-        0x14,
-        0x0D,
-        0x0C,
-        0x0B,
-        0x0B,
-        0x0C,
-        0x19,
-        0x12,
-        0x13,
-        0x0F,
-        0x14,
-        0x1D,
-        0x1A,
-        0x1F,
-        0x1E,
-        0x1D,
-        0x1A,
-        0x1C,
-        0x1C,
-        0x20,
-        0x24,
-        0x2E,
-        0x27,
-        0x20,
-        0x28,
-        0x23,
-        0x1C,
-        0x1C,
-        0x2B,
-        0x37,
-        0x2B,
-        0x28,
-        0x30,
-        0x34,
-        0x39,
-        0x3A,
-        0x3F,
-        0x3F,
-        0x3F,
-        0x1F,
-        0x27,
-        0x39,
-        0x3D,
-        0x3F,
-        0x34,
-        0x2E,
-        0x37,
-        0x38,
-        0xFF,
-        0xC0,
-        0x00,
-        0x0B,
-        0x08,
-        0x00,
-        0x01,
-        0x00,
-        0x01,
-        0x01,
-        0x01,
-        0x11,
-        0x00,
-        0xFF,
-        0xC4,
-        0x00,
-        0x14,
-        0x00,
-        0x01,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0xFF,
-        0xC4,
-        0x00,
-        0x14,
-        0x10,
-        0x01,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0xFF,
-        0xDA,
-        0x00,
-        0x08,
-        0x01,
-        0x01,
-        0x00,
-        0x00,
-        0x3F,
-        0x00,
-        0xD2,
-        0xCF,
-        0x20,
-        0xFF,
-        0xD9,
-    ]
-)
-
 
 __all__ = ["ClipFilters", "ClipRecord", "SurveillanceManager"]

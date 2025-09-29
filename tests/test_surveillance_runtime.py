@@ -3,7 +3,7 @@ from pathlib import Path
 
 import numpy as np
 
-from rev_cam.surveillance import ClipFilters, MotionRecorder, SurveillanceManager
+from rev_cam.surveillance import ClipFilters, SurveillanceManager, SurveillanceRuntime
 
 
 def test_motion_recorder_emits_clip_on_motion(tmp_path):
@@ -21,38 +21,36 @@ def test_motion_recorder_emits_clip_on_motion(tmp_path):
         }
     )
 
-    recorder = MotionRecorder(manager)
-    recorder.update_settings(settings)
+    runtime = SurveillanceRuntime(manager)
+    runtime.notify_settings_updated(settings)
+    runtime.set_active(True)
 
     now = datetime.now(timezone.utc)
     base_frame = np.zeros((120, 160, 3), dtype=np.uint8)
     motion_frame = base_frame.copy()
     motion_frame[:, :80] = 255
 
-    # Prime the background with still frames.
-    for index in range(3):
-        recorder.process_frame(base_frame, timestamp=now + timedelta(seconds=index * 0.05))
+    for index in range(10):
+        runtime.ingest_frame(base_frame, timestamp=now + timedelta(seconds=index * 0.05))
 
-    result = None
-    # Feed motion frames to trigger recording.
-    for index in range(5):
-        recorder.process_frame(
+    motion_start = now + timedelta(seconds=0.5)
+    for index in range(10):
+        runtime.ingest_frame(
             motion_frame,
-            timestamp=now + timedelta(seconds=0.2 + index * 0.05),
+            timestamp=motion_start + timedelta(seconds=index * 0.05),
         )
 
-    # Supply idle frames so the recorder finalises the clip.
-    for index in range(5):
-        result = recorder.process_frame(
+    settle_start = motion_start + timedelta(seconds=0.5)
+    for index in range(20):
+        runtime.ingest_frame(
             base_frame,
-            timestamp=now + timedelta(seconds=0.5 + index * 0.1),
+            timestamp=settle_start + timedelta(seconds=index * 0.05),
         )
-        if result is not None:
-            break
 
-    assert result is not None
-    assert Path(result.path).exists()
+    runtime.set_active(False)
 
     clips, total = manager.list_clips(ClipFilters())
     assert total == 1
-    assert clips[0].id == result.id
+    clip = clips[0]
+    assert Path(clip.path).exists()
+    assert Path(clip.path).stat().st_size > 0
