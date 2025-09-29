@@ -740,6 +740,12 @@ class WiFiManager:
                 return float("-inf")
             return float(network.signal)
 
+        known_ssids = {
+            ssid.strip()
+            for ssid in self._credentials.list_networks()
+            if isinstance(ssid, str) and ssid.strip()
+        }
+
         try:
             initial_status = self._fetch_status()
         except WiFiError as exc:
@@ -750,12 +756,18 @@ class WiFiManager:
             )
         else:
             if initial_status.connected and not initial_status.hotspot_active:
-                self._record_log(
-                    "auto_connect_skip",
-                    "Wi-Fi already connected; skipping automatic network selection.",
-                    status=initial_status,
-                )
-                return initial_status
+                identifiers = {
+                    value.strip()
+                    for value in (initial_status.profile, initial_status.ssid)
+                    if isinstance(value, str) and value.strip()
+                }
+                if identifiers & known_ssids:
+                    self._record_log(
+                        "auto_connect_skip",
+                        "Wi-Fi already connected; skipping automatic network selection.",
+                        status=initial_status,
+                    )
+                    return initial_status
 
         self._record_log(
             "auto_connect_start",
@@ -769,7 +781,6 @@ class WiFiManager:
                 "auto_connect_scan_error",
                 f"Unable to scan Wi-Fi networks: {exc}.",
             )
-        known_ssids = {ssid.strip() for ssid in self._credentials.list_networks() if ssid.strip()}
         candidates: dict[str, WiFiNetwork] = {}
         for network in scan_results:
             ssid = network.ssid.strip()
