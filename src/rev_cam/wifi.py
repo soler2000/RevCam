@@ -623,20 +623,10 @@ class NMCLIBackend(WiFiBackend):
                     "802-11-wireless-security.wep-key2",
                     "802-11-wireless-security.wep-key3",
                 ):
-                    try:
-                        self._run(
-                            [
-                                "nmcli",
-                                "connection",
-                                "modify",
-                                connection_name,
-                                f"-{property_name}",
-                            ]
+                    if not self._clear_security_property(connection_name, property_name):
+                        logging.getLogger(__name__).debug(
+                            "Unable to clear hotspot security property %s", property_name
                         )
-                    except WiFiError:
-                        # Older NetworkManager versions may not expose all key
-                        # slots; ignore missing properties.
-                        pass
                 try:
                     self._run(["nmcli", "connection", "down", connection_name])
                 except WiFiError:
@@ -651,6 +641,41 @@ class NMCLIBackend(WiFiBackend):
         status.hotspot_active = True
         self._last_hotspot_profile = connection_name
         return status
+
+    def _clear_security_property(self, connection_name: str, property_name: str) -> bool:
+        """Remove a security property for the given connection.
+
+        Returns True if NetworkManager accepted either the removal or empty
+        string assignment, False otherwise.
+        """
+
+        try:
+            self._run(
+                [
+                    "nmcli",
+                    "connection",
+                    "modify",
+                    connection_name,
+                    f"-{property_name}",
+                ]
+            )
+            return True
+        except WiFiError:
+            pass
+        try:
+            self._run(
+                [
+                    "nmcli",
+                    "connection",
+                    "modify",
+                    connection_name,
+                    property_name,
+                    "",
+                ]
+            )
+            return True
+        except WiFiError:
+            return False
 
     def stop_hotspot(self, profile: str | None) -> WiFiStatus:
         connection_name = profile or self._last_hotspot_profile or "RevCam Hotspot"

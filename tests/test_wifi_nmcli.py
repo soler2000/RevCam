@@ -102,13 +102,30 @@ def test_nmcli_start_hotspot_opens_network_without_password(
         "802-11-wireless-security.key-mgmt",
         "none",
     ] in commands
-    assert [
-        "nmcli",
-        "connection",
-        "modify",
-        "RevCam Hotspot",
-        "-802-11-wireless-security.psk",
-    ] in commands
+
+    def _cleared(property_name: str) -> bool:
+        return any(
+            command
+            == [
+                "nmcli",
+                "connection",
+                "modify",
+                "RevCam Hotspot",
+                f"-{property_name}",
+            ]
+            or command
+            == [
+                "nmcli",
+                "connection",
+                "modify",
+                "RevCam Hotspot",
+                property_name,
+                "",
+            ]
+            for command in commands
+        )
+
+    assert _cleared("802-11-wireless-security.psk")
     assert "password" not in {item for command in commands for item in command}
     assert ["nmcli", "connection", "up", "RevCam Hotspot"] in commands
 
