@@ -99,7 +99,7 @@ def test_nmcli_start_hotspot_opens_network_without_password(
         "connection",
         "modify",
         "RevCam Hotspot",
-        "wifi-sec.key-mgmt",
+        "802-11-wireless-security.key-mgmt",
         "none",
     ] in commands
     assert [
@@ -107,7 +107,7 @@ def test_nmcli_start_hotspot_opens_network_without_password(
         "connection",
         "modify",
         "RevCam Hotspot",
-        "-wifi-sec.psk",
+        "-802-11-wireless-security.psk",
     ] in commands
     assert "password" not in {item for command in commands for item in command}
     assert ["nmcli", "connection", "up", "RevCam Hotspot"] in commands

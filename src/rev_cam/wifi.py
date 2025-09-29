@@ -576,7 +576,7 @@ class NMCLIBackend(WiFiBackend):
                         "connection",
                         "modify",
                         connection_name,
-                        "wifi.mode",
+                        "802-11-wireless.mode",
                         "ap",
                     ],
                     [
@@ -608,7 +608,7 @@ class NMCLIBackend(WiFiBackend):
                         "connection",
                         "modify",
                         connection_name,
-                        "wifi-sec.key-mgmt",
+                        "802-11-wireless-security.key-mgmt",
                         "none",
                     ],
                 ]
@@ -617,11 +617,11 @@ class NMCLIBackend(WiFiBackend):
                 # Remove any previously configured passphrases or keys so the
                 # hotspot broadcasts as an open network.
                 for property_name in (
-                    "wifi-sec.psk",
-                    "wifi-sec.wep-key0",
-                    "wifi-sec.wep-key1",
-                    "wifi-sec.wep-key2",
-                    "wifi-sec.wep-key3",
+                    "802-11-wireless-security.psk",
+                    "802-11-wireless-security.wep-key0",
+                    "802-11-wireless-security.wep-key1",
+                    "802-11-wireless-security.wep-key2",
+                    "802-11-wireless-security.wep-key3",
                 ):
                     try:
                         self._run(
