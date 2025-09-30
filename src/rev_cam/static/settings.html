@@ -861,6 +861,19 @@
         font-size: 0.9rem;
         color: var(--text-muted);
       }
+      .wifi-network .badge {
+        display: inline-flex;
+        align-items: center;
+        margin-top: var(--space-xs);
+        padding: 0 var(--space-sm);
+        border-radius: var(--radius-pill);
+        background: var(--surface-strong);
+        color: var(--text-muted);
+        font-size: 0.75rem;
+        font-weight: 600;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+      }
       .wifi-network .actions {
         display: flex;
         flex-wrap: wrap;
@@ -6966,6 +6979,45 @@
         }
       }
 
+      function showWifiConnectFormForNetwork(network, options = {}) {
+        if (!wifiConnectForm || !wifiConnectSsidInput || !wifiConnectSelected) {
+          return;
+        }
+        const identifier =
+          network && typeof network.ssid === "string" ? network.ssid.trim() : "";
+        const ssid = identifier || "";
+        wifiConnectForm.hidden = false;
+        wifiConnectSsidInput.value = ssid;
+        wifiConnectSelected.textContent = ssid ? `Selected network: ${ssid}` : "";
+        const updatingPassword = options && options.updatingPassword === true;
+        if (wifiConnectPasswordInput) {
+          wifiConnectPasswordInput.value = "";
+          const hasStoredCredentials =
+            !!network && network.stored_credentials === true && !network.hidden;
+          if (hasStoredCredentials && !updatingPassword) {
+            wifiConnectPasswordInput.placeholder =
+              "Saved network – leave blank to use stored password.";
+            wifiConnectPasswordInput.dataset.knownNetwork = "true";
+            wifiConnectPasswordInput.title = "Leave blank to reuse the saved credentials.";
+          } else if (hasStoredCredentials && updatingPassword) {
+            wifiConnectPasswordInput.placeholder =
+              "Enter a new password to update saved credentials.";
+            wifiConnectPasswordInput.dataset.knownNetwork = "true";
+            wifiConnectPasswordInput.title =
+              "Enter a new password to replace the stored credentials.";
+          } else {
+            wifiConnectPasswordInput.placeholder = network && network.security
+              ? `Security: ${network.security}`
+              : "Password (if required)";
+            delete wifiConnectPasswordInput.dataset.knownNetwork;
+            wifiConnectPasswordInput.title = "Enter the network password if required.";
+          }
+        }
+        if (wifiRollbackInput && typeof wifiRollbackInput.value === "string" && !wifiRollbackInput.value) {
+          wifiRollbackInput.value = "30";
+        }
+      }
+
       function renderWifiNetworks(networks) {
         if (!wifiNetworkList) {
           return;
@@ -7004,7 +7056,10 @@
               detailParts.push(freqText);
             }
           }
-          if (network.known) {
+          const hasStoredCredentials = network && network.stored_credentials === true;
+          if (hasStoredCredentials) {
+            detailParts.push("saved password");
+          } else if (network.known) {
             detailParts.push("saved");
           }
           if (network.active) {
@@ -7012,6 +7067,12 @@
           }
           details.textContent = detailParts.length ? detailParts.join(" • ") : "Details unavailable";
           info.appendChild(details);
+          if (hasStoredCredentials) {
+            const badge = document.createElement("span");
+            badge.className = "badge";
+            badge.textContent = "Saved password";
+            info.appendChild(badge);
+          }
           item.appendChild(info);
           const actions = document.createElement("div");
           actions.className = "actions";
@@ -7025,33 +7086,39 @@
             connectButton.disabled = true;
           } else {
             connectButton.textContent = "Connect";
-            connectButton.addEventListener("click", () => {
-              if (!wifiConnectForm || !wifiConnectSsidInput || !wifiConnectSelected) {
-                return;
-              }
-              wifiConnectForm.hidden = false;
-              wifiConnectSsidInput.value = ssid;
-              wifiConnectSelected.textContent = `Selected network: ${ssid}`;
-              if (wifiConnectPasswordInput) {
-                wifiConnectPasswordInput.value = "";
-                if (network.known) {
-                  wifiConnectPasswordInput.placeholder = "Saved network – leave blank to use stored password.";
-                  wifiConnectPasswordInput.dataset.knownNetwork = "true";
-                  wifiConnectPasswordInput.title = "Leave blank to reuse the saved credentials.";
-                } else {
-                  wifiConnectPasswordInput.placeholder = network.security
-                    ? `Security: ${network.security}`
-                    : "Password (if required)";
-                  delete wifiConnectPasswordInput.dataset.knownNetwork;
-                  wifiConnectPasswordInput.title = "Enter the network password if required.";
+            if (hasStoredCredentials) {
+              connectButton.title = "Connect using the saved password.";
+              connectButton.addEventListener("click", () => {
+                if (!wifiConnectForm || !wifiConnectSsidInput) {
+                  return;
                 }
-              }
-              if (wifiRollbackInput && typeof wifiRollbackInput.value === "string" && !wifiRollbackInput.value) {
-                wifiRollbackInput.value = "30";
-              }
-            });
+                hideWifiConnectForm();
+                wifiConnectSsidInput.value = ssid;
+                if (wifiConnectPasswordInput) {
+                  wifiConnectPasswordInput.value = "";
+                }
+                connectToWifi().catch((err) => console.error(err));
+              });
+            } else {
+              connectButton.addEventListener("click", () => {
+                showWifiConnectFormForNetwork(network);
+              });
+            }
           }
           actions.appendChild(connectButton);
+          if (hasStoredCredentials) {
+            const updateButton = document.createElement("button");
+            updateButton.type = "button";
+            updateButton.className = "secondary-button";
+            updateButton.textContent = "Update password";
+            updateButton.addEventListener("click", () => {
+              showWifiConnectFormForNetwork(network, { updatingPassword: true });
+              if (wifiConnectPasswordInput) {
+                wifiConnectPasswordInput.focus({ preventScroll: true });
+              }
+            });
+            actions.appendChild(updateButton);
+          }
           if (network.known) {
             const forgetButton = document.createElement("button");
             forgetButton.type = "button";

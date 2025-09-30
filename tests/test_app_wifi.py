@@ -237,6 +237,25 @@ def test_wifi_scan_endpoint(client: TestClient) -> None:
     payload = response.json()
     assert "networks" in payload
     assert any(network.get("active") for network in payload["networks"])
+    assert all("stored_credentials" in network for network in payload["networks"])
+
+
+def test_wifi_scan_marks_stored_credentials(tmp_path: Path) -> None:
+    backend = FakeWiFiBackend()
+    credentials_path = tmp_path / "wifi_credentials.json"
+    store = WiFiCredentialStore(credentials_path)
+    store.set_network_password("Home", "homepass")
+    manager = WiFiManager(
+        backend=backend,
+        rollback_timeout=0.05,
+        poll_interval=0.005,
+        hotspot_rollback_timeout=0.05,
+        credential_store=store,
+    )
+
+    networks = manager.scan_networks()
+
+    assert any(network.ssid == "Home" and network.stored_credentials for network in networks)
 
 
 def test_wifi_log_endpoint_initially_empty(client: TestClient) -> None:

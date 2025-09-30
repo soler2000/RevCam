@@ -152,6 +152,7 @@ class WiFiNetwork:
     known: bool = False
     active: bool = False
     hidden: bool = False
+    stored_credentials: bool = False
 
     def to_dict(self) -> dict[str, object | None]:
         return {
@@ -163,6 +164,7 @@ class WiFiNetwork:
             "known": self.known,
             "active": self.active,
             "hidden": self.hidden,
+            "stored_credentials": self.stored_credentials,
         }
 
 
@@ -913,7 +915,23 @@ class WiFiManager:
         return self._fetch_status()
 
     def scan_networks(self) -> Sequence[WiFiNetwork]:
-        return self._backend.scan()
+        networks = list(self._backend.scan())
+        stored = {
+            ssid.strip()
+            for ssid in self._credentials.list_networks()
+            if isinstance(ssid, str) and ssid.strip()
+        }
+        if stored:
+            for network in networks:
+                if network.hidden:
+                    continue
+                identifier = network.ssid.strip()
+                if not identifier:
+                    continue
+                if identifier in stored:
+                    network.stored_credentials = True
+                    network.known = True
+        return networks
 
     def auto_connect_known_networks(self, *, start_hotspot: bool = True) -> WiFiStatus:
         """Join the strongest known network or fall back to hotspot mode."""
@@ -1067,10 +1085,12 @@ class WiFiManager:
         else:
             raise WiFiError("Password must be a string or null")
         supplied_password = cleaned_password if password is not None else None
+        stored_credentials_used = False
         if cleaned_password is None:
             stored_password = self._credentials.get_network_password(cleaned_ssid)
             if stored_password:
                 cleaned_password = stored_password
+                stored_credentials_used = True
         attempt_metadata: dict[str, object | None] = {
             "target": cleaned_ssid,
             "development_mode": development_mode,
@@ -1078,6 +1098,7 @@ class WiFiManager:
         if rollback_timeout is not None:
             attempt_metadata["requested_rollback"] = max(0.0, rollback_timeout)
         attempt_metadata["password_provided"] = cleaned_password is not None
+        attempt_metadata["used_stored_credentials"] = stored_credentials_used
         self._record_log(
             "connect_attempt",
             f"Attempting to connect to {cleaned_ssid}.",
