@@ -245,6 +245,11 @@ class WiFiBackend:
     def forget(self, profile_or_ssid: str) -> None:  # pragma: no cover - interface only
         raise NotImplementedError
 
+    def hotspot_diagnostics(self) -> dict[str, object | None] | None:  # pragma: no cover - optional hook
+        """Return backend-specific hotspot troubleshooting details when available."""
+
+        return None
+
 
 class NMCLIBackend(WiFiBackend):
     """Interact with NetworkManager via nmcli commands."""
@@ -608,17 +613,37 @@ class NMCLIBackend(WiFiBackend):
                 ]
                 for command in base_configuration:
                     self._run(command)
-                security_cleared = self._reset_hotspot_security(connection_name)
+                security_cleared, security_attempts = self._reset_hotspot_security(
+                    connection_name
+                )
+                attempt_history: list[dict[str, object | None]] = [
+                    {"stage": "initial", "steps": security_attempts}
+                ]
                 if not security_cleared:
                     self._recreate_hotspot_connection(
                         interface, connection_name, ssid
                     )
                     for command in base_configuration:
                         self._run(command)
-                    if not self._reset_hotspot_security(connection_name):
-                        raise WiFiError(
+                    retry_cleared, retry_attempts = self._reset_hotspot_security(
+                        connection_name
+                    )
+                    attempt_history.append(
+                        {"stage": "after_recreate", "steps": retry_attempts}
+                    )
+                    if not retry_cleared:
+                        failure = WiFiError(
                             "Unable to clear hotspot security configuration"
                         )
+                        setattr(
+                            failure,
+                            "details",
+                            {
+                                "connection": connection_name,
+                                "attempts": attempt_history,
+                            },
+                        )
+                        raise failure
                 try:
                     self._run(["nmcli", "connection", "down", connection_name])
                 except WiFiError:
@@ -640,13 +665,15 @@ class NMCLIBackend(WiFiBackend):
         property_name: str,
         *,
         fallback_value: str | None = "",
-    ) -> bool:
+    ) -> tuple[bool, list[dict[str, object | None]]]:
         """Remove a security property for the given connection.
 
-        Returns True if NetworkManager accepted either the removal or provided
-        fallback assignment, False otherwise.
+        Returns a tuple describing whether the property could be cleared and a
+        list of step dictionaries suitable for troubleshooting metadata.
         """
 
+        logger = logging.getLogger(__name__)
+        steps: list[dict[str, object | None]] = []
         try:
             self._run(
                 [
@@ -657,11 +684,33 @@ class NMCLIBackend(WiFiBackend):
                     f"-{property_name}",
                 ]
             )
-            return True
-        except WiFiError:
-            pass
+        except WiFiError as exc:
+            message = str(exc).strip() or None
+            steps.append(
+                {
+                    "property": property_name,
+                    "action": "remove",
+                    "result": "error",
+                    "error": message,
+                }
+            )
+            logger.debug(
+                "Unable to remove hotspot security property %s from %s: %s",
+                property_name,
+                connection_name,
+                message,
+            )
+        else:
+            steps.append(
+                {
+                    "property": property_name,
+                    "action": "remove",
+                    "result": "success",
+                }
+            )
+            return True, steps
         if fallback_value is None:
-            return False
+            return False, steps
         try:
             self._run(
                 [
@@ -673,12 +722,39 @@ class NMCLIBackend(WiFiBackend):
                     fallback_value,
                 ]
             )
-            return True
-        except WiFiError:
-            return False
+        except WiFiError as exc:
+            message = str(exc).strip() or None
+            steps.append(
+                {
+                    "property": property_name,
+                    "action": "set",
+                    "result": "error",
+                    "value": fallback_value,
+                    "error": message,
+                }
+            )
+            logger.debug(
+                "Unable to set hotspot security fallback %s=%s on %s: %s",
+                property_name,
+                fallback_value,
+                connection_name,
+                message,
+            )
+            return False, steps
+        steps.append(
+            {
+                "property": property_name,
+                "action": "set",
+                "result": "success",
+                "value": fallback_value,
+            }
+        )
+        return True, steps
 
-    def _connection_security_requires_secret(self, connection_name: str) -> bool:
-        """Return True when the connection still expects a Wi-Fi secret."""
+    def _fetch_connection_security_fields(
+        self, connection_name: str
+    ) -> tuple[dict[str, str] | None, str | None]:
+        """Return raw security fields for a connection or an error message."""
 
         try:
             output = self._run(
@@ -701,8 +777,8 @@ class NMCLIBackend(WiFiBackend):
                     connection_name,
                 ]
             )
-        except WiFiError:
-            return False
+        except WiFiError as exc:
+            return None, str(exc).strip() or str(exc)
         fields = output.splitlines()
         values: dict[str, str] = {}
         keys = [
@@ -716,6 +792,10 @@ class NMCLIBackend(WiFiBackend):
         ]
         for key, value in zip(keys, fields):
             values[key] = value.strip()
+        return values, None
+
+    @staticmethod
+    def _security_values_require_secret(values: dict[str, str]) -> bool:
         key_mgmt = values.get("802-11-wireless-security.key-mgmt", "")
         if key_mgmt and key_mgmt != "none":
             return True
@@ -747,11 +827,25 @@ class NMCLIBackend(WiFiBackend):
                             return True
         return False
 
-    def _reset_hotspot_security(self, connection_name: str) -> bool:
+    def _connection_security_requires_secret(self, connection_name: str) -> bool:
+        """Return True when the connection still expects a Wi-Fi secret."""
+
+        values, error = self._fetch_connection_security_fields(connection_name)
+        if not values or error:
+            return False
+        return self._security_values_require_secret(values)
+
+    def _reset_hotspot_security(
+        self, connection_name: str
+    ) -> tuple[bool, list[dict[str, object | None]]]:
         """Ensure the hotspot connection no longer expects a secret."""
 
         logger = logging.getLogger(__name__)
-        removed = self._remove_security_setting(connection_name)
+        attempts: list[dict[str, object | None]] = []
+        removed, removal_step = self._remove_security_setting(connection_name)
+        removal_with_context = dict(removal_step)
+        removal_with_context.setdefault("connection", connection_name)
+        attempts.append(removal_with_context)
         cleared_any = False
         for property_name, fallback in (
             ("802-11-wireless-security.auth-alg", "open"),
@@ -765,9 +859,14 @@ class NMCLIBackend(WiFiBackend):
             ("802-11-wireless-security.wep-key-type", None),
             ("802-11-wireless-security.wep-tx-keyidx", "0"),
         ):
-            if self._clear_security_property(
+            cleared, steps = self._clear_security_property(
                 connection_name, property_name, fallback_value=fallback
-            ):
+            )
+            for step in steps:
+                step_with_context = dict(step)
+                step_with_context.setdefault("connection", connection_name)
+                attempts.append(step_with_context)
+            if cleared:
                 cleared_any = True
         success = removed or cleared_any
         try:
@@ -781,26 +880,77 @@ class NMCLIBackend(WiFiBackend):
                     "none",
                 ]
             )
-            success = True
         except WiFiError as exc:
-            if not success:
-                raise WiFiError(
-                    f"Unable to clear hotspot security configuration: {exc}"
-                ) from exc
-            logger.debug(
-                "Unable to update hotspot key management to none: %s", exc
+            message = str(exc).strip() or None
+            attempts.append(
+                {
+                    "connection": connection_name,
+                    "property": "802-11-wireless-security.key-mgmt",
+                    "action": "set",
+                    "value": "none",
+                    "result": "error",
+                    "error": message,
+                }
             )
-        if self._connection_security_requires_secret(connection_name):
+            if not success:
+                failure = WiFiError(
+                    f"Unable to clear hotspot security configuration: {exc}"
+                )
+                setattr(
+                    failure,
+                    "details",
+                    {"connection": connection_name, "attempts": attempts},
+                )
+                raise failure from exc
+            logger.debug(
+                "Unable to update hotspot key management to none: %s", message
+            )
+        else:
+            attempts.append(
+                {
+                    "connection": connection_name,
+                    "property": "802-11-wireless-security.key-mgmt",
+                    "action": "set",
+                    "value": "none",
+                    "result": "success",
+                }
+            )
+            success = True
+        values, error = self._fetch_connection_security_fields(connection_name)
+        if error:
+            attempts.append(
+                {
+                    "connection": connection_name,
+                    "action": "inspect",
+                    "result": "error",
+                    "error": error,
+                }
+            )
+            return success, attempts
+        requires_secret = self._security_values_require_secret(values)
+        attempts.append(
+            {
+                "connection": connection_name,
+                "action": "inspect",
+                "result": "success",
+                "values": values,
+                "requires_secret": requires_secret,
+            }
+        )
+        if requires_secret:
             logger.debug(
                 "Hotspot connection %s still references secrets after reset",
                 connection_name,
             )
-            return False
-        return True
+            return False, attempts
+        return True, attempts
 
-    def _remove_security_setting(self, connection_name: str) -> bool:
+    def _remove_security_setting(
+        self, connection_name: str
+    ) -> tuple[bool, dict[str, object | None]]:
         """Remove the entire security setting from the connection."""
 
+        logger = logging.getLogger(__name__)
         try:
             self._run(
                 [
@@ -811,9 +961,31 @@ class NMCLIBackend(WiFiBackend):
                     "-802-11-wireless-security",
                 ]
             )
-            return True
-        except WiFiError:
-            return False
+        except WiFiError as exc:
+            message = str(exc).strip() or None
+            logger.debug(
+                "Unable to remove hotspot security setting from %s: %s",
+                connection_name,
+                message,
+            )
+            return False, {"action": "remove_setting", "result": "error", "error": message}
+        return True, {"action": "remove_setting", "result": "success"}
+
+    def hotspot_diagnostics(self) -> dict[str, object | None] | None:
+        """Return current hotspot security fields for troubleshooting."""
+
+        connection_name = self._last_hotspot_profile or "RevCam Hotspot"
+        values, error = self._fetch_connection_security_fields(connection_name)
+        diagnostics: dict[str, object | None] = {"connection": connection_name}
+        if error:
+            diagnostics["error"] = error
+            return diagnostics
+        if values is None:
+            diagnostics["values"] = None
+            return diagnostics
+        diagnostics["values"] = values
+        diagnostics["requires_secret"] = self._security_values_require_secret(values)
+        return diagnostics
 
     def _recreate_hotspot_connection(
         self, interface: str, connection_name: str, ssid: str
@@ -1323,12 +1495,19 @@ class WiFiManager:
                     "Ensure RevCam has permission to manage NetworkManager."
                 ) from exc
             error_message = f"Unable to enable hotspot {cleaned_ssid}: {message}."
+            error_metadata = self._collect_hotspot_error_context(
+                attempt_metadata, exc
+            )
             self._record_log(
                 "hotspot_enable_error",
                 error_message,
-                metadata=attempt_metadata,
+                metadata=error_metadata if error_metadata else None,
             )
-            raise WiFiError(f"Unable to enable hotspot: {message}") from exc
+            failure = WiFiError(f"Unable to enable hotspot: {message}")
+            details = getattr(exc, "details", None)
+            if details is not None:
+                setattr(failure, "details", details)
+            raise failure from exc
         self._hotspot_password = cleaned_password
         self._credentials.set_hotspot_password(cleaned_password)
         status = self._apply_hotspot_password(status)
@@ -1601,11 +1780,15 @@ class WiFiManager:
             "Starting hotspot after watchdog auto-connect attempts failed.",
             status=last_status,
         )
-        retry_delay = self._watchdog_retry_delay
 
+        failure_attempts: list[dict[str, object | None]] = []
         try:
             first_attempt = self.enable_hotspot()
         except WiFiError as exc:
+            error_metadata = self._collect_hotspot_error_context(
+                {"attempt": 1, "trigger": "watchdog"}, exc
+            )
+            failure_attempts.append(error_metadata)
             self._record_log(
                 "hotspot_watchdog_hotspot_error",
                 (
@@ -1613,6 +1796,7 @@ class WiFiManager:
                     f"{exc}."
                 ),
                 status=last_status,
+                metadata=error_metadata if error_metadata else None,
             )
             first_attempt = None
         else:
@@ -1636,6 +1820,10 @@ class WiFiManager:
         try:
             second_attempt = self.enable_hotspot()
         except WiFiError as exc:
+            error_metadata = self._collect_hotspot_error_context(
+                {"attempt": 2, "trigger": "watchdog"}, exc
+            )
+            failure_attempts.append(error_metadata)
             self._record_log(
                 "hotspot_watchdog_hotspot_error",
                 (
@@ -1643,6 +1831,7 @@ class WiFiManager:
                     f"{exc}."
                 ),
                 status=last_status,
+                metadata=error_metadata if error_metadata else None,
             )
         else:
             if second_attempt.hotspot_active:
@@ -1665,10 +1854,12 @@ class WiFiManager:
             current_status = self._fetch_status(update_mdns=False)
         except WiFiError:
             current_status = None
+        final_metadata = {"attempts": failure_attempts} if failure_attempts else None
         self._record_log(
             "hotspot_watchdog_hotspot_failed",
             "Hotspot could not be enabled after watchdog retries.",
             status=current_status,
+            metadata=final_metadata,
         )
 
     @staticmethod
@@ -1783,6 +1974,31 @@ class WiFiManager:
             with self._log_lock:
                 for entry in restored:
                     self._log.append(entry)
+
+    def _collect_hotspot_error_context(
+        self,
+        base_metadata: dict[str, object | None] | None,
+        exc: Exception,
+    ) -> dict[str, object | None]:
+        """Merge hotspot attempt metadata with backend diagnostics."""
+
+        metadata = dict(base_metadata) if base_metadata else {}
+        details = getattr(exc, "details", None)
+        if details:
+            metadata["error_details"] = details
+        diagnostics: dict[str, object | None] | None = None
+        backend_diag = getattr(self._backend, "hotspot_diagnostics", None)
+        if callable(backend_diag):
+            try:
+                diagnostics = backend_diag()
+            except Exception:  # pragma: no cover - diagnostics are best effort
+                logging.getLogger(__name__).debug(
+                    "Unable to collect hotspot diagnostics", exc_info=True
+                )
+                diagnostics = None
+        if diagnostics:
+            metadata.setdefault("diagnostics", diagnostics)
+        return metadata
 
     def _deserialize_log_entry(self, payload: object) -> WiFiLogEntry | None:
         if not isinstance(payload, dict):

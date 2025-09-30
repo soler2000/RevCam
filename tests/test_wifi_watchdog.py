@@ -23,7 +23,10 @@ class WatchdogBackend:
         self.connect_calls: list[tuple[str, str | None]] = []
         self.hotspot_calls: list[tuple[str, str | None]] = []
         self.hotspot_error_messages: list[str] = []
+        self.hotspot_error_details: list[dict[str, object | None]] = []
         self.hotspot_inactive_attempts: int = 0
+        self.hotspot_diagnostics_payloads: list[dict[str, object | None]] = []
+        self._diagnostic_index = 0
 
     def get_status(self) -> WiFiStatus:
         return self.status
@@ -52,7 +55,10 @@ class WatchdogBackend:
         self.hotspot_calls.append((ssid, password))
         if self.hotspot_error_messages:
             message = self.hotspot_error_messages.pop(0)
-            raise WiFiError(message)
+            exc = WiFiError(message)
+            if self.hotspot_error_details:
+                setattr(exc, "details", self.hotspot_error_details.pop(0))
+            raise exc
         if self.hotspot_inactive_attempts > 0:
             self.hotspot_inactive_attempts -= 1
             self.status = WiFiStatus(
@@ -92,6 +98,13 @@ class WatchdogBackend:
         return self.status
 
     def forget(self, profile_or_ssid: str) -> None:  # pragma: no cover - not used
+        return None
+
+    def hotspot_diagnostics(self) -> dict[str, object | None] | None:
+        if self.hotspot_diagnostics_payloads:
+            index = min(self._diagnostic_index, len(self.hotspot_diagnostics_payloads) - 1)
+            self._diagnostic_index += 1
+            return self.hotspot_diagnostics_payloads[index]
         return None
 
 
@@ -229,9 +242,39 @@ def test_watchdog_reports_failure_when_hotspot_errors(
 ) -> None:
     manager, backend, _ = watchdog_manager
     backend.hotspot_error_messages = ["busy", "still busy"]
+    backend.hotspot_error_details = [
+        {
+            "connection": "RevCam Hotspot",
+            "attempts": [
+                {
+                    "stage": "initial",
+                    "steps": [
+                        {"action": "remove_setting", "result": "error"},
+                        {"property": "802-11-wireless-security.psk", "action": "remove", "result": "error"},
+                    ],
+                }
+            ],
+        },
+        {
+            "connection": "RevCam Hotspot",
+            "attempts": [
+                {
+                    "stage": "initial",
+                    "steps": [
+                        {"action": "remove_setting", "result": "error"},
+                        {"property": "802-11-wireless-security.key-mgmt", "action": "set", "result": "error"},
+                    ],
+                }
+            ],
+        },
+    ]
+    backend.hotspot_diagnostics_payloads = [
+        {"state": "first-attempt"},
+        {"state": "second-attempt"},
+    ]
     manager.start_hotspot_watchdog()
     try:
-        deadline = time.time() + 0.5
+        deadline = time.time() + 1.0
         failure_logged = False
         error_count = 0
         while time.time() < deadline and not failure_logged:
@@ -248,6 +291,37 @@ def test_watchdog_reports_failure_when_hotspot_errors(
         assert failure_logged
         entries = manager.get_connection_log()
         assert not any(entry["event"] == "hotspot_watchdog_hotspot_enabled" for entry in entries)
+        error_entries = sorted(
+            (
+                entry
+                for entry in entries
+                if entry["event"] == "hotspot_watchdog_hotspot_error"
+            ),
+            key=lambda entry: entry.get("metadata", {}).get("attempt", 0),
+        )
+        assert len(error_entries) >= 2
+        diag_states: set[str] = set()
+        for index, entry in enumerate(error_entries[:2], start=1):
+            metadata = entry.get("metadata")
+            assert metadata is not None
+            assert metadata.get("attempt") == index
+            assert metadata.get("trigger") == "watchdog"
+            assert "error_details" in metadata
+            assert metadata["error_details"]["connection"] == "RevCam Hotspot"
+            diag_state = metadata.get("diagnostics", {}).get("state")
+            assert diag_state in {"first-attempt", "second-attempt"}
+            diag_states.add(diag_state)
+        assert diag_states
+        assert diag_states.issubset({"first-attempt", "second-attempt"})
+        final_entry = next(
+            entry for entry in entries if entry["event"] == "hotspot_watchdog_hotspot_failed"
+        )
+        final_metadata = final_entry.get("metadata")
+        assert final_metadata is not None
+        attempts = final_metadata.get("attempts")
+        assert isinstance(attempts, list) and len(attempts) >= 2
+        assert attempts[0].get("attempt") == 1
+        assert attempts[1].get("attempt") == 2
     finally:
         manager.close()
 
@@ -287,3 +361,49 @@ def test_watchdog_persistent_log(tmp_path: Path) -> None:
         assert any(entry["event"] == "test_event" for entry in entries)
     finally:
         restarted.close()
+
+
+def test_enable_hotspot_error_metadata(tmp_path: Path) -> None:
+    backend = WatchdogBackend()
+    backend.hotspot_error_messages = ["failed to configure"]
+    backend.hotspot_error_details = [
+        {
+            "connection": "RevCam Hotspot",
+            "attempts": [
+                {
+                    "stage": "initial",
+                    "steps": [
+                        {"action": "remove_setting", "result": "error"},
+                        {"property": "802-11-wireless-security.psk", "action": "set", "result": "error"},
+                    ],
+                }
+            ],
+        }
+    ]
+    backend.hotspot_diagnostics_payloads = [{"state": "enable"}]
+    base_dir = (tmp_path / "enable").resolve()
+    credentials = WiFiCredentialStore(base_dir / "wifi.json")
+    manager = WiFiManager(
+        backend=backend,
+        credential_store=credentials,
+        rollback_timeout=0.05,
+        poll_interval=0.005,
+        hotspot_rollback_timeout=0.05,
+        watchdog_boot_delay=0.02,
+        watchdog_interval=0.05,
+        watchdog_retry_delay=0.01,
+        log_path=base_dir / "wifi_log.jsonl",
+    )
+    with pytest.raises(WiFiError):
+        manager.enable_hotspot()
+    try:
+        entries = manager.get_connection_log()
+        error_entry = next(
+            entry for entry in entries if entry["event"] == "hotspot_enable_error"
+        )
+        metadata = error_entry.get("metadata")
+        assert metadata is not None
+        assert metadata.get("error_details", {}).get("connection") == "RevCam Hotspot"
+        assert metadata.get("diagnostics", {}).get("state") == "enable"
+    finally:
+        manager.close()
