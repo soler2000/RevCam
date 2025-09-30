@@ -152,6 +152,7 @@ class WiFiNetwork:
     known: bool = False
     active: bool = False
     hidden: bool = False
+    stored_credentials: bool = False
 
     def to_dict(self) -> dict[str, object | None]:
         return {
@@ -163,6 +164,7 @@ class WiFiNetwork:
             "known": self.known,
             "active": self.active,
             "hidden": self.hidden,
+            "stored_credentials": self.stored_credentials,
         }
 
 
@@ -576,7 +578,7 @@ class NMCLIBackend(WiFiBackend):
                         "connection",
                         "modify",
                         connection_name,
-                        "wifi.mode",
+                        "802-11-wireless.mode",
                         "ap",
                     ],
                     [
@@ -603,40 +605,20 @@ class NMCLIBackend(WiFiBackend):
                         "connection.autoconnect",
                         "yes",
                     ],
-                    [
-                        "nmcli",
-                        "connection",
-                        "modify",
-                        connection_name,
-                        "wifi-sec.key-mgmt",
-                        "none",
-                    ],
                 ]
                 for command in base_configuration:
                     self._run(command)
-                # Remove any previously configured passphrases or keys so the
-                # hotspot broadcasts as an open network.
-                for property_name in (
-                    "wifi-sec.psk",
-                    "wifi-sec.wep-key0",
-                    "wifi-sec.wep-key1",
-                    "wifi-sec.wep-key2",
-                    "wifi-sec.wep-key3",
-                ):
-                    try:
-                        self._run(
-                            [
-                                "nmcli",
-                                "connection",
-                                "modify",
-                                connection_name,
-                                f"-{property_name}",
-                            ]
+                security_cleared = self._reset_hotspot_security(connection_name)
+                if not security_cleared:
+                    self._recreate_hotspot_connection(
+                        interface, connection_name, ssid
+                    )
+                    for command in base_configuration:
+                        self._run(command)
+                    if not self._reset_hotspot_security(connection_name):
+                        raise WiFiError(
+                            "Unable to clear hotspot security configuration"
                         )
-                    except WiFiError:
-                        # Older NetworkManager versions may not expose all key
-                        # slots; ignore missing properties.
-                        pass
                 try:
                     self._run(["nmcli", "connection", "down", connection_name])
                 except WiFiError:
@@ -651,6 +633,201 @@ class NMCLIBackend(WiFiBackend):
         status.hotspot_active = True
         self._last_hotspot_profile = connection_name
         return status
+
+    def _clear_security_property(
+        self,
+        connection_name: str,
+        property_name: str,
+        *,
+        fallback_value: str | None = "",
+    ) -> bool:
+        """Remove a security property for the given connection.
+
+        Returns True if NetworkManager accepted either the removal or provided
+        fallback assignment, False otherwise.
+        """
+
+        try:
+            self._run(
+                [
+                    "nmcli",
+                    "connection",
+                    "modify",
+                    connection_name,
+                    f"-{property_name}",
+                ]
+            )
+            return True
+        except WiFiError:
+            pass
+        if fallback_value is None:
+            return False
+        try:
+            self._run(
+                [
+                    "nmcli",
+                    "connection",
+                    "modify",
+                    connection_name,
+                    property_name,
+                    fallback_value,
+                ]
+            )
+            return True
+        except WiFiError:
+            return False
+
+    def _connection_security_requires_secret(self, connection_name: str) -> bool:
+        """Return True when the connection still expects a Wi-Fi secret."""
+
+        try:
+            output = self._run(
+                [
+                    "nmcli",
+                    "-g",
+                    ",".join(
+                        [
+                            "802-11-wireless-security.key-mgmt",
+                            "802-11-wireless-security.psk",
+                            "802-11-wireless-security.wep-key0",
+                            "802-11-wireless-security.wep-key1",
+                            "802-11-wireless-security.wep-key2",
+                            "802-11-wireless-security.wep-key3",
+                            "802-11-wireless-security.wep-key-flags",
+                        ]
+                    ),
+                    "connection",
+                    "show",
+                    connection_name,
+                ]
+            )
+        except WiFiError:
+            return False
+        fields = output.splitlines()
+        values: dict[str, str] = {}
+        keys = [
+            "802-11-wireless-security.key-mgmt",
+            "802-11-wireless-security.psk",
+            "802-11-wireless-security.wep-key0",
+            "802-11-wireless-security.wep-key1",
+            "802-11-wireless-security.wep-key2",
+            "802-11-wireless-security.wep-key3",
+            "802-11-wireless-security.wep-key-flags",
+        ]
+        for key, value in zip(keys, fields):
+            values[key] = value.strip()
+        key_mgmt = values.get("802-11-wireless-security.key-mgmt", "")
+        if key_mgmt and key_mgmt != "none":
+            return True
+        for secret_key in (
+            "802-11-wireless-security.psk",
+            "802-11-wireless-security.wep-key0",
+            "802-11-wireless-security.wep-key1",
+            "802-11-wireless-security.wep-key2",
+            "802-11-wireless-security.wep-key3",
+        ):
+            if values.get(secret_key):
+                return True
+        flags_value = values.get("802-11-wireless-security.wep-key-flags", "")
+        if flags_value and flags_value not in {"0", ""}:
+            return True
+        return False
+
+    def _reset_hotspot_security(self, connection_name: str) -> bool:
+        """Ensure the hotspot connection no longer expects a secret."""
+
+        logger = logging.getLogger(__name__)
+        removed = self._remove_security_setting(connection_name)
+        cleared_any = False
+        for property_name, fallback in (
+            ("802-11-wireless-security.auth-alg", "open"),
+            ("802-11-wireless-security.psk", None),
+            ("802-11-wireless-security.psk-flags", "0"),
+            ("802-11-wireless-security.wep-key0", None),
+            ("802-11-wireless-security.wep-key1", None),
+            ("802-11-wireless-security.wep-key2", None),
+            ("802-11-wireless-security.wep-key3", None),
+            ("802-11-wireless-security.wep-key-flags", "0"),
+            ("802-11-wireless-security.wep-key-type", None),
+            ("802-11-wireless-security.wep-tx-keyidx", "0"),
+        ):
+            if self._clear_security_property(
+                connection_name, property_name, fallback_value=fallback
+            ):
+                cleared_any = True
+        success = removed or cleared_any
+        try:
+            self._run(
+                [
+                    "nmcli",
+                    "connection",
+                    "modify",
+                    connection_name,
+                    "802-11-wireless-security.key-mgmt",
+                    "none",
+                ]
+            )
+            success = True
+        except WiFiError as exc:
+            if not success:
+                raise WiFiError(
+                    f"Unable to clear hotspot security configuration: {exc}"
+                ) from exc
+            logger.debug(
+                "Unable to update hotspot key management to none: %s", exc
+            )
+        if self._connection_security_requires_secret(connection_name):
+            logger.debug(
+                "Hotspot connection %s still references secrets after reset",
+                connection_name,
+            )
+            return False
+        return True
+
+    def _remove_security_setting(self, connection_name: str) -> bool:
+        """Remove the entire security setting from the connection."""
+
+        try:
+            self._run(
+                [
+                    "nmcli",
+                    "connection",
+                    "modify",
+                    connection_name,
+                    "-802-11-wireless-security",
+                ]
+            )
+            return True
+        except WiFiError:
+            return False
+
+    def _recreate_hotspot_connection(
+        self, interface: str, connection_name: str, ssid: str
+    ) -> None:
+        """Delete and recreate the hotspot profile to drop lingering secrets."""
+
+        try:
+            self._run(["nmcli", "connection", "delete", connection_name])
+        except WiFiError:
+            # Connection may not exist yet; proceed with creation regardless.
+            pass
+        self._run(
+            [
+                "nmcli",
+                "connection",
+                "add",
+                "type",
+                "wifi",
+                "ifname",
+                interface,
+                "con-name",
+                connection_name,
+                "autoconnect",
+                "yes",
+                "ssid",
+                ssid,
+            ]
+        )
 
     def stop_hotspot(self, profile: str | None) -> WiFiStatus:
         connection_name = profile or self._last_hotspot_profile or "RevCam Hotspot"
@@ -675,6 +852,20 @@ class NMCLIBackend(WiFiBackend):
                     "Unable to forget Wi-Fi network: not authorized to control networking. "
                     "Ensure RevCam has permission to manage NetworkManager."
                 ) from exc
+            if any(
+                phrase in lowered
+                for phrase in (
+                    "unknown connection",
+                    "cannot delete unknown connection",
+                    "no such connection",
+                )
+            ):
+                logging.getLogger(__name__).info(
+                    "Requested removal of unknown Wi-Fi connection \"%s\": %s",
+                    profile_or_ssid,
+                    message,
+                )
+                return
             raise
         if profile_or_ssid == self._last_hotspot_profile:
             self._last_hotspot_profile = None
@@ -693,6 +884,9 @@ class WiFiManager:
         mdns_advertiser: MDNSAdvertiser | None = None,
         default_hotspot_ssid: str = "RevCam",
         credential_store: WiFiCredentialStore | None = None,
+        watchdog_boot_delay: float = 30.0,
+        watchdog_interval: float = 30.0,
+        watchdog_retry_delay: float = 5.0,
     ) -> None:
         self._backend = backend or NMCLIBackend()
         self._rollback_timeout = rollback_timeout
@@ -718,6 +912,11 @@ class WiFiManager:
                 self._mdns = None
         self._log: Deque[WiFiLogEntry] = deque(maxlen=200)
         self._log_lock = threading.Lock()
+        self._watchdog_thread: threading.Thread | None = None
+        self._watchdog_stop_event: threading.Event | None = None
+        self._watchdog_boot_delay = max(0.0, watchdog_boot_delay)
+        self._watchdog_interval = max(0.0, watchdog_interval)
+        self._watchdog_retry_delay = max(0.0, watchdog_retry_delay)
         try:
             initial_status = self._backend.get_status()
         except WiFiError:
@@ -730,7 +929,23 @@ class WiFiManager:
         return self._fetch_status()
 
     def scan_networks(self) -> Sequence[WiFiNetwork]:
-        return self._backend.scan()
+        networks = list(self._backend.scan())
+        stored = {
+            ssid.strip()
+            for ssid in self._credentials.list_networks()
+            if isinstance(ssid, str) and ssid.strip()
+        }
+        if stored:
+            for network in networks:
+                if network.hidden:
+                    continue
+                identifier = network.ssid.strip()
+                if not identifier:
+                    continue
+                if identifier in stored:
+                    network.stored_credentials = True
+                    network.known = True
+        return networks
 
     def auto_connect_known_networks(self, *, start_hotspot: bool = True) -> WiFiStatus:
         """Join the strongest known network or fall back to hotspot mode."""
@@ -739,6 +954,12 @@ class WiFiManager:
             if network.signal is None:
                 return float("-inf")
             return float(network.signal)
+
+        known_ssids = {
+            ssid.strip()
+            for ssid in self._credentials.list_networks()
+            if isinstance(ssid, str) and ssid.strip()
+        }
 
         try:
             initial_status = self._fetch_status()
@@ -750,12 +971,18 @@ class WiFiManager:
             )
         else:
             if initial_status.connected and not initial_status.hotspot_active:
-                self._record_log(
-                    "auto_connect_skip",
-                    "Wi-Fi already connected; skipping automatic network selection.",
-                    status=initial_status,
-                )
-                return initial_status
+                identifiers = {
+                    value.strip()
+                    for value in (initial_status.profile, initial_status.ssid)
+                    if isinstance(value, str) and value.strip()
+                }
+                if identifiers & known_ssids:
+                    self._record_log(
+                        "auto_connect_skip",
+                        "Wi-Fi already connected; skipping automatic network selection.",
+                        status=initial_status,
+                    )
+                    return initial_status
 
         self._record_log(
             "auto_connect_start",
@@ -769,7 +996,6 @@ class WiFiManager:
                 "auto_connect_scan_error",
                 f"Unable to scan Wi-Fi networks: {exc}.",
             )
-        known_ssids = {ssid.strip() for ssid in self._credentials.list_networks() if ssid.strip()}
         candidates: dict[str, WiFiNetwork] = {}
         for network in scan_results:
             ssid = network.ssid.strip()
@@ -873,10 +1099,12 @@ class WiFiManager:
         else:
             raise WiFiError("Password must be a string or null")
         supplied_password = cleaned_password if password is not None else None
+        stored_credentials_used = False
         if cleaned_password is None:
             stored_password = self._credentials.get_network_password(cleaned_ssid)
             if stored_password:
                 cleaned_password = stored_password
+                stored_credentials_used = True
         attempt_metadata: dict[str, object | None] = {
             "target": cleaned_ssid,
             "development_mode": development_mode,
@@ -884,6 +1112,7 @@ class WiFiManager:
         if rollback_timeout is not None:
             attempt_metadata["requested_rollback"] = max(0.0, rollback_timeout)
         attempt_metadata["password_provided"] = cleaned_password is not None
+        attempt_metadata["used_stored_credentials"] = stored_credentials_used
         self._record_log(
             "connect_attempt",
             f"Attempting to connect to {cleaned_ssid}.",
@@ -891,6 +1120,11 @@ class WiFiManager:
         )
         previous_status = self._fetch_status()
         previous_profile = previous_status.profile if previous_status.connected else None
+        previous_identifier: str | None = None
+        if previous_status.connected:
+            prior_value = previous_status.ssid or previous_status.profile
+            if isinstance(prior_value, str) and prior_value.strip():
+                previous_identifier = prior_value.strip()
         try:
             status = self._backend.connect(cleaned_ssid, cleaned_password)
         except WiFiError as exc:
@@ -922,6 +1156,26 @@ class WiFiManager:
             result_metadata["effective_rollback"] = effective_timeout
         monitor_required = False
         if status.connected and (status.ssid == cleaned_ssid or status.profile == cleaned_ssid):
+            reminder_text: str | None = None
+            current_identifier = status.ssid or status.profile or cleaned_ssid
+            if isinstance(current_identifier, str):
+                current_identifier = current_identifier.strip() or cleaned_ssid
+            if (
+                isinstance(current_identifier, str)
+                and current_identifier
+                and previous_identifier
+                and current_identifier != previous_identifier
+            ):
+                reminder_text = (
+                    "Remember to reconnect your controlling device to "
+                    f'"{current_identifier}" to continue.'
+                )
+            if reminder_text:
+                existing_detail = status.detail.strip() if isinstance(status.detail, str) else ""
+                if existing_detail and not existing_detail.endswith("."):
+                    existing_detail = f"{existing_detail}."
+                status.detail = f"{existing_detail} {reminder_text}".strip()
+                result_metadata["previous_connection"] = previous_identifier
             message = f"Connected to {status.ssid or cleaned_ssid}."
             self._record_log("connect_success", message, status=status, metadata=result_metadata)
             if not rollback_requested:
@@ -1181,6 +1435,7 @@ class WiFiManager:
         return status
 
     def close(self) -> None:
+        self.stop_hotspot_watchdog()
         if self._mdns is not None:
             try:
                 self._mdns.close()
@@ -1190,6 +1445,154 @@ class WiFiManager:
                 self._mdns = None
 
     # ------------------------------ helpers -----------------------------
+    def start_hotspot_watchdog(self) -> None:
+        """Begin monitoring connectivity for hotspot fallback."""
+
+        if self._watchdog_thread and self._watchdog_thread.is_alive():
+            return
+        stop_event = threading.Event()
+        self._watchdog_stop_event = stop_event
+
+        def _run() -> None:
+            deadline = time.monotonic() + self._watchdog_boot_delay
+            first_cycle = True
+            while not stop_event.is_set():
+                if first_cycle:
+                    wait_time = max(0.0, deadline - time.monotonic())
+                else:
+                    wait_time = self._watchdog_interval
+                if wait_time and stop_event.wait(wait_time):
+                    break
+                try:
+                    self._watchdog_cycle(initial_boot_check=first_cycle)
+                except Exception:  # pragma: no cover - defensive logging
+                    logging.getLogger(__name__).exception("Wi-Fi hotspot watchdog error")
+                first_cycle = False
+
+        thread = threading.Thread(target=_run, name="wifi-hotspot-watchdog", daemon=True)
+        self._watchdog_thread = thread
+        thread.start()
+
+    def stop_hotspot_watchdog(self) -> None:
+        """Stop the hotspot watchdog thread if running."""
+
+        stop_event = self._watchdog_stop_event
+        thread = self._watchdog_thread
+        if stop_event is None or thread is None:
+            return
+        stop_event.set()
+        thread.join(timeout=5.0)
+        self._watchdog_thread = None
+        self._watchdog_stop_event = None
+
+    def _watchdog_cycle(self, *, initial_boot_check: bool) -> None:
+        known_ssids = {
+            ssid.strip()
+            for ssid in self._credentials.list_networks()
+            if isinstance(ssid, str) and ssid.strip()
+        }
+        try:
+            status = self._fetch_status()
+        except WiFiError as exc:
+            status = None
+            self._record_log(
+                "hotspot_watchdog_status_error",
+                f"Unable to refresh Wi-Fi status during watchdog cycle: {exc}.",
+            )
+        else:
+            if self._status_on_known_network(status, known_ssids):
+                event = "hotspot_watchdog_boot_connected" if initial_boot_check else "hotspot_watchdog_connected"
+                self._record_log(
+                    event,
+                    "Watchdog confirms connection to a known network.",
+                    status=status,
+                )
+                return
+            if status.hotspot_active:
+                self._record_log(
+                    "hotspot_watchdog_hotspot_active",
+                    "Watchdog detected active hotspot; skipping checks.",
+                    status=status,
+                )
+                return
+
+        self._record_log(
+            "hotspot_watchdog_start",
+            "Watchdog attempting to recover connectivity to a known network.",
+            status=status,
+        )
+        attempts = 0
+        last_status = status
+        while attempts < 2:
+            attempts += 1
+            try:
+                last_status = self.auto_connect_known_networks(start_hotspot=False)
+            except WiFiError as exc:
+                self._record_log(
+                    "hotspot_watchdog_connect_error",
+                    f"Watchdog auto-connect attempt {attempts} failed: {exc}.",
+                    status=last_status,
+                )
+                last_status = None
+            else:
+                if self._status_on_known_network(last_status, known_ssids):
+                    self._record_log(
+                        "hotspot_watchdog_recovered",
+                        "Watchdog restored connection to a known network.",
+                        status=last_status,
+                    )
+                    return
+            if attempts < 2 and self._watchdog_stop_event is not None:
+                retry_wait = self._watchdog_retry_delay
+                self._record_log(
+                    "hotspot_watchdog_retry",
+                    f"Retrying known network connection in {retry_wait:.1f}s.",
+                    status=last_status,
+                )
+                if retry_wait and self._watchdog_stop_event.wait(retry_wait):
+                    return
+
+        if last_status and last_status.hotspot_active:
+            self._record_log(
+                "hotspot_watchdog_hotspot_already_enabled",
+                "Hotspot already active after auto-connect attempts.",
+                status=last_status,
+            )
+            return
+
+        self._record_log(
+            "hotspot_watchdog_enable_hotspot",
+            "Starting hotspot after watchdog auto-connect attempts failed.",
+            status=last_status,
+        )
+        try:
+            enabled = self.enable_hotspot()
+        except WiFiError as exc:
+            self._record_log(
+                "hotspot_watchdog_hotspot_error",
+                f"Unable to enable hotspot after watchdog attempts: {exc}.",
+                status=last_status,
+            )
+        else:
+            self._record_log(
+                "hotspot_watchdog_hotspot_enabled",
+                "Hotspot enabled by watchdog after failed reconnection attempts.",
+                status=enabled,
+            )
+
+    @staticmethod
+    def _status_on_known_network(status: WiFiStatus, known_ssids: set[str]) -> bool:
+        if not isinstance(status, WiFiStatus):
+            return False
+        if not status.connected or status.hotspot_active:
+            return False
+        identifiers = {
+            value.strip()
+            for value in (status.ssid, status.profile)
+            if isinstance(value, str) and value.strip()
+        }
+        return bool(identifiers & known_ssids)
+
     def _fetch_status(self) -> WiFiStatus:
         status = self._backend.get_status()
         status = self._apply_hotspot_password(status)

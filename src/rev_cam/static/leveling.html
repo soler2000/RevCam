@@ -1,0 +1,987 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>RevCam Trailer Leveling</title>
+    <link rel="icon" type="image/svg+xml" href="images/favicon.svg" />
+    <style>
+      :root {
+        color-scheme: dark;
+        --font-family: "Inter", "Manrope", "Segoe UI", system-ui, -apple-system,
+          BlinkMacSystemFont, sans-serif;
+        --line-height: 1.65;
+        --transition: 200ms ease;
+        --surface-0: rgba(14, 16, 22, 0.82);
+        --surface-1: rgba(26, 28, 36, 0.78);
+        --surface-muted: rgba(255, 255, 255, 0.08);
+        --surface-soft: rgba(255, 255, 255, 0.04);
+        --surface-panel: rgba(30, 33, 44, 0.82);
+        --surface-primary: rgba(38, 42, 55, 0.85);
+        --surface-secondary: rgba(24, 27, 38, 0.88);
+        --border-subtle: rgba(255, 255, 255, 0.08);
+        --border-muted: rgba(255, 255, 255, 0.12);
+        --text-primary: #f5f7fb;
+        --text-muted: rgba(245, 247, 250, 0.72);
+        --text-on-accent: #ffffff;
+        --accent: #0a84ff;
+        --accent-hover: #2f95ff;
+        --accent-active: #55adff;
+        --accent-soft: rgba(10, 132, 255, 0.16);
+        --accent-soft-hover: rgba(10, 132, 255, 0.24);
+        --accent-ring: rgba(10, 132, 255, 0.45);
+        --success: #4ade80;
+        --success-soft: rgba(74, 222, 128, 0.16);
+        --warning: #ff9f0a;
+        --danger: #ff453a;
+        --danger-soft: rgba(255, 69, 58, 0.2);
+        --radius-sm: 0.5rem;
+        --radius-md: 0.75rem;
+        --radius-lg: 1rem;
+        --radius-xl: 1.5rem;
+        --radius-pill: 999px;
+        --shell-padding-y: clamp(2rem, 7vh, 3.5rem);
+        --shell-padding-x: clamp(1.25rem, 5vw, 3.5rem);
+        --rhythm: 1.5rem;
+        --space-xs: 0.25rem;
+        --space-sm: 0.5rem;
+        --space-md: 0.75rem;
+        --space-lg: 1.25rem;
+        --space-xl: 1.75rem;
+        --space-2xl: 2.5rem;
+        --control-padding-y: 0.6rem;
+        --control-padding-x: 1.25rem;
+        --card-padding: calc(var(--rhythm) + 0.25rem);
+        --stack-gap: calc(var(--rhythm) / 2);
+        --stack-gap-lg: var(--rhythm);
+        --shadow-sm: 0 18px 44px rgba(0, 0, 0, 0.45);
+        --shadow-md: 0 26px 60px rgba(0, 0, 0, 0.5);
+        --shadow-lg: 0 40px 120px rgba(0, 0, 0, 0.55);
+        --page-gradient: radial-gradient(120% 140% at top, #1b1e26 0%, #10131a 60%, #050609 100%);
+        --panel-max-width: 1100px;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: var(--font-family);
+        line-height: var(--line-height);
+        background: var(--page-gradient);
+        color: var(--text-primary);
+        min-height: 100vh;
+        display: flex;
+        justify-content: center;
+        align-items: flex-start;
+        padding: var(--shell-padding-y) var(--shell-padding-x);
+      }
+
+      .shell {
+        width: 100%;
+        max-width: var(--panel-max-width);
+        display: flex;
+        flex-direction: column;
+        gap: var(--rhythm);
+      }
+
+      header,
+      footer {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-md);
+        flex-wrap: wrap;
+        background: var(--surface-panel);
+        border-radius: var(--radius-lg);
+        padding: 1rem calc(var(--space-lg) + 0.25rem);
+        box-shadow: var(--shadow-sm);
+        border: 1px solid var(--border-muted);
+      }
+
+      header {
+        backdrop-filter: blur(18px) saturate(125%);
+        -webkit-backdrop-filter: blur(18px) saturate(125%);
+      }
+
+      footer {
+        font-size: 0.95rem;
+        justify-content: space-between;
+      }
+
+      strong.brand {
+        font-size: 1.35rem;
+        letter-spacing: 0.04em;
+        color: var(--success);
+      }
+
+      nav {
+        display: inline-flex;
+        gap: var(--space-sm);
+        flex-wrap: wrap;
+      }
+
+      nav a {
+        color: var(--text-muted);
+        text-decoration: none;
+        font-weight: 600;
+        padding: 0.45rem 1.15rem;
+        border-radius: var(--radius-pill);
+        border: 1px solid transparent;
+        background: transparent;
+        transition: color var(--transition), border-color var(--transition),
+          background var(--transition), transform var(--transition);
+      }
+
+      nav a:hover,
+      nav a:focus-visible {
+        color: var(--accent-active);
+        border-color: var(--accent-active);
+        background: var(--accent-soft-hover);
+        outline: none;
+        transform: translateY(-1px);
+      }
+
+      nav a[aria-current="page"] {
+        color: var(--text-primary);
+        border-color: var(--accent-active);
+        background: var(--accent-soft);
+        box-shadow: 0 16px 40px rgba(10, 132, 255, 0.25);
+      }
+
+      main {
+        display: grid;
+        gap: var(--stack-gap-lg);
+      }
+
+      .panel-grid {
+        display: grid;
+        gap: var(--stack-gap-lg);
+        grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+        align-items: start;
+      }
+
+      @media (min-width: 1100px) {
+        .panel-grid {
+          grid-template-columns: minmax(340px, 420px) minmax(520px, 1fr);
+        }
+      }
+
+      .card {
+        background: var(--surface-panel);
+        border-radius: var(--radius-xl);
+        border: 1px solid var(--border-muted);
+        box-shadow: var(--shadow-md);
+        padding: var(--card-padding);
+        display: flex;
+        flex-direction: column;
+        gap: var(--stack-gap);
+      }
+
+      .card h2,
+      .card h3 {
+        margin: 0;
+        font-weight: 600;
+      }
+
+      .card p {
+        margin: 0;
+        color: var(--text-muted);
+      }
+
+      #viewer-card {
+        grid-column: 1 / -1;
+      }
+
+      form label {
+        display: block;
+        font-weight: 600;
+        margin-bottom: var(--space-xs);
+      }
+
+      .field-group {
+        display: grid;
+        gap: var(--space-md);
+      }
+
+      .field-row {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        gap: var(--space-md);
+      }
+
+      input[type="number"],
+      input[type="range"],
+      button {
+        font: inherit;
+      }
+
+      input[type="number"] {
+        width: 100%;
+        padding: var(--control-padding-y) var(--control-padding-x);
+        border-radius: var(--radius-sm);
+        border: 1px solid transparent;
+        background: var(--surface-soft);
+        box-shadow: inset 0 0 0 1px var(--border-subtle);
+        color: var(--text-primary);
+        transition: border-color var(--transition), box-shadow var(--transition),
+          background var(--transition);
+      }
+
+      input[type="number"]:focus-visible {
+        outline: none;
+        background: var(--surface-secondary);
+        box-shadow: inset 0 0 0 1px var(--accent), 0 0 0 4px var(--accent-soft);
+      }
+
+      input[type="range"] {
+        width: 100%;
+      }
+
+      button {
+        align-self: flex-start;
+        background: linear-gradient(135deg, var(--accent), var(--accent-hover));
+        color: var(--text-on-accent);
+        border: none;
+        border-radius: var(--radius-pill);
+        padding: 0.7rem 1.9rem;
+        font-weight: 600;
+        cursor: pointer;
+        box-shadow: 0 18px 42px rgba(10, 132, 255, 0.35);
+        transition: transform var(--transition), box-shadow var(--transition);
+      }
+
+      button:hover,
+      button:focus-visible {
+        outline: none;
+        transform: translateY(-1px);
+        box-shadow: 0 24px 52px rgba(10, 132, 255, 0.45);
+      }
+
+      .sensor-grid {
+        display: grid;
+        gap: var(--space-lg);
+      }
+
+      .sensor-group {
+        background: var(--surface-secondary);
+        border-radius: var(--radius-lg);
+        padding: var(--space-lg);
+        border: 1px solid var(--border-subtle);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+      }
+
+      .sensor-group h3 {
+        margin-top: 0;
+        margin-bottom: var(--space-md);
+      }
+
+      .slider-row {
+        display: grid;
+        gap: var(--space-xs);
+      }
+
+      .slider-row span {
+        display: flex;
+        justify-content: space-between;
+        font-size: 0.9rem;
+        color: var(--text-muted);
+      }
+
+      .mode-toggle {
+        display: inline-flex;
+        gap: var(--space-md);
+        align-items: center;
+        flex-wrap: wrap;
+      }
+
+      .mode-toggle label {
+        font-weight: 500;
+        cursor: pointer;
+      }
+
+      .mode-toggle input {
+        margin-right: var(--space-xs);
+      }
+
+      .orientation-readout {
+        display: flex;
+        gap: var(--space-xl);
+        flex-wrap: wrap;
+      }
+
+      .orientation-readout div {
+        min-width: 120px;
+      }
+
+      .orientation-readout strong {
+        display: block;
+        font-size: 2rem;
+      }
+
+      .analysis-section {
+        display: grid;
+        gap: var(--space-md);
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      }
+
+      .analysis-section section {
+        background: var(--surface-secondary);
+        border-radius: var(--radius-lg);
+        border: 1px solid var(--border-subtle);
+        padding: var(--space-lg);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+      }
+
+      .analysis-section h3 {
+        margin-top: 0;
+        margin-bottom: var(--space-sm);
+      }
+
+      dl.stats {
+        margin: 0;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+        gap: var(--space-sm) var(--space-lg);
+      }
+
+      dl.stats dt {
+        font-weight: 600;
+        color: var(--text-muted);
+      }
+
+      dl.stats dd {
+        margin: 0;
+        font-size: 1.05rem;
+      }
+
+      .support-stats {
+        margin: 0;
+        display: grid;
+        gap: var(--space-sm);
+      }
+
+      .support-stats div {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-xs);
+        padding: 0.55rem 0.75rem;
+        border-radius: var(--radius-md);
+        border: 1px solid var(--border-subtle);
+        background: rgba(255, 255, 255, 0.02);
+      }
+
+      .support-stats dt {
+        font-size: 0.85rem;
+        font-weight: 600;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+
+      .support-stats dd {
+        margin: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 0.2rem;
+      }
+
+      .support-primary {
+        font-size: 1.1rem;
+        font-weight: 600;
+        color: var(--text-primary);
+      }
+
+      .support-secondary {
+        font-size: 0.85rem;
+        color: var(--text-muted);
+      }
+
+      #viewer {
+        position: relative;
+        width: 100%;
+        aspect-ratio: 16 / 9;
+        min-height: clamp(420px, 60vh, 720px);
+        background: radial-gradient(circle at top, rgba(70, 80, 110, 0.32), rgba(9, 11, 18, 0.9));
+        border-radius: var(--radius-xl);
+        border: 1px solid var(--border-muted);
+        overflow: hidden;
+        box-shadow: var(--shadow-lg);
+      }
+
+      #viewer canvas {
+        position: absolute;
+        inset: 0;
+      }
+
+      .status {
+        position: relative;
+        font-size: 0.9rem;
+        color: var(--text-muted);
+        padding-right: 1.5rem;
+        min-height: calc(2 * 1em);
+        display: block;
+      }
+
+      .status.error {
+        color: var(--danger);
+      }
+
+      .status.success {
+        color: var(--success);
+      }
+
+      .status.live {
+        color: var(--info, #38bdf8);
+      }
+
+      .status.loading::after {
+        content: "";
+        position: absolute;
+        top: 50%;
+        right: 0.1rem;
+        width: 0.75rem;
+        height: 0.75rem;
+        border-radius: 50%;
+        border: 2px solid rgba(255, 255, 255, 0.28);
+        border-top-color: var(--accent);
+        transform: translateY(-50%);
+        animation: spin 900ms linear infinite;
+      }
+
+      @keyframes spin {
+        from {
+          transform: translateY(-50%) rotate(0deg);
+        }
+
+        to {
+          transform: translateY(-50%) rotate(360deg);
+        }
+      }
+
+      @media (max-width: 720px) {
+        body {
+          padding: var(--space-xl);
+        }
+        header,
+        footer {
+          padding-inline: var(--space-lg);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <header>
+        <strong class="brand">RevCam</strong>
+        <nav>
+          <a href="/">Live View</a>
+          <a href="/settings">Settings</a>
+          <a href="/leveling" aria-current="page">Trailer Leveling</a>
+        </nav>
+      </header>
+      <main>
+        <div class="panel-grid">
+        <article class="card">
+          <h2>Sensor Simulator</h2>
+          <p>Use sliders to emulate the GY-85 outputs until the hardware is connected. Values are fed through a Kalman filter to estimate orientation.</p>
+          <div class="mode-toggle" role="radiogroup" aria-label="Operating mode">
+            <label><input type="radio" name="mode" value="hitched" checked /> Hitched</label>
+            <label><input type="radio" name="mode" value="unhitched" /> Unhitched</label>
+          </div>
+          <div class="sensor-grid">
+            <section class="sensor-group">
+              <h3>Accelerometer (g)</h3>
+              <div class="slider-row">
+                <span><span>X axis</span><span id="accel-x-display">0.00 g</span></span>
+                <input type="range" min="-2" max="2" step="0.01" value="0" id="accel-x" />
+              </div>
+              <div class="slider-row">
+                <span><span>Y axis</span><span id="accel-y-display">1.00 g</span></span>
+                <input type="range" min="-2" max="2" step="0.01" value="1" id="accel-y" />
+              </div>
+              <div class="slider-row">
+                <span><span>Z axis</span><span id="accel-z-display">0.00 g</span></span>
+                <input type="range" min="-2" max="2" step="0.01" value="0" id="accel-z" />
+              </div>
+            </section>
+            <section class="sensor-group">
+              <h3>Gyroscope (°/s)</h3>
+              <div class="slider-row">
+                <span><span>Roll</span><span id="gyro-x-display">0 °/s</span></span>
+                <input type="range" min="-250" max="250" step="1" value="0" id="gyro-x" />
+              </div>
+              <div class="slider-row">
+                <span><span>Pitch</span><span id="gyro-y-display">0 °/s</span></span>
+                <input type="range" min="-250" max="250" step="1" value="0" id="gyro-y" />
+              </div>
+              <div class="slider-row">
+                <span><span>Yaw</span><span id="gyro-z-display">0 °/s</span></span>
+                <input type="range" min="-250" max="250" step="1" value="0" id="gyro-z" />
+              </div>
+            </section>
+            <section class="sensor-group">
+              <h3>Magnetometer (µT)</h3>
+              <div class="slider-row">
+                <span><span>X axis</span><span id="mag-x-display">20 µT</span></span>
+                <input type="range" min="-100" max="100" step="1" value="20" id="mag-x" />
+              </div>
+              <div class="slider-row">
+                <span><span>Y axis</span><span id="mag-y-display">0 µT</span></span>
+                <input type="range" min="-100" max="100" step="1" value="0" id="mag-y" />
+              </div>
+              <div class="slider-row">
+                <span><span>Z axis</span><span id="mag-z-display">-5 µT</span></span>
+                <input type="range" min="-100" max="100" step="1" value="-5" id="mag-z" />
+              </div>
+            </section>
+          </div>
+        </article>
+
+        <article class="card">
+          <h2>Leveling Analysis</h2>
+          <p class="status" id="analysis-status">Awaiting sensor data…</p>
+          <div class="orientation-readout">
+            <div>
+              <span>Roll</span>
+              <strong id="roll-display">0°</strong>
+            </div>
+            <div>
+              <span>Pitch</span>
+              <strong id="pitch-display">0°</strong>
+            </div>
+            <div>
+              <span>Yaw</span>
+              <strong id="yaw-display">0°</strong>
+            </div>
+          </div>
+          <div class="analysis-section">
+            <section>
+              <h3>Hitched guidance</h3>
+              <p id="hitched-message">—</p>
+              <dl class="stats">
+                <dt>Side to raise</dt>
+                <dd id="hitched-side">—</dd>
+                <dt>Raise amount</dt>
+                <dd id="hitched-raise">—</dd>
+                <dt>Ramp travel</dt>
+                <dd id="hitched-travel">—</dd>
+              </dl>
+            </section>
+            <section>
+              <h3>Unhitched guidance</h3>
+              <p id="unhitched-message">—</p>
+              <dl class="stats">
+                <dt>Side to raise</dt>
+                <dd id="unhitched-side">—</dd>
+                <dt>Raise amount</dt>
+                <dd id="unhitched-raise">—</dd>
+                <dt>Hitch adjustment</dt>
+                <dd id="unhitched-hitch">—</dd>
+              </dl>
+            </section>
+            <section class="support-section">
+              <h3>Support adjustments</h3>
+              <dl class="support-stats" id="support-points">
+                <div data-point="left_wheel">
+                  <dt>Left wheel</dt>
+                  <dd>
+                    <span class="support-primary">—</span>
+                    <span class="support-secondary">Offset: —</span>
+                  </dd>
+                </div>
+                <div data-point="right_wheel">
+                  <dt>Right wheel</dt>
+                  <dd>
+                    <span class="support-primary">—</span>
+                    <span class="support-secondary">Offset: —</span>
+                  </dd>
+                </div>
+                <div data-point="hitch">
+                  <dt>Hitch jack</dt>
+                  <dd>
+                    <span class="support-primary">—</span>
+                    <span class="support-secondary">Offset: —</span>
+                  </dd>
+                </div>
+                <div data-point="rear_stabilizer">
+                  <dt>Rear stabilizer</dt>
+                  <dd>
+                    <span class="support-primary">—</span>
+                    <span class="support-secondary">Offset: —</span>
+                  </dd>
+                </div>
+              </dl>
+            </section>
+          </div>
+        </article>
+
+        <article class="card" id="viewer-card">
+          <h2>3D Trailer Visualiser</h2>
+          <p>Orientation estimates drive this rendering. Adjust the sliders to see how the trailer shifts relative to level ground.</p>
+          <div id="viewer" aria-label="3D rendering of trailer"></div>
+        </article>
+      </div>
+    </main>
+    <footer>
+      <span>&copy; RevCam – Trailer leveling preview</span>
+      <span id="sample-rate" class="status"></span>
+    </footer>
+  </div>
+  <script type="module">
+      import * as THREE from "https://unpkg.com/three@0.158.0/build/three.module.js?module";
+      import { OrbitControls } from "https://unpkg.com/three@0.158.0/examples/jsm/controls/OrbitControls.js?module";
+      import { STLLoader } from "https://unpkg.com/three@0.158.0/examples/jsm/loaders/STLLoader.js?module";
+
+      const SAMPLE_INTERVAL = 300;
+      const sampleRateDisplay = document.getElementById("sample-rate");
+      const analysisStatus = document.getElementById("analysis-status");
+      const rollDisplay = document.getElementById("roll-display");
+      const pitchDisplay = document.getElementById("pitch-display");
+      const yawDisplay = document.getElementById("yaw-display");
+      const hitchedMessage = document.getElementById("hitched-message");
+      const hitchedSide = document.getElementById("hitched-side");
+      const hitchedRaise = document.getElementById("hitched-raise");
+      const hitchedTravel = document.getElementById("hitched-travel");
+      const unhitchedMessage = document.getElementById("unhitched-message");
+      const unhitchedSide = document.getElementById("unhitched-side");
+      const unhitchedRaise = document.getElementById("unhitched-raise");
+      const unhitchedHitch = document.getElementById("unhitched-hitch");
+      const supportElements = new Map();
+      const supportRoot = document.getElementById("support-points");
+      if (supportRoot) {
+        for (const element of supportRoot.querySelectorAll("[data-point]")) {
+          const key = element.dataset.point;
+          if (!key) continue;
+          supportElements.set(key, {
+            primary: element.querySelector(".support-primary"),
+            secondary: element.querySelector(".support-secondary"),
+          });
+        }
+      }
+
+      const sensorState = {
+        accelerometer: { x: 0, y: 1, z: 0 },
+        gyroscope: { x: 0, y: 0, z: 0 },
+        magnetometer: { x: 20, y: 0, z: -5 },
+      };
+      let currentMode = "hitched";
+      let lastSampleTime = performance.now();
+      let inFlight = false;
+      let pendingSample = false;
+      let latestOrientation = { roll: 0, pitch: 0, yaw: 0 };
+      let scene, renderer, camera, controls, trailer;
+
+      function formatDistance(value) {
+        if (!Number.isFinite(value)) return "—";
+        const absValue = Math.abs(value);
+        if (absValue >= 1) {
+          return `${value.toFixed(2)} m`;
+        }
+        return `${(value * 100).toFixed(1)} cm`;
+      }
+
+      function formatAngle(value) {
+        if (!Number.isFinite(value)) return "—";
+        return `${value.toFixed(2)}°`;
+      }
+
+      function formatSide(value) {
+        if (!value) return "—";
+        if (value === "level") return "Level";
+        return value.charAt(0).toUpperCase() + value.slice(1);
+      }
+
+      function formatOffset(value) {
+        if (!Number.isFinite(value)) {
+          return "Offset: —";
+        }
+        const centimetres = value * 100;
+        const sign = centimetres >= 0 ? "+" : "−";
+        return `Offset: ${sign}${Math.abs(centimetres).toFixed(1)} cm`;
+      }
+
+      function updateSupportPoints(points) {
+        if (!supportElements.size) {
+          return;
+        }
+        for (const [key, refs] of supportElements.entries()) {
+          const primary = refs.primary;
+          const secondary = refs.secondary;
+          if (!(primary instanceof HTMLElement) || !(secondary instanceof HTMLElement)) {
+            continue;
+          }
+          const entry = points && typeof points === "object" ? points[key] : null;
+          if (!entry) {
+            primary.textContent = "—";
+            secondary.textContent = "Offset: —";
+            continue;
+          }
+          const action = entry.action;
+          const adjustment = Number(entry.adjustment_m);
+          const offset = Number(entry.offset_m);
+          let primaryText = "—";
+          if (action === "level" || !Number.isFinite(adjustment) || Math.abs(adjustment) < 1e-4) {
+            primaryText = "Level";
+          } else if (action === "raise") {
+            primaryText = `Raise ${formatDistance(adjustment)}`;
+          } else if (action === "lower") {
+            primaryText = `Lower ${formatDistance(adjustment)}`;
+          } else {
+            primaryText = formatSide(action);
+          }
+          primary.textContent = primaryText;
+          secondary.textContent = Number.isFinite(offset) ? formatOffset(offset) : "Offset: —";
+        }
+      }
+
+      function updateDisplays(evaluation, meta) {
+        if (!evaluation) {
+          return;
+        }
+        const { orientation, hitched, unhitched, support_points: supportPoints } = evaluation;
+        latestOrientation = orientation;
+        rollDisplay.textContent = formatAngle(orientation.roll);
+        pitchDisplay.textContent = formatAngle(orientation.pitch);
+        yawDisplay.textContent = formatAngle(orientation.yaw);
+
+        hitchedMessage.textContent = hitched.message;
+        hitchedSide.textContent = formatSide(hitched.side_to_raise);
+        hitchedRaise.textContent = formatDistance(hitched.required_raise_m);
+        if (hitched.ramp) {
+          const travel = hitched.ramp.travel_m ?? 0;
+          const percent = hitched.ramp.travel_percent ?? 0;
+          const limited = hitched.ramp.limited;
+          const travelText = `${formatDistance(travel)} (${percent.toFixed(1)}%)`;
+          hitchedTravel.textContent = limited
+            ? `${travelText} – limited`
+            : travelText;
+        } else {
+          hitchedTravel.textContent = "—";
+        }
+
+        unhitchedMessage.textContent = unhitched.message;
+        unhitchedSide.textContent = formatSide(unhitched.side_to_raise);
+        unhitchedRaise.textContent = formatDistance(unhitched.required_raise_m);
+        const hitchDir = unhitched.hitch_direction;
+        const hitchAmount = formatDistance(unhitched.hitch_adjustment_m);
+        if (hitchDir === "level") {
+          unhitchedHitch.textContent = "Level";
+        } else {
+          const direction = formatSide(hitchDir);
+          unhitchedHitch.textContent = `${direction} ${hitchAmount}`;
+        }
+
+        updateSupportPoints(supportPoints);
+
+        if (meta) {
+          const { modeLabel, analysisMessage } = meta;
+          const message = analysisMessage ? `${modeLabel} • ${analysisMessage}` : modeLabel;
+          analysisStatus.textContent = message;
+          analysisStatus.classList.remove("error");
+          analysisStatus.classList.add("live");
+        }
+
+        analysisStatus.classList.remove("loading");
+        analysisStatus.removeAttribute("aria-busy");
+
+        if (trailer) {
+          const rollRad = THREE.MathUtils.degToRad(orientation.roll);
+          const pitchRad = THREE.MathUtils.degToRad(orientation.pitch);
+          const yawRad = THREE.MathUtils.degToRad(orientation.yaw);
+          trailer.rotation.x = rollRad;
+          trailer.rotation.y = yawRad;
+          trailer.rotation.z = pitchRad;
+        }
+      }
+
+      function requestSample() {
+        if (inFlight) {
+          pendingSample = true;
+          return;
+        }
+        pendingSample = false;
+        void sendSample();
+      }
+
+      async function sendSample() {
+        inFlight = true;
+        analysisStatus.classList.add("loading");
+        analysisStatus.setAttribute("aria-busy", "true");
+        analysisStatus.classList.remove("error");
+        const payload = {
+          accelerometer: sensorState.accelerometer,
+          gyroscope: sensorState.gyroscope,
+          magnetometer: sensorState.magnetometer,
+          dt: SAMPLE_INTERVAL / 1000,
+          mode: currentMode,
+        };
+        try {
+          const response = await fetch("/api/leveling/sample", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+          const data = await response.json();
+          const modeLabel = data.mode === "hitched" ? "Hitched mode" : "Unhitched mode";
+          const analysisMessage = data.analysis?.message ?? "";
+          updateDisplays({
+            orientation: data.orientation,
+            hitched: data.hitched,
+            unhitched: data.unhitched,
+            support_points: data.support_points,
+          }, { modeLabel, analysisMessage });
+          const now = performance.now();
+          const delta = now - lastSampleTime;
+          lastSampleTime = now;
+          const timestamp = new Date();
+          sampleRateDisplay.textContent = `Last update ${timestamp.toLocaleTimeString()} • Δ ${Math.round(delta)} ms`;
+        } catch (error) {
+          console.error(error);
+          analysisStatus.textContent = "Unable to reach leveling API";
+          analysisStatus.classList.remove("live");
+          analysisStatus.classList.add("error");
+          analysisStatus.classList.remove("loading");
+          analysisStatus.removeAttribute("aria-busy");
+          sampleRateDisplay.textContent = "Waiting for connection…";
+        } finally {
+          inFlight = false;
+          if (pendingSample) {
+            pendingSample = false;
+            requestSample();
+          }
+        }
+      }
+
+      function handleSlider(id, formatter, target) {
+        const input = document.getElementById(id);
+        const display = document.getElementById(`${id}-display`);
+        if (!input || !display) {
+          throw new Error(`Missing slider ${id}`);
+        }
+        const update = (triggerSample = true) => {
+          const value = parseFloat(input.value);
+          display.textContent = formatter(value);
+          target(value);
+          if (triggerSample) {
+            requestSample();
+          }
+        };
+        input.addEventListener("input", () => update(true));
+        update(false);
+      }
+
+      function initSliders() {
+        handleSlider("accel-x", (v) => `${v.toFixed(2)} g`, (v) => (sensorState.accelerometer.x = v));
+        handleSlider("accel-y", (v) => `${v.toFixed(2)} g`, (v) => (sensorState.accelerometer.y = v));
+        handleSlider("accel-z", (v) => `${v.toFixed(2)} g`, (v) => (sensorState.accelerometer.z = v));
+        handleSlider("gyro-x", (v) => `${v.toFixed(0)} °/s`, (v) => (sensorState.gyroscope.x = v));
+        handleSlider("gyro-y", (v) => `${v.toFixed(0)} °/s`, (v) => (sensorState.gyroscope.y = v));
+        handleSlider("gyro-z", (v) => `${v.toFixed(0)} °/s`, (v) => (sensorState.gyroscope.z = v));
+        handleSlider("mag-x", (v) => `${v.toFixed(0)} µT`, (v) => (sensorState.magnetometer.x = v));
+        handleSlider("mag-y", (v) => `${v.toFixed(0)} µT`, (v) => (sensorState.magnetometer.y = v));
+        handleSlider("mag-z", (v) => `${v.toFixed(0)} µT`, (v) => (sensorState.magnetometer.z = v));
+      }
+
+      function initModeToggle() {
+        for (const radio of document.querySelectorAll('input[name="mode"]')) {
+          radio.addEventListener("change", (event) => {
+            if (event.target instanceof HTMLInputElement && event.target.checked) {
+              currentMode = event.target.value;
+              requestSample();
+            }
+          });
+        }
+      }
+
+      function initThree() {
+        const container = document.getElementById("viewer");
+        const width = container.clientWidth;
+        const height = container.clientHeight;
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x0b0d13);
+
+        camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 100);
+        camera.position.set(2.8, 1.8, 2.8);
+
+        renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.setSize(width, height);
+        container.appendChild(renderer.domElement);
+
+        controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.08;
+        controls.target.set(0, 0.4, 0);
+
+        const ambient = new THREE.AmbientLight(0xffffff, 0.5);
+        scene.add(ambient);
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        dirLight.position.set(5, 10, 7);
+        scene.add(dirLight);
+
+        const planeGeometry = new THREE.PlaneGeometry(6, 6);
+        const planeMaterial = new THREE.MeshStandardMaterial({
+          color: 0x1a1d24,
+          roughness: 0.9,
+          metalness: 0.1,
+        });
+        const plane = new THREE.Mesh(planeGeometry, planeMaterial);
+        plane.rotation.x = -Math.PI / 2;
+        scene.add(plane);
+
+        const loader = new STLLoader();
+        loader.load(
+          "/models/airstream_trailer.stl",
+          (geometry) => {
+            const material = new THREE.MeshStandardMaterial({
+              color: 0xbcc9d6,
+              metalness: 0.65,
+              roughness: 0.35,
+            });
+            trailer = new THREE.Mesh(geometry, material);
+            geometry.computeBoundingBox();
+            const box = geometry.boundingBox;
+            const center = box.getCenter(new THREE.Vector3());
+            geometry.translate(-center.x, -center.y, -center.z);
+            geometry.computeBoundingBox();
+            const adjustedBox = geometry.boundingBox;
+            trailer.position.y = -adjustedBox.min.y;
+            scene.add(trailer);
+          },
+          undefined,
+          (error) => {
+            console.error(error);
+            analysisStatus.textContent = "Unable to load trailer model";
+            analysisStatus.classList.add("error");
+          }
+        );
+
+        window.addEventListener("resize", () => {
+          const w = container.clientWidth;
+          const h = container.clientHeight;
+          camera.aspect = w / h;
+          camera.updateProjectionMatrix();
+          renderer.setSize(w, h);
+        });
+
+        function animate() {
+          requestAnimationFrame(animate);
+          controls.update();
+          renderer.render(scene, camera);
+        }
+        animate();
+      }
+
+      initSliders();
+      initModeToggle();
+      initThree();
+      setInterval(requestSample, SAMPLE_INTERVAL);
+      requestSample();
+    </script>
+  </body>
+</html>

@@ -20,8 +20,10 @@ from rev_cam.config import (
     DEFAULT_REVERSING_AIDS,
     DEFAULT_DISTANCE_MOUNTING,
     DEFAULT_DISTANCE_USE_PROJECTED,
+    DEFAULT_LEVELING_SETTINGS,
 )
 from rev_cam.distance import DistanceCalibration
+from rev_cam.trailer_leveling import LevelingSettings
 
 
 def test_default_orientation(tmp_path: Path):
@@ -265,6 +267,34 @@ def test_reversing_aids_validation(tmp_path: Path) -> None:
                 ],
             }
         )
+
+
+def test_default_leveling_settings(tmp_path: Path) -> None:
+    manager = ConfigManager(tmp_path / "config.json")
+    settings = manager.get_leveling_settings()
+    assert isinstance(settings, LevelingSettings)
+    assert settings == DEFAULT_LEVELING_SETTINGS
+
+
+def test_leveling_settings_persist(tmp_path: Path) -> None:
+    config_file = tmp_path / "config.json"
+    manager = ConfigManager(config_file)
+    payload = {
+        "geometry": {"axle_width_m": 2.6, "hitch_to_axle_m": 5.1, "length_m": 8.2},
+        "ramp": {"length_m": 0.9, "height_m": 0.18},
+    }
+    updated = manager.set_leveling_settings(payload)
+    assert isinstance(updated, LevelingSettings)
+    reloaded = ConfigManager(config_file)
+    assert reloaded.get_leveling_settings() == updated
+
+
+def test_leveling_settings_validation(tmp_path: Path) -> None:
+    manager = ConfigManager(tmp_path / "config.json")
+    with pytest.raises(ValueError):
+        manager.set_leveling_settings({"geometry": {"axle_width_m": -1.0}})
+    with pytest.raises(ValueError):
+        manager.set_leveling_settings({"ramp": {"height_m": 0.0}})
 
 
 def test_default_overlay_settings(tmp_path: Path) -> None:

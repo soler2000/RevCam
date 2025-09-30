@@ -587,6 +587,18 @@
         margin-bottom: 0;
         font-size: 0.95rem;
       }
+      .trailer-settings-grid {
+        display: grid;
+        gap: var(--stack-gap);
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        margin-bottom: var(--stack-gap);
+      }
+      .trailer-settings-grid label {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-sm);
+        font-size: 0.95rem;
+      }
       .stream-settings input[type="range"] {
         width: 100%;
       }
@@ -848,6 +860,19 @@
       .wifi-network span {
         font-size: 0.9rem;
         color: var(--text-muted);
+      }
+      .wifi-network .badge {
+        display: inline-flex;
+        align-items: center;
+        margin-top: var(--space-xs);
+        padding: 0 var(--space-sm);
+        border-radius: var(--radius-pill);
+        background: var(--surface-strong);
+        color: var(--text-muted);
+        font-size: 0.75rem;
+        font-weight: 600;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
       }
       .wifi-network .actions {
         display: flex;
@@ -1598,6 +1623,18 @@
                   type="button"
                   class="tab-button"
                   role="tab"
+                  id="tab-trailer"
+                  aria-controls="panel-trailer"
+                  aria-selected="false"
+                  data-tab="trailer"
+                  tabindex="-1"
+                >
+                  Trailer leveling
+                </button>
+                <button
+                  type="button"
+                  class="tab-button"
+                  role="tab"
                   id="tab-reversing"
                   aria-controls="panel-reversing"
                   aria-selected="false"
@@ -2011,6 +2048,95 @@
             <div class="form-actions">
               <button type="submit">Save warning zones</button>
               <span id="distance-zones-status" class="muted helper-text status-text"></span>
+            </div>
+          </form>
+        </section>
+
+            <section
+          id="panel-trailer"
+          class="tab-panel"
+          role="tabpanel"
+          aria-labelledby="tab-trailer"
+          data-tab="trailer"
+          hidden
+        >
+          <form id="trailer-settings-form" class="card">
+            <h2>Trailer leveling</h2>
+            <p class="muted helper-text">
+              Configure the trailer geometry and ramp dimensions used to calculate leveling guidance.
+              All values are stored in metres.
+            </p>
+            <div class="trailer-settings-grid">
+              <label>
+                Axle width (m)
+                <input
+                  type="number"
+                  name="axle_width_m"
+                  min="1"
+                  max="5"
+                  step="0.01"
+                  inputmode="decimal"
+                  required
+                />
+              </label>
+              <label>
+                Hitch to axle (m)
+                <input
+                  type="number"
+                  name="hitch_to_axle_m"
+                  min="1"
+                  max="10"
+                  step="0.01"
+                  inputmode="decimal"
+                  required
+                />
+              </label>
+              <label>
+                Trailer length (m)
+                <input
+                  type="number"
+                  name="length_m"
+                  min="1"
+                  max="15"
+                  step="0.01"
+                  inputmode="decimal"
+                  required
+                />
+              </label>
+            </div>
+            <h3>Ramp specification</h3>
+            <p class="muted helper-text">
+              Ramp measurements determine the maximum achievable raise before recommending additional blocking.
+            </p>
+            <div class="trailer-settings-grid">
+              <label>
+                Ramp length (m)
+                <input
+                  type="number"
+                  name="ramp_length_m"
+                  min="0.2"
+                  max="2"
+                  step="0.01"
+                  inputmode="decimal"
+                  required
+                />
+              </label>
+              <label>
+                Ramp height (m)
+                <input
+                  type="number"
+                  name="ramp_height_m"
+                  min="0.05"
+                  max="0.5"
+                  step="0.005"
+                  inputmode="decimal"
+                  required
+                />
+              </label>
+            </div>
+            <div class="form-actions">
+              <button type="submit">Save trailer settings</button>
+              <span id="trailer-settings-status" class="muted helper-text status-text" role="status"></span>
             </div>
           </form>
         </section>
@@ -2732,6 +2858,17 @@
       const CALIBRATION_OFFSET_LIMIT = 5.0;
       const CALIBRATION_SCALE_MIN = 0.5;
       const CALIBRATION_SCALE_MAX = 2.0;
+      const DEFAULT_TRAILER_SETTINGS = {
+        geometry: {
+          axle_width_m: 2.4,
+          hitch_to_axle_m: 4.8,
+          length_m: 7.0,
+        },
+        ramp: {
+          length_m: 0.8,
+          height_m: 0.12,
+        },
+      };
       const ledSummary = document.getElementById("led-summary");
       const ledForm = document.getElementById("led-form");
       const ledPatternSelect = document.getElementById("led-pattern");
@@ -2777,6 +2914,17 @@
             danger: distanceZonesForm.querySelector('input[name="danger"]'),
           }
         : null;
+      const trailerSettingsForm = document.getElementById("trailer-settings-form");
+      const trailerSettingsStatus = document.getElementById("trailer-settings-status");
+      const trailerInputs = trailerSettingsForm
+        ? {
+            axleWidth: trailerSettingsForm.querySelector('input[name="axle_width_m"]'),
+            hitchToAxle: trailerSettingsForm.querySelector('input[name="hitch_to_axle_m"]'),
+            length: trailerSettingsForm.querySelector('input[name="length_m"]'),
+            rampLength: trailerSettingsForm.querySelector('input[name="ramp_length_m"]'),
+            rampHeight: trailerSettingsForm.querySelector('input[name="ramp_height_m"]'),
+          }
+        : null;
       const distanceCalibrationForm = document.getElementById("distance-calibration-form");
       const distanceCalibrationStatus = document.getElementById("distance-calibration-status");
       const distanceZeroButton = document.getElementById("distance-zero");
@@ -2786,6 +2934,8 @@
             scale: distanceCalibrationForm.querySelector('input[name="scale"]'),
           }
         : null;
+      let trailerStatusTimer = null;
+      let trailerSaving = false;
       let distanceLoading = false;
       let distanceCalibrationStatusTimer = null;
       let distanceOverlayStatusTimer = null;
@@ -2856,6 +3006,69 @@
             });
           }
         }
+      }
+      if (trailerInputs) {
+        for (const input of Object.values(trailerInputs)) {
+          if (input instanceof HTMLInputElement) {
+            input.addEventListener("input", () => {
+              input.dataset.userEdited = "true";
+              setTrailerStatus("", { persistent: true });
+            });
+          }
+        }
+        applyTrailerSettings(DEFAULT_TRAILER_SETTINGS, { force: true });
+      }
+      if (trailerSettingsForm) {
+        trailerSettingsForm.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          if (!trailerInputs || trailerSaving) {
+            return;
+          }
+          const geometry = {
+            axle_width_m: parseFloat(trailerInputs.axleWidth?.value ?? ""),
+            hitch_to_axle_m: parseFloat(trailerInputs.hitchToAxle?.value ?? ""),
+            length_m: parseFloat(trailerInputs.length?.value ?? ""),
+          };
+          const ramp = {
+            length_m: parseFloat(trailerInputs.rampLength?.value ?? ""),
+            height_m: parseFloat(trailerInputs.rampHeight?.value ?? ""),
+          };
+          const values = [...Object.values(geometry), ...Object.values(ramp)];
+          if (values.some((value) => !Number.isFinite(value) || value <= 0)) {
+            setTrailerStatus("Enter positive measurements for all fields.", { persistent: true });
+            return;
+          }
+          trailerSaving = true;
+          setTrailerStatus("Saving…", { persistent: true });
+          try {
+            const response = await fetch("/api/leveling/config", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ geometry, ramp }),
+            });
+            if (!response.ok) {
+              let detail = "Unable to save trailer settings.";
+              try {
+                const error = await response.json();
+                if (error && typeof error.detail === "string") {
+                  detail = error.detail;
+                }
+              } catch (err) {
+                console.error(err);
+              }
+              throw new Error(detail);
+            }
+            const data = await response.json();
+            applyTrailerSettings(data, { force: true });
+            setTrailerStatus("Trailer settings saved");
+          } catch (error) {
+            console.error(error);
+            const message = error instanceof Error ? error.message : "Unable to save trailer settings.";
+            setTrailerStatus(`Error: ${message}`, { persistent: true });
+          } finally {
+            trailerSaving = false;
+          }
+        });
       }
       const reversingAidsForm = document.getElementById("reversing-aids-form");
       const reversingAidsStatus = document.getElementById("reversing-aids-status");
@@ -4084,6 +4297,25 @@
               distanceCalibrationStatus.textContent = "";
             }
             distanceCalibrationStatusTimer = null;
+          }, 4000);
+        }
+      }
+
+      function setTrailerStatus(message, options = {}) {
+        if (!trailerSettingsStatus) {
+          return;
+        }
+        if (trailerStatusTimer) {
+          window.clearTimeout(trailerStatusTimer);
+          trailerStatusTimer = null;
+        }
+        trailerSettingsStatus.textContent = message || "";
+        if (message && options.persistent !== true) {
+          trailerStatusTimer = window.setTimeout(() => {
+            if (trailerSettingsStatus && trailerSettingsStatus.textContent === message) {
+              trailerSettingsStatus.textContent = "";
+            }
+            trailerStatusTimer = null;
           }, 4000);
         }
       }
@@ -6747,6 +6979,45 @@
         }
       }
 
+      function showWifiConnectFormForNetwork(network, options = {}) {
+        if (!wifiConnectForm || !wifiConnectSsidInput || !wifiConnectSelected) {
+          return;
+        }
+        const identifier =
+          network && typeof network.ssid === "string" ? network.ssid.trim() : "";
+        const ssid = identifier || "";
+        wifiConnectForm.hidden = false;
+        wifiConnectSsidInput.value = ssid;
+        wifiConnectSelected.textContent = ssid ? `Selected network: ${ssid}` : "";
+        const updatingPassword = options && options.updatingPassword === true;
+        if (wifiConnectPasswordInput) {
+          wifiConnectPasswordInput.value = "";
+          const hasStoredCredentials =
+            !!network && network.stored_credentials === true && !network.hidden;
+          if (hasStoredCredentials && !updatingPassword) {
+            wifiConnectPasswordInput.placeholder =
+              "Saved network – leave blank to use stored password.";
+            wifiConnectPasswordInput.dataset.knownNetwork = "true";
+            wifiConnectPasswordInput.title = "Leave blank to reuse the saved credentials.";
+          } else if (hasStoredCredentials && updatingPassword) {
+            wifiConnectPasswordInput.placeholder =
+              "Enter a new password to update saved credentials.";
+            wifiConnectPasswordInput.dataset.knownNetwork = "true";
+            wifiConnectPasswordInput.title =
+              "Enter a new password to replace the stored credentials.";
+          } else {
+            wifiConnectPasswordInput.placeholder = network && network.security
+              ? `Security: ${network.security}`
+              : "Password (if required)";
+            delete wifiConnectPasswordInput.dataset.knownNetwork;
+            wifiConnectPasswordInput.title = "Enter the network password if required.";
+          }
+        }
+        if (wifiRollbackInput && typeof wifiRollbackInput.value === "string" && !wifiRollbackInput.value) {
+          wifiRollbackInput.value = "30";
+        }
+      }
+
       function renderWifiNetworks(networks) {
         if (!wifiNetworkList) {
           return;
@@ -6785,7 +7056,10 @@
               detailParts.push(freqText);
             }
           }
-          if (network.known) {
+          const hasStoredCredentials = network && network.stored_credentials === true;
+          if (hasStoredCredentials) {
+            detailParts.push("saved password");
+          } else if (network.known) {
             detailParts.push("saved");
           }
           if (network.active) {
@@ -6793,6 +7067,12 @@
           }
           details.textContent = detailParts.length ? detailParts.join(" • ") : "Details unavailable";
           info.appendChild(details);
+          if (hasStoredCredentials) {
+            const badge = document.createElement("span");
+            badge.className = "badge";
+            badge.textContent = "Saved password";
+            info.appendChild(badge);
+          }
           item.appendChild(info);
           const actions = document.createElement("div");
           actions.className = "actions";
@@ -6806,33 +7086,39 @@
             connectButton.disabled = true;
           } else {
             connectButton.textContent = "Connect";
-            connectButton.addEventListener("click", () => {
-              if (!wifiConnectForm || !wifiConnectSsidInput || !wifiConnectSelected) {
-                return;
-              }
-              wifiConnectForm.hidden = false;
-              wifiConnectSsidInput.value = ssid;
-              wifiConnectSelected.textContent = `Selected network: ${ssid}`;
-              if (wifiConnectPasswordInput) {
-                wifiConnectPasswordInput.value = "";
-                if (network.known) {
-                  wifiConnectPasswordInput.placeholder = "Saved network – leave blank to use stored password.";
-                  wifiConnectPasswordInput.dataset.knownNetwork = "true";
-                  wifiConnectPasswordInput.title = "Leave blank to reuse the saved credentials.";
-                } else {
-                  wifiConnectPasswordInput.placeholder = network.security
-                    ? `Security: ${network.security}`
-                    : "Password (if required)";
-                  delete wifiConnectPasswordInput.dataset.knownNetwork;
-                  wifiConnectPasswordInput.title = "Enter the network password if required.";
+            if (hasStoredCredentials) {
+              connectButton.title = "Connect using the saved password.";
+              connectButton.addEventListener("click", () => {
+                if (!wifiConnectForm || !wifiConnectSsidInput) {
+                  return;
                 }
-              }
-              if (wifiRollbackInput && typeof wifiRollbackInput.value === "string" && !wifiRollbackInput.value) {
-                wifiRollbackInput.value = "30";
-              }
-            });
+                hideWifiConnectForm();
+                wifiConnectSsidInput.value = ssid;
+                if (wifiConnectPasswordInput) {
+                  wifiConnectPasswordInput.value = "";
+                }
+                connectToWifi().catch((err) => console.error(err));
+              });
+            } else {
+              connectButton.addEventListener("click", () => {
+                showWifiConnectFormForNetwork(network);
+              });
+            }
           }
           actions.appendChild(connectButton);
+          if (hasStoredCredentials) {
+            const updateButton = document.createElement("button");
+            updateButton.type = "button";
+            updateButton.className = "secondary-button";
+            updateButton.textContent = "Update password";
+            updateButton.addEventListener("click", () => {
+              showWifiConnectFormForNetwork(network, { updatingPassword: true });
+              if (wifiConnectPasswordInput) {
+                wifiConnectPasswordInput.focus({ preventScroll: true });
+              }
+            });
+            actions.appendChild(updateButton);
+          }
           if (network.known) {
             const forgetButton = document.createElement("button");
             forgetButton.type = "button";
@@ -7667,6 +7953,77 @@
         });
       }
 
+      function applyTrailerSettings(settings, options = {}) {
+        if (!trailerInputs) {
+          return;
+        }
+        const geometrySource =
+          settings && typeof settings.geometry === "object"
+            ? settings.geometry
+            : DEFAULT_TRAILER_SETTINGS.geometry;
+        const rampSource =
+          settings && typeof settings.ramp === "object" ? settings.ramp : DEFAULT_TRAILER_SETTINGS.ramp;
+        const forceUpdate = options.force === true;
+        const pairs = [
+          [trailerInputs.axleWidth, geometrySource.axle_width_m ?? DEFAULT_TRAILER_SETTINGS.geometry.axle_width_m],
+          [trailerInputs.hitchToAxle, geometrySource.hitch_to_axle_m ?? DEFAULT_TRAILER_SETTINGS.geometry.hitch_to_axle_m],
+          [trailerInputs.length, geometrySource.length_m ?? DEFAULT_TRAILER_SETTINGS.geometry.length_m],
+          [trailerInputs.rampLength, rampSource.length_m ?? DEFAULT_TRAILER_SETTINGS.ramp.length_m],
+          [trailerInputs.rampHeight, rampSource.height_m ?? DEFAULT_TRAILER_SETTINGS.ramp.height_m],
+        ];
+        for (const [input, value] of pairs) {
+          if (!(input instanceof HTMLInputElement)) {
+            continue;
+          }
+          if (!forceUpdate && input.dataset.userEdited === "true") {
+            continue;
+          }
+          if (Number.isFinite(value)) {
+            input.value = String(Number(value));
+          } else if (forceUpdate) {
+            input.value = "";
+          }
+          if (forceUpdate) {
+            delete input.dataset.userEdited;
+          }
+        }
+      }
+
+      async function fetchTrailerSettings() {
+        const response = await fetch("/api/leveling/config");
+        if (!response.ok) {
+          let detail = `HTTP ${response.status}`;
+          try {
+            const error = await response.json();
+            if (error && typeof error.detail === "string") {
+              detail = error.detail;
+            }
+          } catch (err) {
+            console.error(err);
+          }
+          throw new Error(detail);
+        }
+        return response.json();
+      }
+
+      async function loadTrailerSettings(options = {}) {
+        if (!trailerSettingsForm) {
+          return;
+        }
+        if (options.clearStatus !== false) {
+          setTrailerStatus("", { persistent: true });
+        }
+        try {
+          const data = await fetchTrailerSettings();
+          applyTrailerSettings(data, { force: true });
+        } catch (error) {
+          console.error(error);
+          applyTrailerSettings(DEFAULT_TRAILER_SETTINGS, { force: true });
+          const message = error instanceof Error ? error.message : "Unable to load trailer settings.";
+          setTrailerStatus(`Error: ${message}`, { persistent: true });
+        }
+      }
+
       async function fetchSettings() {
         const [
           orientationResponse,
@@ -7802,6 +8159,8 @@
           statusLabel.textContent = "Settings saved";
         }
       });
+
+      loadTrailerSettings().catch((err) => console.error(err));
 
       loadSettings().catch((err) => {
         console.error(err);

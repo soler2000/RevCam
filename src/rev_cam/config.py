@@ -19,6 +19,11 @@ except ImportError:  # pragma: no cover - fallback when optional dependencies mi
     }
     DEFAULT_CAMERA_CHOICE = "auto"
 from .battery import BatteryLimits, DEFAULT_BATTERY_LIMITS
+from .trailer_leveling import (
+    DEFAULT_LEVELING_SETTINGS,
+    LevelingSettings,
+    parse_leveling_settings,
+)
 
 DEFAULT_BATTERY_CAPACITY_MAH = 1000
 from .distance import (
@@ -659,6 +664,7 @@ class ConfigManager:
             self._battery_overlay_enabled,
             self._wifi_overlay_enabled,
             self._reversing_overlay_enabled,
+            self._leveling_settings,
         ) = self._load()
 
     def _ensure_parent(self) -> None:
@@ -683,6 +689,7 @@ class ConfigManager:
         bool,
         bool,
         bool,
+        LevelingSettings,
     ]:
         if not self._path.exists():
             return (
@@ -702,6 +709,7 @@ class ConfigManager:
                 DEFAULT_BATTERY_OVERLAY_ENABLED,
                 DEFAULT_WIFI_OVERLAY_ENABLED,
                 DEFAULT_REVERSING_OVERLAY_ENABLED,
+                DEFAULT_LEVELING_SETTINGS,
             )
         try:
             payload = json.loads(self._path.read_text())
@@ -780,6 +788,11 @@ class ConfigManager:
                     overlays_payload.get("reversing_aids"), default=reversing_overlay_enabled
                 )
 
+            leveling_payload = payload.get("leveling")
+            leveling_settings = parse_leveling_settings(
+                leveling_payload, default=DEFAULT_LEVELING_SETTINGS
+            )
+
             return (
                 orientation,
                 camera,
@@ -797,6 +810,7 @@ class ConfigManager:
                 battery_overlay_enabled,
                 wifi_overlay_enabled,
                 reversing_overlay_enabled,
+                leveling_settings,
             )
         except (OSError, ValueError) as exc:
             raise RuntimeError(f"Failed to load configuration: {exc}") from exc
@@ -826,6 +840,7 @@ class ConfigManager:
                 "distance": self._distance_overlay_enabled,
                 "reversing_aids": self._reversing_overlay_enabled,
             },
+            "leveling": self._leveling_settings.to_dict(),
         }
         self._path.write_text(json.dumps(payload, indent=2))
 
@@ -925,6 +940,17 @@ class ConfigManager:
             self._battery_overlay_enabled = enabled
             self._save()
         return enabled
+
+    def get_leveling_settings(self) -> LevelingSettings:
+        with self._lock:
+            return self._leveling_settings
+
+    def set_leveling_settings(self, data: Mapping[str, Any] | LevelingSettings) -> LevelingSettings:
+        settings = parse_leveling_settings(data, default=self._leveling_settings)
+        with self._lock:
+            self._leveling_settings = settings
+            self._save()
+        return settings
 
     def get_wifi_overlay_enabled(self) -> bool:
         with self._lock:

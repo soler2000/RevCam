@@ -237,6 +237,25 @@ def test_wifi_scan_endpoint(client: TestClient) -> None:
     payload = response.json()
     assert "networks" in payload
     assert any(network.get("active") for network in payload["networks"])
+    assert all("stored_credentials" in network for network in payload["networks"])
+
+
+def test_wifi_scan_marks_stored_credentials(tmp_path: Path) -> None:
+    backend = FakeWiFiBackend()
+    credentials_path = tmp_path / "wifi_credentials.json"
+    store = WiFiCredentialStore(credentials_path)
+    store.set_network_password("Home", "homepass")
+    manager = WiFiManager(
+        backend=backend,
+        rollback_timeout=0.05,
+        poll_interval=0.005,
+        hotspot_rollback_timeout=0.05,
+        credential_store=store,
+    )
+
+    networks = manager.scan_networks()
+
+    assert any(network.ssid == "Home" and network.stored_credentials for network in networks)
 
 
 def test_wifi_log_endpoint_initially_empty(client: TestClient) -> None:
@@ -272,6 +291,49 @@ def test_wifi_connect_manual_rollback_without_dev_mode(client: TestClient) -> No
     assert backend is not None
     assert backend.connect_attempts[0][0] == "Guest"
     assert backend.connect_attempts[1][0] == "Home"
+
+
+def test_wifi_connect_switch_prompts_network_change_notice(client: TestClient) -> None:
+    backend = getattr(client, "backend", None)
+    assert backend is not None
+    backend.status = WiFiStatus(
+        connected=True,
+        ssid="Home",
+        signal=70,
+        ip_address="192.168.1.10",
+        mode="station",
+        hotspot_active=False,
+        profile="Home",
+        detail="Connected to Home",
+    )
+
+    response = client.post("/api/wifi/connect", json={"ssid": "Cafe"})
+    assert response.status_code == 200
+    payload = response.json()
+    detail = (payload.get("detail") or "").lower()
+    assert "reconnect" in detail
+    assert "cafe" in detail
+
+
+def test_wifi_connect_same_network_omits_switch_notice(client: TestClient) -> None:
+    backend = getattr(client, "backend", None)
+    assert backend is not None
+    backend.status = WiFiStatus(
+        connected=True,
+        ssid="Home",
+        signal=70,
+        ip_address="192.168.1.10",
+        mode="station",
+        hotspot_active=False,
+        profile="Home",
+        detail="Connected to Home",
+    )
+
+    response = client.post("/api/wifi/connect", json={"ssid": "Home"})
+    assert response.status_code == 200
+    payload = response.json()
+    detail = (payload.get("detail") or "").lower()
+    assert "reconnect" not in detail
 
 
 def test_wifi_hotspot_toggle(client: TestClient) -> None:
@@ -576,5 +638,36 @@ def test_auto_connect_falls_back_to_hotspot(
 
     assert wifi_backend.connect_attempts
     assert wifi_backend.connect_attempts[0][0] == "Guest"
+    assert wifi_backend.hotspot_attempts
+    assert status.hotspot_active is True
+
+
+def test_auto_connect_enables_hotspot_when_connected_to_unknown_network(
+    tmp_path: Path,
+    wifi_backend: FakeWiFiBackend,
+    mdns_advertiser: FakeMDNSAdvertiser,
+) -> None:
+    wifi_backend.status = WiFiStatus(
+        connected=True,
+        ssid="Visitor",
+        signal=45,
+        ip_address="192.168.50.12",
+        mode="station",
+        hotspot_active=False,
+        profile="Visitor",
+        detail="Connected to Visitor",
+    )
+    wifi_backend.networks = []
+    manager = WiFiManager(
+        backend=wifi_backend,
+        rollback_timeout=0.05,
+        poll_interval=0.005,
+        hotspot_rollback_timeout=0.05,
+        mdns_advertiser=mdns_advertiser,
+        credential_store=WiFiCredentialStore(tmp_path / "wifi_credentials.json"),
+    )
+
+    status = manager.auto_connect_known_networks()
+
     assert wifi_backend.hotspot_attempts
     assert status.hotspot_active is True
