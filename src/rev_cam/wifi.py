@@ -606,7 +606,17 @@ class NMCLIBackend(WiFiBackend):
                 ]
                 for command in base_configuration:
                     self._run(command)
-                self._reset_hotspot_security(connection_name)
+                security_cleared = self._reset_hotspot_security(connection_name)
+                if not security_cleared:
+                    self._recreate_hotspot_connection(
+                        interface, connection_name, ssid
+                    )
+                    for command in base_configuration:
+                        self._run(command)
+                    if not self._reset_hotspot_security(connection_name):
+                        raise WiFiError(
+                            "Unable to clear hotspot security configuration"
+                        )
                 try:
                     self._run(["nmcli", "connection", "down", connection_name])
                 except WiFiError:
@@ -622,11 +632,17 @@ class NMCLIBackend(WiFiBackend):
         self._last_hotspot_profile = connection_name
         return status
 
-    def _clear_security_property(self, connection_name: str, property_name: str) -> bool:
+    def _clear_security_property(
+        self,
+        connection_name: str,
+        property_name: str,
+        *,
+        fallback_value: str | None = "",
+    ) -> bool:
         """Remove a security property for the given connection.
 
-        Returns True if NetworkManager accepted either the removal or empty
-        string assignment, False otherwise.
+        Returns True if NetworkManager accepted either the removal or provided
+        fallback assignment, False otherwise.
         """
 
         try:
@@ -642,6 +658,8 @@ class NMCLIBackend(WiFiBackend):
             return True
         except WiFiError:
             pass
+        if fallback_value is None:
+            return False
         try:
             self._run(
                 [
@@ -650,34 +668,92 @@ class NMCLIBackend(WiFiBackend):
                     "modify",
                     connection_name,
                     property_name,
-                    "",
+                    fallback_value,
                 ]
             )
             return True
         except WiFiError:
             return False
 
-    def _reset_hotspot_security(self, connection_name: str) -> None:
-        """Ensure the hotspot connection no longer expects a secret."""
+    def _connection_security_requires_secret(self, connection_name: str) -> bool:
+        """Return True when the connection still expects a Wi-Fi secret."""
 
-        logger = logging.getLogger(__name__)
-        removed = self._remove_security_setting(connection_name)
-        cleared_any = False
-        for property_name in (
-            "802-11-wireless-security.auth-alg",
+        try:
+            output = self._run(
+                [
+                    "nmcli",
+                    "-g",
+                    ",".join(
+                        [
+                            "802-11-wireless-security.key-mgmt",
+                            "802-11-wireless-security.psk",
+                            "802-11-wireless-security.wep-key0",
+                            "802-11-wireless-security.wep-key1",
+                            "802-11-wireless-security.wep-key2",
+                            "802-11-wireless-security.wep-key3",
+                            "802-11-wireless-security.wep-key-flags",
+                        ]
+                    ),
+                    "connection",
+                    "show",
+                    connection_name,
+                ]
+            )
+        except WiFiError:
+            return False
+        fields = output.splitlines()
+        values: dict[str, str] = {}
+        keys = [
+            "802-11-wireless-security.key-mgmt",
             "802-11-wireless-security.psk",
-            "802-11-wireless-security.psk-flags",
             "802-11-wireless-security.wep-key0",
             "802-11-wireless-security.wep-key1",
             "802-11-wireless-security.wep-key2",
             "802-11-wireless-security.wep-key3",
             "802-11-wireless-security.wep-key-flags",
-            "802-11-wireless-security.wep-key-type",
+        ]
+        for key, value in zip(keys, fields):
+            values[key] = value.strip()
+        key_mgmt = values.get("802-11-wireless-security.key-mgmt", "")
+        if key_mgmt and key_mgmt != "none":
+            return True
+        for secret_key in (
+            "802-11-wireless-security.psk",
+            "802-11-wireless-security.wep-key0",
+            "802-11-wireless-security.wep-key1",
+            "802-11-wireless-security.wep-key2",
+            "802-11-wireless-security.wep-key3",
         ):
-            if self._clear_security_property(connection_name, property_name):
+            if values.get(secret_key):
+                return True
+        flags_value = values.get("802-11-wireless-security.wep-key-flags", "")
+        if flags_value and flags_value not in {"0", ""}:
+            return True
+        return False
+
+    def _reset_hotspot_security(self, connection_name: str) -> bool:
+        """Ensure the hotspot connection no longer expects a secret."""
+
+        logger = logging.getLogger(__name__)
+        removed = self._remove_security_setting(connection_name)
+        cleared_any = False
+        for property_name, fallback in (
+            ("802-11-wireless-security.auth-alg", "open"),
+            ("802-11-wireless-security.psk", None),
+            ("802-11-wireless-security.psk-flags", "0"),
+            ("802-11-wireless-security.wep-key0", None),
+            ("802-11-wireless-security.wep-key1", None),
+            ("802-11-wireless-security.wep-key2", None),
+            ("802-11-wireless-security.wep-key3", None),
+            ("802-11-wireless-security.wep-key-flags", "0"),
+            ("802-11-wireless-security.wep-key-type", None),
+            ("802-11-wireless-security.wep-tx-keyidx", "0"),
+        ):
+            if self._clear_security_property(
+                connection_name, property_name, fallback_value=fallback
+            ):
                 cleared_any = True
-        if removed:
-            return
+        success = removed or cleared_any
         try:
             self._run(
                 [
@@ -689,14 +765,22 @@ class NMCLIBackend(WiFiBackend):
                     "none",
                 ]
             )
+            success = True
         except WiFiError as exc:
-            if not cleared_any:
+            if not success:
                 raise WiFiError(
                     f"Unable to clear hotspot security configuration: {exc}"
                 ) from exc
             logger.debug(
                 "Unable to update hotspot key management to none: %s", exc
             )
+        if self._connection_security_requires_secret(connection_name):
+            logger.debug(
+                "Hotspot connection %s still references secrets after reset",
+                connection_name,
+            )
+            return False
+        return True
 
     def _remove_security_setting(self, connection_name: str) -> bool:
         """Remove the entire security setting from the connection."""
@@ -714,6 +798,34 @@ class NMCLIBackend(WiFiBackend):
             return True
         except WiFiError:
             return False
+
+    def _recreate_hotspot_connection(
+        self, interface: str, connection_name: str, ssid: str
+    ) -> None:
+        """Delete and recreate the hotspot profile to drop lingering secrets."""
+
+        try:
+            self._run(["nmcli", "connection", "delete", connection_name])
+        except WiFiError:
+            # Connection may not exist yet; proceed with creation regardless.
+            pass
+        self._run(
+            [
+                "nmcli",
+                "connection",
+                "add",
+                "type",
+                "wifi",
+                "ifname",
+                interface,
+                "con-name",
+                connection_name,
+                "autoconnect",
+                "yes",
+                "ssid",
+                ssid,
+            ]
+        )
 
     def stop_hotspot(self, profile: str | None) -> WiFiStatus:
         connection_name = profile or self._last_hotspot_profile or "RevCam Hotspot"
