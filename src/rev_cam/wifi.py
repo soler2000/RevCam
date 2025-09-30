@@ -947,7 +947,12 @@ class WiFiManager:
                     network.known = True
         return networks
 
-    def auto_connect_known_networks(self, *, start_hotspot: bool = True) -> WiFiStatus:
+    def auto_connect_known_networks(
+        self,
+        *,
+        start_hotspot: bool = True,
+        update_mdns: bool = True,
+    ) -> WiFiStatus:
         """Join the strongest known network or fall back to hotspot mode."""
 
         def _signal_value(network: WiFiNetwork) -> float:
@@ -962,7 +967,7 @@ class WiFiManager:
         }
 
         try:
-            initial_status = self._fetch_status()
+            initial_status = self._fetch_status(update_mdns=update_mdns)
         except WiFiError as exc:
             initial_status = None
             self._record_log(
@@ -1054,7 +1059,7 @@ class WiFiManager:
             )
 
         if not start_hotspot:
-            return last_status or self._fetch_status()
+            return last_status or self._fetch_status(update_mdns=update_mdns)
 
         self._record_log(
             "auto_connect_hotspot_fallback",
@@ -1118,7 +1123,7 @@ class WiFiManager:
             f"Attempting to connect to {cleaned_ssid}.",
             metadata=attempt_metadata,
         )
-        previous_status = self._fetch_status()
+        previous_status = self._fetch_status(update_mdns=False)
         previous_profile = previous_status.profile if previous_status.connected else None
         previous_identifier: str | None = None
         if previous_status.connected:
@@ -1226,7 +1231,7 @@ class WiFiManager:
                 )
                 return current
             time.sleep(self._poll_interval)
-            current = self._fetch_status()
+            current = self._fetch_status(update_mdns=False)
         restored = self._backend.activate_profile(previous_profile)
         restored = self._apply_hotspot_password(restored)
         self._update_mdns(restored)
@@ -1273,7 +1278,7 @@ class WiFiManager:
             metadata=attempt_metadata,
         )
         try:
-            previous_status = self._fetch_status()
+            previous_status = self._fetch_status(update_mdns=False)
         except WiFiError:
             previous_status = None
             previous_profile = None
@@ -1367,7 +1372,7 @@ class WiFiManager:
                 )
                 return current
             time.sleep(self._poll_interval)
-            current = self._fetch_status()
+            current = self._fetch_status(update_mdns=False)
         if previous_profile:
             restored = self._backend.activate_profile(previous_profile)
             restored = self._apply_hotspot_password(restored)
@@ -1492,7 +1497,7 @@ class WiFiManager:
             if isinstance(ssid, str) and ssid.strip()
         }
         try:
-            status = self._fetch_status()
+            status = self._fetch_status(update_mdns=False)
         except WiFiError as exc:
             status = None
             self._record_log(
@@ -1526,7 +1531,10 @@ class WiFiManager:
         while attempts < 2:
             attempts += 1
             try:
-                last_status = self.auto_connect_known_networks(start_hotspot=False)
+                last_status = self.auto_connect_known_networks(
+                    start_hotspot=False,
+                    update_mdns=False,
+                )
             except WiFiError as exc:
                 self._record_log(
                     "hotspot_watchdog_connect_error",
@@ -1593,10 +1601,11 @@ class WiFiManager:
         }
         return bool(identifiers & known_ssids)
 
-    def _fetch_status(self) -> WiFiStatus:
+    def _fetch_status(self, *, update_mdns: bool = True) -> WiFiStatus:
         status = self._backend.get_status()
         status = self._apply_hotspot_password(status)
-        self._update_mdns(status)
+        if update_mdns:
+            self._update_mdns(status)
         return status
 
     def _apply_hotspot_password(self, status: WiFiStatus | None) -> WiFiStatus:

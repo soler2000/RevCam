@@ -99,7 +99,7 @@ def test_watchdog_enables_hotspot_after_boot_delay(
     manager, backend, _ = watchdog_manager
     manager.start_hotspot_watchdog()
     try:
-        time.sleep(0.08)
+        time.sleep(0.2)
         assert backend.hotspot_calls
     finally:
         manager.close()
@@ -147,8 +147,43 @@ def test_watchdog_retries_before_enabling_hotspot(
     ]
     manager.start_hotspot_watchdog()
     try:
-        time.sleep(0.08)
+        time.sleep(0.2)
         assert len(backend.connect_calls) >= 2
+        assert backend.hotspot_calls
+    finally:
+        manager.close()
+
+
+def test_watchdog_enables_hotspot_when_connection_drops(
+    watchdog_manager: tuple[WiFiManager, WatchdogBackend, WiFiCredentialStore]
+) -> None:
+    manager, backend, credentials = watchdog_manager
+    credentials.set_network_password("Home", "secret123")
+    backend.status = WiFiStatus(
+        connected=True,
+        ssid="Home",
+        signal=70,
+        ip_address="192.168.1.2",
+        mode="station",
+        hotspot_active=False,
+        profile="Home",
+        detail="Connected",
+    )
+    manager.start_hotspot_watchdog()
+    try:
+        time.sleep(0.03)
+        backend.status = WiFiStatus(
+            connected=False,
+            ssid=None,
+            signal=None,
+            ip_address=None,
+            mode="station",
+            hotspot_active=False,
+            profile=None,
+            detail="Connection lost",
+        )
+        backend.networks = []
+        time.sleep(0.2)
         assert backend.hotspot_calls
     finally:
         manager.close()
