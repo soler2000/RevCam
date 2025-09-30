@@ -603,30 +603,10 @@ class NMCLIBackend(WiFiBackend):
                         "connection.autoconnect",
                         "yes",
                     ],
-                    [
-                        "nmcli",
-                        "connection",
-                        "modify",
-                        connection_name,
-                        "802-11-wireless-security.key-mgmt",
-                        "none",
-                    ],
                 ]
                 for command in base_configuration:
                     self._run(command)
-                # Remove any previously configured passphrases or keys so the
-                # hotspot broadcasts as an open network.
-                for property_name in (
-                    "802-11-wireless-security.psk",
-                    "802-11-wireless-security.wep-key0",
-                    "802-11-wireless-security.wep-key1",
-                    "802-11-wireless-security.wep-key2",
-                    "802-11-wireless-security.wep-key3",
-                ):
-                    if not self._clear_security_property(connection_name, property_name):
-                        logging.getLogger(__name__).debug(
-                            "Unable to clear hotspot security property %s", property_name
-                        )
+                self._reset_hotspot_security(connection_name)
                 try:
                     self._run(["nmcli", "connection", "down", connection_name])
                 except WiFiError:
@@ -671,6 +651,64 @@ class NMCLIBackend(WiFiBackend):
                     connection_name,
                     property_name,
                     "",
+                ]
+            )
+            return True
+        except WiFiError:
+            return False
+
+    def _reset_hotspot_security(self, connection_name: str) -> None:
+        """Ensure the hotspot connection no longer expects a secret."""
+
+        logger = logging.getLogger(__name__)
+        removed = self._remove_security_setting(connection_name)
+        cleared_any = False
+        for property_name in (
+            "802-11-wireless-security.auth-alg",
+            "802-11-wireless-security.psk",
+            "802-11-wireless-security.psk-flags",
+            "802-11-wireless-security.wep-key0",
+            "802-11-wireless-security.wep-key1",
+            "802-11-wireless-security.wep-key2",
+            "802-11-wireless-security.wep-key3",
+            "802-11-wireless-security.wep-key-flags",
+            "802-11-wireless-security.wep-key-type",
+        ):
+            if self._clear_security_property(connection_name, property_name):
+                cleared_any = True
+        if removed:
+            return
+        try:
+            self._run(
+                [
+                    "nmcli",
+                    "connection",
+                    "modify",
+                    connection_name,
+                    "802-11-wireless-security.key-mgmt",
+                    "none",
+                ]
+            )
+        except WiFiError as exc:
+            if not cleared_any:
+                raise WiFiError(
+                    f"Unable to clear hotspot security configuration: {exc}"
+                ) from exc
+            logger.debug(
+                "Unable to update hotspot key management to none: %s", exc
+            )
+
+    def _remove_security_setting(self, connection_name: str) -> bool:
+        """Remove the entire security setting from the connection."""
+
+        try:
+            self._run(
+                [
+                    "nmcli",
+                    "connection",
+                    "modify",
+                    connection_name,
+                    "-802-11-wireless-security",
                 ]
             )
             return True
