@@ -887,6 +887,7 @@ class WiFiManager:
         watchdog_boot_delay: float = 30.0,
         watchdog_interval: float = 30.0,
         watchdog_retry_delay: float = 5.0,
+        log_path: Path | str | None = Path("data/wifi_log.jsonl"),
     ) -> None:
         self._backend = backend or NMCLIBackend()
         self._rollback_timeout = rollback_timeout
@@ -912,6 +913,19 @@ class WiFiManager:
                 self._mdns = None
         self._log: Deque[WiFiLogEntry] = deque(maxlen=200)
         self._log_lock = threading.Lock()
+        self._log_path: Path | None
+        if log_path is None:
+            self._log_path = None
+        else:
+            path = Path(log_path)
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+            except OSError as exc:  # pragma: no cover - filesystem errors rare
+                logging.getLogger(__name__).warning("Unable to prepare Wi-Fi log directory: %s", exc)
+                self._log_path = None
+            else:
+                self._log_path = path
+                self._load_persistent_log()
         self._watchdog_thread: threading.Thread | None = None
         self._watchdog_stop_event: threading.Event | None = None
         self._watchdog_boot_delay = max(0.0, watchdog_boot_delay)
@@ -1573,20 +1587,75 @@ class WiFiManager:
             "Starting hotspot after watchdog auto-connect attempts failed.",
             status=last_status,
         )
+        retry_delay = self._watchdog_retry_delay
+
         try:
-            enabled = self.enable_hotspot()
+            first_attempt = self.enable_hotspot()
         except WiFiError as exc:
             self._record_log(
                 "hotspot_watchdog_hotspot_error",
-                f"Unable to enable hotspot after watchdog attempts: {exc}.",
+                (
+                    "Unable to enable hotspot after watchdog attempts: "
+                    f"{exc}."
+                ),
+                status=last_status,
+            )
+            first_attempt = None
+        else:
+            if first_attempt.hotspot_active:
+                self._record_log(
+                    "hotspot_watchdog_hotspot_enabled",
+                    (
+                        "Hotspot enabled by watchdog after failed reconnection "
+                        "attempts."
+                    ),
+                    status=first_attempt,
+                )
+                return
+            self._record_log(
+                "hotspot_watchdog_hotspot_inactive",
+                "Hotspot did not report as active; retrying.",
+                status=first_attempt,
+            )
+            last_status = first_attempt
+
+        try:
+            second_attempt = self.enable_hotspot()
+        except WiFiError as exc:
+            self._record_log(
+                "hotspot_watchdog_hotspot_error",
+                (
+                    "Unable to enable hotspot after watchdog attempts: "
+                    f"{exc}."
+                ),
                 status=last_status,
             )
         else:
+            if second_attempt.hotspot_active:
+                self._record_log(
+                    "hotspot_watchdog_hotspot_enabled",
+                    (
+                        "Hotspot enabled by watchdog after failed reconnection "
+                        "attempts."
+                    ),
+                    status=second_attempt,
+                )
+                return
+            last_status = second_attempt
             self._record_log(
-                "hotspot_watchdog_hotspot_enabled",
-                "Hotspot enabled by watchdog after failed reconnection attempts.",
-                status=enabled,
+                "hotspot_watchdog_hotspot_inactive",
+                "Hotspot still inactive after watchdog retry.",
+                status=second_attempt,
             )
+        try:
+            current_status = self._fetch_status(update_mdns=False)
+        except WiFiError:
+            current_status = None
+        self._record_log(
+            "hotspot_watchdog_hotspot_failed",
+            "Hotspot could not be enabled after watchdog retries.",
+            status=current_status,
+        )
 
     @staticmethod
     def _status_on_known_network(status: WiFiStatus, known_ssids: set[str]) -> bool:
@@ -1660,6 +1729,7 @@ class WiFiManager:
         )
         with self._log_lock:
             self._log.append(entry)
+            self._append_persistent_log(entry)
         logger = logging.getLogger(__name__)
         if metadata_payload:
             logger.info("Wi-Fi event %s: %s | metadata=%s", event, message, metadata_payload)
@@ -1673,6 +1743,67 @@ class WiFiManager:
             self._mdns.advertise(status.ip_address)
         except Exception:  # pragma: no cover - best effort logging
             logging.getLogger(__name__).debug("mDNS advertise failed", exc_info=True)
+
+    def _load_persistent_log(self) -> None:
+        if self._log_path is None or not self._log_path.exists():
+            return
+        try:
+            with self._log_path.open("r", encoding="utf-8") as handle:
+                lines = handle.readlines()
+        except OSError as exc:  # pragma: no cover - best effort logging
+            logging.getLogger(__name__).warning("Unable to load Wi-Fi event log: %s", exc)
+            return
+        restored: Deque[WiFiLogEntry] = deque(maxlen=self._log.maxlen)
+        for raw_line in lines:
+            line = raw_line.strip()
+            if not line:
+                continue
+            try:
+                payload = json.loads(line)
+            except ValueError:
+                continue
+            entry = self._deserialize_log_entry(payload)
+            if entry is not None:
+                restored.append(entry)
+        if restored:
+            with self._log_lock:
+                for entry in restored:
+                    self._log.append(entry)
+
+    def _deserialize_log_entry(self, payload: object) -> WiFiLogEntry | None:
+        if not isinstance(payload, dict):
+            return None
+        event = payload.get("event")
+        message = payload.get("message")
+        timestamp = payload.get("timestamp")
+        if not isinstance(event, str) or not isinstance(message, str):
+            return None
+        try:
+            ts_value = float(timestamp) if timestamp is not None else time.time()
+        except (TypeError, ValueError):
+            ts_value = time.time()
+        status_payload = payload.get("status")
+        if not isinstance(status_payload, dict):
+            status_payload = None
+        metadata_payload = payload.get("metadata")
+        if not isinstance(metadata_payload, dict):
+            metadata_payload = None
+        return WiFiLogEntry(
+            timestamp=ts_value,
+            event=event,
+            message=message,
+            status=status_payload,
+            metadata=metadata_payload,
+        )
+
+    def _append_persistent_log(self, entry: WiFiLogEntry) -> None:
+        if self._log_path is None:
+            return
+        try:
+            with self._log_path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(entry.to_dict(), separators=(",", ":")) + "\n")
+        except OSError as exc:  # pragma: no cover - best effort logging
+            logging.getLogger(__name__).warning("Unable to persist Wi-Fi event log: %s", exc)
 
 
 __all__ = [
