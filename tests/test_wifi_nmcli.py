@@ -190,8 +190,8 @@ def test_nmcli_start_hotspot_recreates_profile_when_secrets_remain(
         if args[:2] == ["nmcli", "-g"]:
             secret_checks += 1
             if secret_checks == 1:
-                return "\n".join(["wpa-psk", "", "", "", "", "", "1"])
-            return "\n".join(["none", "", "", "", "", "", "0"])
+                return "\n".join(["wpa-psk", "", "", "", "", "", "1 (0x1)"])
+            return "\n".join(["none", "", "", "", "", "", "0 (0x0)"])
         return ""
 
     monkeypatch.setattr(backend, "_run", fake_run)

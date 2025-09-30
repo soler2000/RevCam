@@ -729,8 +729,22 @@ class NMCLIBackend(WiFiBackend):
             if values.get(secret_key):
                 return True
         flags_value = values.get("802-11-wireless-security.wep-key-flags", "")
-        if flags_value and flags_value not in {"0", ""}:
-            return True
+        if flags_value:
+            normalized = flags_value.strip().split()[0]
+            if normalized:
+                if normalized.lower().startswith("0x"):
+                    try:
+                        if int(normalized, 16) != 0:
+                            return True
+                    except ValueError:
+                        return True
+                else:
+                    try:
+                        if int(normalized, 10) != 0:
+                            return True
+                    except ValueError:
+                        if normalized not in {"0", ""}:
+                            return True
         return False
 
     def _reset_hotspot_security(self, connection_name: str) -> bool:
