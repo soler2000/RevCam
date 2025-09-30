@@ -293,6 +293,49 @@ def test_wifi_connect_manual_rollback_without_dev_mode(client: TestClient) -> No
     assert backend.connect_attempts[1][0] == "Home"
 
 
+def test_wifi_connect_switch_prompts_network_change_notice(client: TestClient) -> None:
+    backend = getattr(client, "backend", None)
+    assert backend is not None
+    backend.status = WiFiStatus(
+        connected=True,
+        ssid="Home",
+        signal=70,
+        ip_address="192.168.1.10",
+        mode="station",
+        hotspot_active=False,
+        profile="Home",
+        detail="Connected to Home",
+    )
+
+    response = client.post("/api/wifi/connect", json={"ssid": "Cafe"})
+    assert response.status_code == 200
+    payload = response.json()
+    detail = (payload.get("detail") or "").lower()
+    assert "reconnect" in detail
+    assert "cafe" in detail
+
+
+def test_wifi_connect_same_network_omits_switch_notice(client: TestClient) -> None:
+    backend = getattr(client, "backend", None)
+    assert backend is not None
+    backend.status = WiFiStatus(
+        connected=True,
+        ssid="Home",
+        signal=70,
+        ip_address="192.168.1.10",
+        mode="station",
+        hotspot_active=False,
+        profile="Home",
+        detail="Connected to Home",
+    )
+
+    response = client.post("/api/wifi/connect", json={"ssid": "Home"})
+    assert response.status_code == 200
+    payload = response.json()
+    detail = (payload.get("detail") or "").lower()
+    assert "reconnect" not in detail
+
+
 def test_wifi_hotspot_toggle(client: TestClient) -> None:
     enable = client.post(
         "/api/wifi/hotspot",

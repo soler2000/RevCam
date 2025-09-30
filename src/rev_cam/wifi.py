@@ -852,6 +852,20 @@ class NMCLIBackend(WiFiBackend):
                     "Unable to forget Wi-Fi network: not authorized to control networking. "
                     "Ensure RevCam has permission to manage NetworkManager."
                 ) from exc
+            if any(
+                phrase in lowered
+                for phrase in (
+                    "unknown connection",
+                    "cannot delete unknown connection",
+                    "no such connection",
+                )
+            ):
+                logging.getLogger(__name__).info(
+                    "Requested removal of unknown Wi-Fi connection \"%s\": %s",
+                    profile_or_ssid,
+                    message,
+                )
+                return
             raise
         if profile_or_ssid == self._last_hotspot_profile:
             self._last_hotspot_profile = None
@@ -1106,6 +1120,11 @@ class WiFiManager:
         )
         previous_status = self._fetch_status()
         previous_profile = previous_status.profile if previous_status.connected else None
+        previous_identifier: str | None = None
+        if previous_status.connected:
+            prior_value = previous_status.ssid or previous_status.profile
+            if isinstance(prior_value, str) and prior_value.strip():
+                previous_identifier = prior_value.strip()
         try:
             status = self._backend.connect(cleaned_ssid, cleaned_password)
         except WiFiError as exc:
@@ -1137,6 +1156,26 @@ class WiFiManager:
             result_metadata["effective_rollback"] = effective_timeout
         monitor_required = False
         if status.connected and (status.ssid == cleaned_ssid or status.profile == cleaned_ssid):
+            reminder_text: str | None = None
+            current_identifier = status.ssid or status.profile or cleaned_ssid
+            if isinstance(current_identifier, str):
+                current_identifier = current_identifier.strip() or cleaned_ssid
+            if (
+                isinstance(current_identifier, str)
+                and current_identifier
+                and previous_identifier
+                and current_identifier != previous_identifier
+            ):
+                reminder_text = (
+                    "Remember to reconnect your controlling device to "
+                    f'"{current_identifier}" to continue.'
+                )
+            if reminder_text:
+                existing_detail = status.detail.strip() if isinstance(status.detail, str) else ""
+                if existing_detail and not existing_detail.endswith("."):
+                    existing_detail = f"{existing_detail}."
+                status.detail = f"{existing_detail} {reminder_text}".strip()
+                result_metadata["previous_connection"] = previous_identifier
             message = f"Connected to {status.ssid or cleaned_ssid}."
             self._record_log("connect_success", message, status=status, metadata=result_metadata)
             if not rollback_requested:

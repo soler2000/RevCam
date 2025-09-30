@@ -272,3 +272,34 @@ def test_nmcli_start_hotspot_with_password_uses_nmcli_hotspot(
         "password",
         "supersecret",
     ]
+
+
+def test_nmcli_forget_ignores_unknown_connections(monkeypatch: pytest.MonkeyPatch) -> None:
+    backend = NMCLIBackend(interface="wlan0")
+    commands: list[list[str]] = []
+
+    def fake_run(args: list[str]) -> str:
+        commands.append(list(args))
+        raise WiFiError(
+            "Error: unknown connection 'Cafe'. Error: cannot delete unknown connection(s): 'Cafe'."
+        )
+
+    monkeypatch.setattr(backend, "_run", fake_run)
+
+    backend.forget("Cafe")
+
+    assert commands == [["nmcli", "connection", "delete", "Cafe"]]
+
+
+def test_nmcli_forget_surfaces_other_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    backend = NMCLIBackend(interface="wlan0")
+
+    def fake_run(_: list[str]) -> str:
+        raise WiFiError("nmcli failure")
+
+    monkeypatch.setattr(backend, "_run", fake_run)
+
+    with pytest.raises(WiFiError) as excinfo:
+        backend.forget("Cafe")
+
+    assert "nmcli failure" in str(excinfo.value)
