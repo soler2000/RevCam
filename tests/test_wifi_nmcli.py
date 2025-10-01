@@ -72,8 +72,8 @@ def test_nmcli_start_hotspot_opens_network_without_password(
 
     def fake_run(args: list[str]) -> str:
         commands.append(list(args))
-        if args[:3] == ["nmcli", "connection", "show"]:
-            raise WiFiError("Unknown connection")
+        if args == ["nmcli", "connection", "delete", "RevCam Hotspot"]:
+            raise WiFiError("Error: Unknown connection 'RevCam Hotspot'.")
         return ""
 
     monkeypatch.setattr(backend, "_run", fake_run)
@@ -94,6 +94,7 @@ def test_nmcli_start_hotspot_opens_network_without_password(
     status = backend.start_hotspot("RevCam", None)
 
     assert status.hotspot_active is True
+    assert ["nmcli", "connection", "delete", "RevCam Hotspot"] in commands
     assert [
         "nmcli",
         "connection",
@@ -135,6 +136,8 @@ def test_nmcli_start_hotspot_open_network_fallback(monkeypatch: pytest.MonkeyPat
 
     def fake_run(args: list[str]) -> str:
         commands.append(list(args))
+        if args == ["nmcli", "connection", "delete", "RevCam Hotspot"]:
+            raise WiFiError("Error: Unknown connection 'RevCam Hotspot'.")
         if args == [
             "nmcli",
             "connection",
@@ -143,8 +146,6 @@ def test_nmcli_start_hotspot_open_network_fallback(monkeypatch: pytest.MonkeyPat
             "-802-11-wireless-security",
         ]:
             raise WiFiError("property removal unsupported")
-        if args[:3] == ["nmcli", "connection", "show"]:
-            raise WiFiError("Unknown connection")
         return ""
 
     monkeypatch.setattr(backend, "_run", fake_run)
@@ -175,23 +176,16 @@ def test_nmcli_start_hotspot_open_network_fallback(monkeypatch: pytest.MonkeyPat
     ] in commands
 
 
-def test_nmcli_start_hotspot_recreates_profile_when_secrets_remain(
+def test_nmcli_start_hotspot_errors_when_secrets_remain(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     backend = NMCLIBackend(interface="wlan0")
     commands: list[list[str]] = []
-    secret_checks = 0
 
     def fake_run(args: list[str]) -> str:
-        nonlocal secret_checks
         commands.append(list(args))
-        if args[:3] == ["nmcli", "connection", "show"]:
-            return ""
         if args[:2] == ["nmcli", "-g"]:
-            secret_checks += 1
-            if secret_checks == 1:
-                return "\n".join(["wpa-psk", "", "", "", "", "", "1 (0x1)"])
-            return "\n".join(["none", "", "", "", "", "", "0 (0x0)"])
+            return "\n".join(["wpa-psk", "", "", "", "", "", "1 (0x1)"])
         return ""
 
     monkeypatch.setattr(backend, "_run", fake_run)
@@ -209,9 +203,16 @@ def test_nmcli_start_hotspot_recreates_profile_when_secrets_remain(
         ),
     )
 
-    status = backend.start_hotspot("RevCam", None)
+    with pytest.raises(WiFiError) as excinfo:
+        backend.start_hotspot("RevCam", None)
 
-    assert status.hotspot_active is True
+    message = str(excinfo.value)
+    assert "Unable to configure open hotspot" in message
+    details = getattr(excinfo.value, "details", {})
+    assert details.get("connection") == "RevCam Hotspot"
+    attempts = details.get("attempts")
+    assert isinstance(attempts, list) and attempts
+    assert any(attempt.get("stage") == "initial" for attempt in attempts)
     assert ["nmcli", "connection", "delete", "RevCam Hotspot"] in commands
     assert [
         "nmcli",

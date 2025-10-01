@@ -520,130 +520,11 @@ class NMCLIBackend(WiFiBackend):
             ]
             self._run(args)
         else:
-            # Reconfigure the hotspot connection explicitly when no password is
-            # requested so NetworkManager does not retain an old passphrase.
-            connection_exists = True
+            attempt_history: list[dict[str, object | None]] | None = None
             try:
-                self._run(["nmcli", "connection", "show", connection_name])
-            except WiFiError:
-                connection_exists = False
-            if not connection_exists:
-                try:
-                    self._run(
-                        [
-                            "nmcli",
-                            "connection",
-                            "add",
-                            "type",
-                            "wifi",
-                            "ifname",
-                            interface,
-                            "con-name",
-                            connection_name,
-                            "autoconnect",
-                            "yes",
-                            "ssid",
-                            ssid,
-                        ]
-                    )
-                except WiFiError as exc:
-                    raise WiFiError(
-                        f"Unable to prepare hotspot connection: {exc}"
-                    ) from exc
-            else:
-                try:
-                    self._run(
-                        [
-                            "nmcli",
-                            "connection",
-                            "modify",
-                            connection_name,
-                            "connection.interface-name",
-                            interface,
-                        ]
-                    )
-                    self._run(
-                        [
-                            "nmcli",
-                            "connection",
-                            "modify",
-                            connection_name,
-                            "wifi.ssid",
-                            ssid,
-                        ]
-                    )
-                except WiFiError as exc:
-                    raise WiFiError(
-                        f"Unable to refresh hotspot configuration: {exc}"
-                    ) from exc
-            try:
-                base_configuration = [
-                    [
-                        "nmcli",
-                        "connection",
-                        "modify",
-                        connection_name,
-                        "802-11-wireless.mode",
-                        "ap",
-                    ],
-                    [
-                        "nmcli",
-                        "connection",
-                        "modify",
-                        connection_name,
-                        "ipv4.method",
-                        "shared",
-                    ],
-                    [
-                        "nmcli",
-                        "connection",
-                        "modify",
-                        connection_name,
-                        "ipv6.method",
-                        "ignore",
-                    ],
-                    [
-                        "nmcli",
-                        "connection",
-                        "modify",
-                        connection_name,
-                        "connection.autoconnect",
-                        "yes",
-                    ],
-                ]
-                for command in base_configuration:
-                    self._run(command)
-                security_cleared, security_attempts = self._reset_hotspot_security(
-                    connection_name
+                attempt_history = self._prepare_open_hotspot_profile(
+                    interface, connection_name, ssid
                 )
-                attempt_history: list[dict[str, object | None]] = [
-                    {"stage": "initial", "steps": security_attempts}
-                ]
-                if not security_cleared:
-                    self._recreate_hotspot_connection(
-                        interface, connection_name, ssid
-                    )
-                    for command in base_configuration:
-                        self._run(command)
-                    retry_cleared, retry_attempts = self._reset_hotspot_security(
-                        connection_name
-                    )
-                    attempt_history.append(
-                        {"stage": "after_recreate", "steps": retry_attempts}
-                    )
-                    if not retry_cleared:
-                        failure = WiFiError(
-                            "Unable to clear hotspot security configuration"
-                        )
-                        setattr(
-                            failure,
-                            "details",
-                            {
-                                "connection": connection_name,
-                                "attempts": attempt_history,
-                            },
-                        )
-                        raise failure
                 try:
                     self._run(["nmcli", "connection", "down", connection_name])
                 except WiFiError:
@@ -651,7 +532,23 @@ class NMCLIBackend(WiFiBackend):
                     pass
                 self._run(["nmcli", "connection", "up", connection_name])
             except WiFiError as exc:
-                raise WiFiError(f"Unable to configure open hotspot: {exc}") from exc
+                if (
+                    attempt_history
+                    and not hasattr(exc, "details")
+                    and isinstance(attempt_history, list)
+                ):
+                    setattr(
+                        exc,
+                        "details",
+                        {
+                            "connection": connection_name,
+                            "attempts": attempt_history,
+                        },
+                    )
+                wrapped = WiFiError(f"Unable to configure open hotspot: {exc}")
+                if hasattr(exc, "details"):
+                    setattr(wrapped, "details", getattr(exc, "details"))
+                raise wrapped from exc
         status = self.get_status()
         status.profile = connection_name
         status.mode = "access-point"
@@ -1039,33 +936,165 @@ class NMCLIBackend(WiFiBackend):
         diagnostics["requires_secret"] = self._security_values_require_secret(values)
         return diagnostics
 
-    def _recreate_hotspot_connection(
+    def _prepare_open_hotspot_profile(
         self, interface: str, connection_name: str, ssid: str
-    ) -> None:
-        """Delete and recreate the hotspot profile to drop lingering secrets."""
+    ) -> list[dict[str, object | None]]:
+        """Rebuild the hotspot profile for an open network and clear secrets."""
 
+        profile_steps: list[dict[str, object | None]] = []
+        configure_steps: list[dict[str, object | None]] = []
+
+        def _clone(steps: list[dict[str, object | None]]) -> list[dict[str, object | None]]:
+            return [dict(step) for step in steps]
+
+        def _build_attempts() -> list[dict[str, object | None]]:
+            attempts: list[dict[str, object | None]] = []
+            if profile_steps:
+                attempts.append({"stage": "profile", "steps": _clone(profile_steps)})
+            if configure_steps:
+                attempts.append(
+                    {"stage": "configure", "steps": _clone(configure_steps)}
+                )
+            return attempts
+
+        delete_command = ["nmcli", "connection", "delete", connection_name]
         try:
-            self._run(["nmcli", "connection", "delete", connection_name])
-        except WiFiError:
-            # Connection may not exist yet; proceed with creation regardless.
-            pass
-        self._run(
-            [
+            self._run(delete_command)
+        except WiFiError as exc:
+            message = str(exc).strip() or None
+            step: dict[str, object | None] = {
+                "action": "delete_connection",
+                "command": delete_command,
+                "result": "error",
+                "error": message,
+            }
+            if self._is_missing_connection_error(message):
+                step["result"] = "missing"
+            profile_steps.append(step)
+            if step["result"] == "error":
+                setattr(
+                    exc,
+                    "details",
+                    {"connection": connection_name, "attempts": _build_attempts()},
+                )
+                raise
+        else:
+            profile_steps.append(
+                {
+                    "action": "delete_connection",
+                    "command": delete_command,
+                    "result": "success",
+                }
+            )
+
+        add_command = [
+            "nmcli",
+            "connection",
+            "add",
+            "type",
+            "wifi",
+            "ifname",
+            interface,
+            "con-name",
+            connection_name,
+            "autoconnect",
+            "yes",
+            "ssid",
+            ssid,
+        ]
+        try:
+            self._run(add_command)
+        except WiFiError as exc:
+            message = str(exc).strip() or None
+            profile_steps.append(
+                {
+                    "action": "add_connection",
+                    "command": add_command,
+                    "result": "error",
+                    "error": message,
+                }
+            )
+            setattr(
+                exc,
+                "details",
+                {"connection": connection_name, "attempts": _build_attempts()},
+            )
+            raise
+        else:
+            profile_steps.append(
+                {
+                    "action": "add_connection",
+                    "command": add_command,
+                    "result": "success",
+                }
+            )
+
+        base_settings = [
+            ("connection.interface-name", interface),
+            ("wifi.ssid", ssid),
+            ("802-11-wireless.mode", "ap"),
+            ("ipv4.method", "shared"),
+            ("ipv6.method", "ignore"),
+            ("connection.autoconnect", "yes"),
+        ]
+        for property_name, value in base_settings:
+            command = [
                 "nmcli",
                 "connection",
-                "add",
-                "type",
-                "wifi",
-                "ifname",
-                interface,
-                "con-name",
+                "modify",
                 connection_name,
-                "autoconnect",
-                "yes",
-                "ssid",
-                ssid,
+                property_name,
+                value,
             ]
+            try:
+                self._run(command)
+            except WiFiError as exc:
+                message = str(exc).strip() or None
+                configure_steps.append(
+                    {
+                        "action": "set",
+                        "property": property_name,
+                        "value": value,
+                        "result": "error",
+                        "error": message,
+                    }
+                )
+                attempts = _build_attempts()
+                setattr(
+                    exc,
+                    "details",
+                    {"connection": connection_name, "attempts": attempts},
+                )
+                raise
+            else:
+                configure_steps.append(
+                    {
+                        "action": "set",
+                        "property": property_name,
+                        "value": value,
+                        "result": "success",
+                    }
+                )
+
+        security_cleared, security_attempts = self._reset_hotspot_security(
+            connection_name
         )
+        attempts = _build_attempts()
+        attempts.append(
+            {
+                "stage": "initial",
+                "steps": [dict(step) for step in security_attempts],
+            }
+        )
+        if not security_cleared:
+            failure = WiFiError("Unable to clear hotspot security configuration")
+            setattr(
+                failure,
+                "details",
+                {"connection": connection_name, "attempts": attempts},
+            )
+            raise failure
+        return attempts
 
     def stop_hotspot(self, profile: str | None) -> WiFiStatus:
         connection_name = profile or self._last_hotspot_profile or "RevCam Hotspot"
