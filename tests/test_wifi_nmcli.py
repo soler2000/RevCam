@@ -274,6 +274,21 @@ def test_nmcli_start_hotspot_with_password_uses_nmcli_hotspot(
     ]
 
 
+def test_nmcli_reset_hotspot_security_missing_connection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = NMCLIBackend(interface="wlan0")
+
+    def fake_run(args: list[str]) -> str:
+        raise WiFiError("Error: Unknown connection 'RevCam Hotspot'.")
+
+    monkeypatch.setattr(backend, "_run", fake_run)
+    success, attempts = backend._reset_hotspot_security("RevCam Hotspot")
+
+    assert success is False
+    assert any(step.get("hint") == "missing_connection" for step in attempts)
+
+
 def test_nmcli_forget_ignores_unknown_connections(monkeypatch: pytest.MonkeyPatch) -> None:
     backend = NMCLIBackend(interface="wlan0")
     commands: list[list[str]] = []

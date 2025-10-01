@@ -882,26 +882,17 @@ class NMCLIBackend(WiFiBackend):
             )
         except WiFiError as exc:
             message = str(exc).strip() or None
-            attempts.append(
-                {
-                    "connection": connection_name,
-                    "property": "802-11-wireless-security.key-mgmt",
-                    "action": "set",
-                    "value": "none",
-                    "result": "error",
-                    "error": message,
-                }
-            )
-            if not success:
-                failure = WiFiError(
-                    f"Unable to clear hotspot security configuration: {exc}"
-                )
-                setattr(
-                    failure,
-                    "details",
-                    {"connection": connection_name, "attempts": attempts},
-                )
-                raise failure from exc
+            attempt: dict[str, object | None] = {
+                "connection": connection_name,
+                "property": "802-11-wireless-security.key-mgmt",
+                "action": "set",
+                "value": "none",
+                "result": "error",
+                "error": message,
+            }
+            if self._is_missing_connection_error(message):
+                attempt["hint"] = "missing_connection"
+            attempts.append(attempt)
             logger.debug(
                 "Unable to update hotspot key management to none: %s", message
             )
@@ -944,6 +935,23 @@ class NMCLIBackend(WiFiBackend):
             )
             return False, attempts
         return True, attempts
+
+    @staticmethod
+    def _is_missing_connection_error(message: str | None) -> bool:
+        if not message:
+            return False
+        normalized = message.strip().lower()
+        for token in (
+            "unknown connection",
+            "no such connection",
+            "not find connection",
+            "cannot find connection",
+            "does not exist",
+            "not exist",
+        ):
+            if token in normalized:
+                return True
+        return False
 
     def _remove_security_setting(
         self, connection_name: str
@@ -1998,7 +2006,96 @@ class WiFiManager:
                 diagnostics = None
         if diagnostics:
             metadata.setdefault("diagnostics", diagnostics)
+        summary = self._summarize_hotspot_error_context(metadata)
+        if summary:
+            metadata.setdefault("diagnostics_summary", summary)
         return metadata
+
+    def _summarize_hotspot_error_context(
+        self, metadata: dict[str, object | None]
+    ) -> str | None:
+        parts: list[str] = []
+        details = metadata.get("error_details")
+        connection_name: str | None = None
+        if isinstance(details, dict):
+            raw_connection = details.get("connection")
+            if isinstance(raw_connection, str) and raw_connection.strip():
+                connection_name = raw_connection.strip()
+                parts.append(f"connection {connection_name}")
+            attempts_summary = self._summarize_hotspot_attempts(details.get("attempts"))
+            if attempts_summary:
+                parts.append(attempts_summary)
+        diagnostics = metadata.get("diagnostics")
+        diagnostics_summary = self._summarize_backend_diagnostics(diagnostics)
+        if diagnostics_summary:
+            parts.append(diagnostics_summary)
+        if not parts:
+            return None
+        return "; ".join(parts)
+
+    @staticmethod
+    def _summarize_hotspot_attempts(attempts: object) -> str | None:
+        if not isinstance(attempts, list):
+            return None
+        errors: list[str] = []
+        for attempt in attempts:
+            if not isinstance(attempt, dict):
+                continue
+            stage = attempt.get("stage")
+            steps = attempt.get("steps")
+            if not isinstance(steps, list):
+                continue
+            for step in steps:
+                if not isinstance(step, dict):
+                    continue
+                if step.get("result") != "error":
+                    continue
+                action = step.get("action")
+                property_name = step.get("property")
+                descriptor_parts: list[str] = []
+                if isinstance(stage, str) and stage.strip():
+                    descriptor_parts.append(stage.strip())
+                if isinstance(action, str) and action.strip():
+                    descriptor_parts.append(action.strip())
+                if isinstance(property_name, str) and property_name.strip():
+                    descriptor_parts.append(property_name.strip())
+                descriptor = " ".join(descriptor_parts) if descriptor_parts else "step"
+                error_message = step.get("error")
+                if not isinstance(error_message, str) or not error_message.strip():
+                    error_message = "error"
+                else:
+                    error_message = error_message.strip()
+                errors.append(f"{descriptor} failed: {error_message}")
+        if not errors:
+            return None
+        if len(errors) > 3:
+            remaining = len(errors) - 3
+            return ", ".join(errors[:3]) + f", and {remaining} more"
+        return ", ".join(errors)
+
+    @staticmethod
+    def _summarize_backend_diagnostics(diagnostics: object) -> str | None:
+        if not isinstance(diagnostics, dict):
+            return None
+        pieces: list[str] = []
+        state = diagnostics.get("state")
+        if isinstance(state, str) and state.strip():
+            pieces.append(f"state={state.strip()}")
+        error_value = diagnostics.get("error")
+        if isinstance(error_value, str) and error_value.strip():
+            pieces.append(f"backend error: {error_value.strip()}")
+        requires_secret = diagnostics.get("requires_secret")
+        if isinstance(requires_secret, bool):
+            if requires_secret:
+                pieces.append("backend reports hotspot still expects secrets")
+            else:
+                pieces.append("backend reports hotspot secrets cleared")
+        connection = diagnostics.get("connection")
+        if isinstance(connection, str) and connection.strip():
+            pieces.append(f"diagnostics connection {connection.strip()}")
+        if not pieces:
+            return None
+        return ", ".join(pieces)
 
     def _deserialize_log_entry(self, payload: object) -> WiFiLogEntry | None:
         if not isinstance(payload, dict):

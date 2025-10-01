@@ -311,6 +311,9 @@ def test_watchdog_reports_failure_when_hotspot_errors(
             diag_state = metadata.get("diagnostics", {}).get("state")
             assert diag_state in {"first-attempt", "second-attempt"}
             diag_states.add(diag_state)
+            summary = metadata.get("diagnostics_summary")
+            assert isinstance(summary, str) and summary
+            assert "initial" in summary
         assert diag_states
         assert diag_states.issubset({"first-attempt", "second-attempt"})
         final_entry = next(
