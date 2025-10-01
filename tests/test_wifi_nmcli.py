@@ -274,6 +274,59 @@ def test_nmcli_start_hotspot_with_password_uses_nmcli_hotspot(
     ]
 
 
+def test_nmcli_start_hotspot_handles_missing_security_property_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = NMCLIBackend(interface="wlan0")
+    commands: list[list[str]] = []
+
+    def fake_run(args: list[str]) -> str:
+        commands.append(list(args))
+        if args[:3] == ["nmcli", "connection", "show"]:
+            return ""
+        if args[:2] == ["nmcli", "-g"]:
+            return "\n".join(["none", "", "", "", "", "", "0 (0x0)"])
+        if args[:4] == ["nmcli", "connection", "modify", "RevCam Hotspot"] and args[4].startswith(
+            "-802-11-wireless-security"
+        ):
+            raise WiFiError(
+                "Error: failed to modify connection 'RevCam Hotspot': property not found."
+            )
+        return ""
+
+    monkeypatch.setattr(backend, "_run", fake_run)
+    monkeypatch.setattr(
+        backend,
+        "get_status",
+        lambda: WiFiStatus(
+            connected=False,
+            ssid="RevCam",
+            signal=None,
+            ip_address=None,
+            mode="access-point",
+            hotspot_active=True,
+            profile="RevCam Hotspot",
+        ),
+    )
+
+    status = backend.start_hotspot("RevCam", None)
+
+    assert status.hotspot_active is True
+    assert ["nmcli", "connection", "up", "RevCam Hotspot"] in commands
+    assert not any(
+        command[:6]
+        == [
+            "nmcli",
+            "connection",
+            "modify",
+            "RevCam Hotspot",
+            "802-11-wireless-security.psk",
+            "",
+        ]
+        for command in commands
+    )
+
+
 def test_nmcli_reset_hotspot_security_missing_connection(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

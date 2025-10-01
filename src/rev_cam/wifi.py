@@ -686,6 +686,22 @@ class NMCLIBackend(WiFiBackend):
             )
         except WiFiError as exc:
             message = str(exc).strip() or None
+            if self._is_missing_security_property_error(message):
+                steps.append(
+                    {
+                        "property": property_name,
+                        "action": "remove",
+                        "result": "missing",
+                        "error": message,
+                    }
+                )
+                logger.debug(
+                    "Hotspot security property %s already absent on %s: %s",
+                    property_name,
+                    connection_name,
+                    message,
+                )
+                return True, steps
             steps.append(
                 {
                     "property": property_name,
@@ -750,6 +766,23 @@ class NMCLIBackend(WiFiBackend):
             }
         )
         return True, steps
+
+    @staticmethod
+    def _is_missing_security_property_error(message: str | None) -> bool:
+        if not message:
+            return False
+        normalized = message.strip().lower()
+        return any(
+            token in normalized
+            for token in (
+                "no such property",
+                "property not found",
+                "unknown property",
+                "property doesn't exist",
+                "property does not exist",
+                "property is not found",
+            )
+        )
 
     def _fetch_connection_security_fields(
         self, connection_name: str
@@ -971,6 +1004,17 @@ class NMCLIBackend(WiFiBackend):
             )
         except WiFiError as exc:
             message = str(exc).strip() or None
+            if self._is_missing_security_property_error(message):
+                logger.debug(
+                    "Hotspot security setting already absent from %s: %s",
+                    connection_name,
+                    message,
+                )
+                return True, {
+                    "action": "remove_setting",
+                    "result": "missing",
+                    "error": message,
+                }
             logger.debug(
                 "Unable to remove hotspot security setting from %s: %s",
                 connection_name,
