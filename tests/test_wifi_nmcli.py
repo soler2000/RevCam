@@ -218,7 +218,7 @@ def test_nmcli_start_hotspot_errors_when_secrets_remain(
 
     def fake_run(args: list[str]) -> str:
         commands.append(list(args))
-        if args[:2] == ["nmcli", "-g"]:
+        if args[:4] == ["nmcli", "--show-secrets", "yes", "-g"]:
             return "\n".join(["wpa-psk", "", "", "", "", "", "1 (0x1)"])
         return ""
 
@@ -321,7 +321,7 @@ def test_nmcli_start_hotspot_handles_missing_security_property_errors(
         commands.append(list(args))
         if args[:3] == ["nmcli", "connection", "show"]:
             return ""
-        if args[:2] == ["nmcli", "-g"]:
+        if args[:4] == ["nmcli", "--show-secrets", "yes", "-g"]:
             return "\n".join(["none", "", "", "", "", "", "0 (0x0)"])
         if args[:4] == ["nmcli", "connection", "modify", "RevCam Hotspot"] and args[4].startswith(
             "-802-11-wireless-security"
@@ -372,7 +372,7 @@ def test_nmcli_start_hotspot_handles_missing_value_errors(
 
     def fake_run(args: list[str]) -> str:
         commands.append(list(args))
-        if args[:2] == ["nmcli", "-g"]:
+        if args[:4] == ["nmcli", "--show-secrets", "yes", "-g"]:
             return "\n".join(["none", "", "", "", "", "", "0 (0x0)"])
         if args[:4] == ["nmcli", "connection", "modify", "RevCam Hotspot"] and args[4].startswith(
             "-802-11-wireless-security"

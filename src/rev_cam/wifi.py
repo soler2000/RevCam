@@ -686,6 +686,8 @@ class NMCLIBackend(WiFiBackend):
             output = self._run(
                 [
                     "nmcli",
+                    "--show-secrets",
+                    "yes",
                     "-g",
                     ",".join(
                         [
