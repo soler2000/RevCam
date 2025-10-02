@@ -485,3 +485,18 @@ def test_nmcli_forget_surfaces_other_errors(monkeypatch: pytest.MonkeyPatch) -> 
         backend.forget("Cafe")
 
     assert "nmcli failure" in str(excinfo.value)
+
+
+def test_nmcli_disconnect_uses_device_disconnect(monkeypatch: pytest.MonkeyPatch) -> None:
+    backend = NMCLIBackend(interface="wlan0")
+    commands: list[list[str]] = []
+
+    def fake_run(args: list[str]) -> str:
+        commands.append(list(args))
+        return ""
+
+    monkeypatch.setattr(backend, "_run", fake_run)
+
+    backend.disconnect()
+
+    assert commands == [["nmcli", "device", "disconnect", "wlan0"]]

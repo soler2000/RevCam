@@ -55,6 +55,7 @@ class FakeWiFiBackend:
         self.hotspot_inactive: bool = False
         self.hotspot_attempts: list[tuple[str, str | None]] = []
         self.forget_attempts: list[str] = []
+        self.disconnect_attempts: list[str | None] = []
 
     def get_status(self) -> WiFiStatus:
         return self.status
@@ -145,23 +146,25 @@ class FakeWiFiBackend:
         )
         return self.status
 
+    def disconnect(self) -> None:
+        self.disconnect_attempts.append(self.status.profile)
+        detail = self.status.detail
+        self.status = WiFiStatus(
+            connected=False,
+            ssid=None,
+            signal=None,
+            ip_address=None,
+            mode="station",
+            hotspot_active=False,
+            profile=None,
+            detail=detail,
+        )
+
     def forget(self, profile_or_ssid: str) -> None:
         identifier = (profile_or_ssid or "").strip()
         self.forget_attempts.append(identifier)
         self.networks = [network for network in self.networks if network.ssid != identifier]
-        if self.status.profile == identifier:
-            self.status = WiFiStatus(
-                connected=False,
-                ssid=None,
-                signal=None,
-                ip_address=None,
-                mode="station",
-                hotspot_active=False,
-                profile=None,
-                detail=f"Removed saved network {identifier}.",
-            )
-        else:
-            self.status.detail = f"Removed saved network {identifier}."
+        self.status.detail = f"Removed saved network {identifier}."
 
 
 class FakeMDNSAdvertiser:
@@ -492,11 +495,23 @@ def test_wifi_forget_endpoint_removes_network(client: TestClient) -> None:
     assert "removed saved network" in (payload.get("detail") or "").lower()
 
     assert backend.forget_attempts[-1] == "Home"
+    assert backend.disconnect_attempts[-1] == "Home"
 
     refreshed = client.get("/api/wifi/networks")
     assert refreshed.status_code == 200
     networks = refreshed.json().get("networks", [])
     assert all(network.get("ssid") != "Home" for network in networks)
+
+
+def test_wifi_forget_inactive_network_does_not_disconnect(client: TestClient) -> None:
+    backend = getattr(client, "backend", None)
+    assert backend is not None
+
+    response = client.post("/api/wifi/forget", json={"identifier": "Guest"})
+    assert response.status_code == 200
+
+    assert backend.forget_attempts[-1] == "Guest"
+    assert backend.disconnect_attempts == []
 
 
 def test_wifi_log_records_connection_and_hotspot_events(client: TestClient) -> None:
