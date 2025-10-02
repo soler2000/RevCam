@@ -6,6 +6,7 @@ import logging
 import math
 import os
 import string
+from enum import Enum
 from pathlib import Path
 from typing import Literal
 
@@ -34,6 +35,11 @@ from .led_matrix import LedRing
 from .reversing_aids import create_reversing_aids_overlay
 from .sensor_fusion import Gy85KalmanFilter, SensorSample, Vector3
 from .pipeline import FramePipeline
+from .recording import (
+    RecordingManager,
+    load_recording_metadata,
+    load_recording_payload,
+)
 from .streaming import MJPEGStreamer, WebRTCManager, encode_frame_to_jpeg
 from .system_log import SystemLog
 from .version import APP_VERSION
@@ -41,6 +47,7 @@ from .wifi import WiFiCredentialStore, WiFiError, WiFiManager
 from .trailer_leveling import evaluate_leveling
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+RECORDINGS_DIR = Path(os.environ.get("REVCAM_RECORDINGS_DIR", STATIC_DIR / "recordings"))
 
 
 def _load_static(name: str) -> str:
@@ -79,6 +86,11 @@ class OrientationPayload(BaseModel):
     rotation: int = 0
     flip_horizontal: bool = False
     flip_vertical: bool = False
+
+
+class StreamMode(str, Enum):
+    REVCAM = "revcam"
+    SURVEILLANCE = "surveillance"
 
 
 class CameraPayload(BaseModel):
@@ -127,6 +139,10 @@ class DistanceOverlayPayload(BaseModel):
 
 class DistanceDisplayModePayload(BaseModel):
     use_projected_distance: bool
+
+
+class SurveillanceModePayload(BaseModel):
+    mode: Literal["revcam", "surveillance"]
 
 
 class BatteryLimitsPayload(BaseModel):
@@ -334,14 +350,17 @@ def create_app(
             enabled_provider=config_manager.get_reversing_overlay_enabled,
         )
     )
+    RECORDINGS_DIR.mkdir(parents=True, exist_ok=True)
     camera: BaseCamera | None = None
     streamer: MJPEGStreamer | None = None
     webrtc_manager: WebRTCManager | None = None
+    recording_manager: RecordingManager | None = None
     stream_error: str | None = None
     webrtc_error: str | None = None
     active_camera_choice: str = "unknown"
     active_resolution: Resolution = config_manager.get_resolution()
     camera_errors: dict[str, str] = {}
+    current_mode: StreamMode = StreamMode.REVCAM
 
     def _distance_payload(
         reading,
@@ -391,7 +410,11 @@ def create_app(
     app.state.system_log = shared_system_log
 
     async def _set_ready_pattern() -> None:
-        available = streamer is not None or webrtc_manager is not None
+        available = (
+            streamer is not None
+            or webrtc_manager is not None
+            or (recording_manager is not None and current_mode is StreamMode.SURVEILLANCE)
+        )
         await led_ring.set_pattern("ready" if available else "error")
 
     async def _serialise_led_status() -> dict[str, object]:
@@ -414,6 +437,150 @@ def create_app(
                 "intensity": intensity_percent,
             },
         }
+
+    async def _serialise_surveillance_status() -> dict[str, object]:
+        recordings: list[dict[str, object]] = []
+        if recording_manager is not None:
+            try:
+                recordings = await recording_manager.list_recordings()
+            except Exception:  # pragma: no cover - defensive logging
+                logger.exception("Failed to list surveillance recordings")
+                recordings = []
+        else:
+            try:
+                recordings = await asyncio.to_thread(
+                    load_recording_metadata, RECORDINGS_DIR
+                )
+            except Exception:  # pragma: no cover - defensive logging
+                logger.exception("Failed to list surveillance recordings")
+                recordings = []
+        preview: dict[str, object] | None = None
+        if current_mode is StreamMode.SURVEILLANCE and recording_manager is not None:
+            preview = {
+                "endpoint": "/surveillance/preview.mjpeg",
+                "content_type": recording_manager.media_type,
+            }
+        return {
+            "mode": current_mode.value,
+            "recording": recording_manager.is_recording if recording_manager else False,
+            "recordings": recordings,
+            "preview": preview,
+        }
+
+    async def _ensure_recording_manager() -> RecordingManager:
+        nonlocal recording_manager
+        if camera is None:
+            raise RuntimeError("Camera unavailable for surveillance mode")
+        settings = config_manager.get_stream_settings()
+        if recording_manager is None:
+            recording_manager = RecordingManager(
+                camera=camera,
+                pipeline=pipeline,
+                fps=settings.fps,
+                jpeg_quality=settings.jpeg_quality,
+                directory=RECORDINGS_DIR,
+            )
+        else:
+            recording_manager.camera = camera
+            await recording_manager.apply_settings(
+                fps=settings.fps,
+                jpeg_quality=settings.jpeg_quality,
+            )
+        return recording_manager
+
+    async def _activate_surveillance_mode() -> RecordingManager:
+        nonlocal streamer, webrtc_manager, recording_manager, current_mode
+        nonlocal stream_error, webrtc_error
+        if current_mode is StreamMode.SURVEILLANCE and recording_manager is not None:
+            return recording_manager
+        if streamer is not None:
+            await streamer.aclose()
+            streamer = None
+        if webrtc_manager is not None:
+            await webrtc_manager.aclose()
+            webrtc_manager = None
+        stream_error = None
+        webrtc_error = None
+        manager = await _ensure_recording_manager()
+        current_mode = StreamMode.SURVEILLANCE
+        await _set_ready_pattern()
+        return manager
+
+    async def _activate_revcam_mode() -> None:
+        nonlocal streamer, webrtc_manager, recording_manager, current_mode
+        nonlocal stream_error, webrtc_error
+        if recording_manager is not None:
+            try:
+                if recording_manager.is_recording:
+                    await recording_manager.stop_recording()
+            except Exception:  # pragma: no cover - defensive logging
+                logger.exception("Failed to finalise active recording while switching modes")
+            await recording_manager.aclose()
+            recording_manager = None
+        current_mode = StreamMode.REVCAM
+        await _refresh_video_services()
+        await _set_ready_pattern()
+
+    async def _refresh_video_services() -> None:
+        nonlocal streamer, webrtc_manager, stream_error, webrtc_error, recording_manager
+        stream_settings = config_manager.get_stream_settings()
+        if current_mode is StreamMode.SURVEILLANCE:
+            if streamer is not None:
+                await streamer.aclose()
+                streamer = None
+            if webrtc_manager is not None:
+                await webrtc_manager.aclose()
+                webrtc_manager = None
+            stream_error = None
+            webrtc_error = None
+            if camera is not None:
+                try:
+                    await _ensure_recording_manager()
+                except Exception:  # pragma: no cover - defensive logging
+                    logger.exception("Failed to prepare surveillance manager")
+                    raise
+            return
+
+        if camera is None:
+            streamer = None
+            webrtc_manager = None
+            stream_error = "Camera unavailable"
+            webrtc_error = "Camera unavailable"
+            return
+
+        if streamer is None:
+            try:
+                streamer = MJPEGStreamer(
+                    camera=camera,
+                    pipeline=pipeline,
+                    fps=stream_settings.fps,
+                    jpeg_quality=stream_settings.jpeg_quality,
+                )
+            except RuntimeError as exc:
+                logger.error("Failed to initialise MJPEG streamer: %s", exc)
+                stream_error = str(exc)
+                streamer = None
+            else:
+                stream_error = None
+        else:
+            streamer.camera = camera
+            stream_error = None
+
+        if webrtc_manager is not None:
+            await webrtc_manager.aclose()
+            webrtc_manager = None
+        try:
+            webrtc_manager = WebRTCManager(
+                camera=camera,
+                pipeline=pipeline,
+                fps=stream_settings.fps,
+            )
+        except RuntimeError as exc:
+            logger.error("Failed to initialise WebRTC streamer: %s", exc)
+            webrtc_error = str(exc)
+            webrtc_manager = None
+        else:
+            webrtc_error = None
 
     def _parse_hex_colour(value: str) -> tuple[int, int, int]:
         if not isinstance(value, str) or not value.strip():
@@ -521,12 +688,22 @@ def create_app(
 
     def _build_stream_info() -> dict[str, object | None]:
         stream_settings = config_manager.get_stream_settings()
-        if streamer is not None:
+        in_surveillance = current_mode is StreamMode.SURVEILLANCE
+        recording_available = recording_manager is not None
+        preview_details: dict[str, object | None] | None = None
+        if in_surveillance and recording_available:
+            preview_details = {
+                "enabled": True,
+                "endpoint": "/surveillance/preview.mjpeg",
+                "content_type": recording_manager.media_type,
+            }
+
+        if not in_surveillance and streamer is not None:
             active_details: dict[str, int | None] | None = {
                 "fps": streamer.fps,
                 "jpeg_quality": streamer.jpeg_quality,
             }
-        elif webrtc_manager is not None:
+        elif not in_surveillance and webrtc_manager is not None:
             active_details = {"fps": webrtc_manager.fps, "jpeg_quality": None}
         else:
             active_details = None
@@ -536,25 +713,30 @@ def create_app(
         else:
             overall_error = stream_error if streamer is None else None
 
+        mjpeg_enabled = (not in_surveillance) and (streamer is not None)
+        webrtc_enabled = (not in_surveillance) and (webrtc_manager is not None)
+
         return {
-            "enabled": (streamer is not None) or (webrtc_manager is not None),
-            "endpoint": "/stream/mjpeg" if streamer else None,
-            "content_type": streamer.media_type if streamer else None,
-            "error": overall_error,
+            "mode": current_mode.value,
+            "enabled": mjpeg_enabled or webrtc_enabled,
+            "endpoint": "/stream/mjpeg" if mjpeg_enabled else None,
+            "content_type": streamer.media_type if mjpeg_enabled and streamer else None,
+            "error": overall_error if not in_surveillance else "Surveillance mode active",
             "settings": stream_settings.to_dict(),
             "active": active_details,
             "webrtc": {
-                "enabled": webrtc_manager is not None,
+                "enabled": webrtc_enabled,
                 "endpoint": "/stream/webrtc",
-                "error": webrtc_error,
-                "fps": webrtc_manager.fps if webrtc_manager is not None else None,
+                "error": webrtc_error if not in_surveillance else "Surveillance mode active",
+                "fps": webrtc_manager.fps if webrtc_enabled and webrtc_manager is not None else None,
             },
             "mjpeg": {
-                "enabled": streamer is not None,
+                "enabled": mjpeg_enabled,
                 "endpoint": "/stream/mjpeg",
-                "error": stream_error,
-                "content_type": streamer.media_type if streamer else None,
+                "error": stream_error if mjpeg_enabled else ("Surveillance mode active" if in_surveillance else stream_error),
+                "content_type": streamer.media_type if mjpeg_enabled and streamer else None,
             },
+            "surveillance": preview_details,
         }
 
     def _build_camera(
@@ -605,7 +787,7 @@ def create_app(
     @app.on_event("startup")
     async def startup() -> None:  # pragma: no cover - framework hook
         nonlocal camera, active_camera_choice, streamer, webrtc_manager, active_resolution
-        nonlocal stream_error, webrtc_error
+        nonlocal stream_error, webrtc_error, recording_manager, current_mode
         if isinstance(shared_system_log, SystemLog):
             shared_system_log.record(
                 "system",
@@ -659,6 +841,8 @@ def create_app(
         else:
             webrtc_error = None
         await _set_ready_pattern()
+        recording_manager = None
+        current_mode = StreamMode.REVCAM
         battery_supervisor.start()
         if isinstance(shared_system_log, SystemLog):
             startup_metadata = {
@@ -677,7 +861,7 @@ def create_app(
 
     @app.on_event("shutdown")
     async def shutdown() -> None:  # pragma: no cover - framework hook
-        nonlocal streamer, webrtc_manager
+        nonlocal streamer, webrtc_manager, recording_manager
         if isinstance(shared_system_log, SystemLog):
             shared_system_log.record(
                 "system",
@@ -691,6 +875,9 @@ def create_app(
         if webrtc_manager is not None:
             await webrtc_manager.aclose()
             webrtc_manager = None
+        if recording_manager is not None:
+            await recording_manager.aclose()
+            recording_manager = None
         if camera:
             await camera.close()
         await battery_supervisor.aclose()
@@ -718,6 +905,14 @@ def create_app(
     @app.get("/leveling", response_class=HTMLResponse)
     async def leveling_page() -> str:
         return _load_static("leveling.html")
+
+    @app.get("/surveillance", response_class=HTMLResponse)
+    async def surveillance_page() -> str:
+        return _load_static("surveillance.html")
+
+    @app.get("/surveillance/player", response_class=HTMLResponse)
+    async def surveillance_player_page() -> str:
+        return _load_static("surveillance_player.html")
 
     @app.get("/images/{asset}")
     async def get_image(asset: str):
@@ -907,7 +1102,7 @@ def create_app(
 
     @app.post("/api/stream/settings")
     async def update_stream_settings(payload: StreamSettingsPayload) -> dict[str, object | None]:
-        nonlocal streamer, webrtc_manager
+        nonlocal streamer, webrtc_manager, recording_manager
         data = payload.model_dump(exclude_none=True)
         if not data:
             raise HTTPException(status_code=400, detail="No streaming settings provided")
@@ -930,6 +1125,15 @@ def create_app(
                 webrtc_manager.apply_settings(fps=settings.fps)
             except Exception as exc:  # pragma: no cover - defensive logging
                 logger.exception("Failed to apply WebRTC streaming settings")
+                raise HTTPException(status_code=500, detail="Unable to apply streaming settings") from exc
+        if recording_manager is not None:
+            try:
+                await recording_manager.apply_settings(
+                    fps=settings.fps,
+                    jpeg_quality=settings.jpeg_quality,
+                )
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.exception("Failed to apply surveillance recording settings")
                 raise HTTPException(status_code=500, detail="Unable to apply streaming settings") from exc
 
         response: dict[str, object | None] = settings.to_dict()
@@ -1270,7 +1474,7 @@ def create_app(
     @app.post("/api/camera")
     async def update_camera(payload: CameraPayload) -> dict[str, object]:
         nonlocal camera, active_camera_choice, streamer, webrtc_manager
-        nonlocal active_resolution, stream_error, webrtc_error
+        nonlocal active_resolution, stream_error, webrtc_error, recording_manager, current_mode
         selection = payload.source.strip().lower()
         if selection not in CAMERA_SOURCES:
             raise HTTPException(status_code=400, detail="Unknown camera source")
@@ -1331,40 +1535,10 @@ def create_app(
                 camera = restored_camera
                 active_camera_choice = restored_active
                 active_resolution = old_resolution
-                stream_settings = config_manager.get_stream_settings()
-                if streamer is None and camera is not None:
-                    try:
-                        streamer = MJPEGStreamer(
-                            camera=camera,
-                            pipeline=pipeline,
-                            fps=stream_settings.fps,
-                            jpeg_quality=stream_settings.jpeg_quality,
-                        )
-                    except RuntimeError as streamer_exc:
-                        logger.error("Failed to initialise MJPEG streamer: %s", streamer_exc)
-                        stream_error = str(streamer_exc)
-                        streamer = None
-                    else:
-                        stream_error = None
-                elif streamer is not None and camera is not None:
-                    streamer.camera = camera
-                    stream_error = None
-                if webrtc_manager is not None:
-                    await webrtc_manager.aclose()
-                    webrtc_manager = None
-                if camera is not None:
-                    try:
-                        webrtc_manager = WebRTCManager(
-                            camera=camera,
-                            pipeline=pipeline,
-                            fps=stream_settings.fps,
-                        )
-                    except RuntimeError as webrtc_exc:
-                        logger.error("Failed to initialise WebRTC streamer: %s", webrtc_exc)
-                        webrtc_error = str(webrtc_exc)
-                        webrtc_manager = None
-                    else:
-                        webrtc_error = None
+                try:
+                    await _refresh_video_services()
+                except Exception:  # pragma: no cover - defensive logging
+                    logger.exception("Failed to restore video services after camera error")
             await _set_ready_pattern()
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -1372,39 +1546,11 @@ def create_app(
         active_resolution = requested_resolution
         config_manager.set_camera(selection)
         config_manager.set_resolution(requested_resolution)
-        stream_settings = config_manager.get_stream_settings()
-        if streamer is None:
-            try:
-                streamer = MJPEGStreamer(
-                    camera=camera,
-                    pipeline=pipeline,
-                    fps=stream_settings.fps,
-                    jpeg_quality=stream_settings.jpeg_quality,
-                )
-            except RuntimeError as exc:
-                logger.error("Failed to initialise MJPEG streamer: %s", exc)
-                stream_error = str(exc)
-                streamer = None
-            else:
-                stream_error = None
-        else:
-            streamer.camera = camera
-            stream_error = None
-        if webrtc_manager is not None:
-            await webrtc_manager.aclose()
-            webrtc_manager = None
         try:
-            webrtc_manager = WebRTCManager(
-                camera=camera,
-                pipeline=pipeline,
-                fps=stream_settings.fps,
-            )
-        except RuntimeError as exc:
-            logger.error("Failed to initialise WebRTC streamer: %s", exc)
-            webrtc_error = str(exc)
-            webrtc_manager = None
-        else:
-            webrtc_error = None
+            await _refresh_video_services()
+        except Exception as exc:
+            await _set_ready_pattern()
+            raise HTTPException(status_code=500, detail="Unable to configure video pipeline") from exc
         await _set_ready_pattern()
         stream_info = _build_stream_info()
         return {
@@ -1449,6 +1595,87 @@ def create_app(
             logger.exception("Failed to negotiate WebRTC session")
             raise HTTPException(status_code=500, detail="Failed to establish WebRTC session") from exc
         return {"sdp": description.sdp, "type": description.type}
+
+    @app.get("/surveillance/preview.mjpeg")
+    async def surveillance_preview():
+        if current_mode is not StreamMode.SURVEILLANCE:
+            raise HTTPException(status_code=409, detail="Surveillance mode inactive")
+        try:
+            manager = await _ensure_recording_manager()
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        response = StreamingResponse(manager.stream(), media_type=manager.media_type)
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        return response
+
+    @app.get("/api/surveillance/status")
+    async def surveillance_status() -> dict[str, object]:
+        return await _serialise_surveillance_status()
+
+    @app.post("/api/surveillance/mode")
+    async def set_surveillance_mode(payload: SurveillanceModePayload) -> dict[str, object]:
+        target = StreamMode(payload.mode)
+        if target is current_mode:
+            return await _serialise_surveillance_status()
+        if target is StreamMode.SURVEILLANCE:
+            try:
+                await _activate_surveillance_mode()
+            except RuntimeError as exc:
+                raise HTTPException(status_code=503, detail=str(exc)) from exc
+        else:
+            await _activate_revcam_mode()
+        return await _serialise_surveillance_status()
+
+    @app.post("/api/surveillance/recordings/start")
+    async def start_surveillance_recording() -> dict[str, object]:
+        if current_mode is not StreamMode.SURVEILLANCE:
+            raise HTTPException(status_code=409, detail="Enable surveillance mode first")
+        try:
+            manager = await _ensure_recording_manager()
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        try:
+            details = await manager.start_recording()
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return {"recording": details}
+
+    @app.post("/api/surveillance/recordings/stop")
+    async def stop_surveillance_recording() -> dict[str, object]:
+        if current_mode is not StreamMode.SURVEILLANCE:
+            raise HTTPException(status_code=409, detail="Enable surveillance mode first")
+        if recording_manager is None:
+            raise HTTPException(status_code=409, detail="No recording in progress")
+        try:
+            details = await recording_manager.stop_recording()
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return {"recording": details}
+
+    @app.get("/api/surveillance/recordings")
+    async def list_surveillance_recordings() -> dict[str, object]:
+        status = await _serialise_surveillance_status()
+        return {"recordings": status.get("recordings", [])}
+
+    @app.get("/api/surveillance/recordings/{name}")
+    async def fetch_surveillance_recording(name: str) -> dict[str, object]:
+        if recording_manager is None:
+            try:
+                return await asyncio.to_thread(
+                    load_recording_payload, RECORDINGS_DIR, name
+                )
+            except FileNotFoundError as exc:
+                raise HTTPException(status_code=404, detail="Recording not found") from exc
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.exception("Failed to load surveillance recording %s", name)
+                raise HTTPException(
+                    status_code=500, detail="Unable to load recording"
+                ) from exc
+        try:
+            return await recording_manager.get_recording(name)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Recording not found") from exc
 
     @app.post("/api/log/webrtc-error")
     async def log_webrtc_error(payload: WebRTCErrorReportPayload) -> dict[str, str]:

@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Surveillance Recording Playback</title>
+    <link rel="icon" type="image/svg+xml" href="images/favicon.svg" />
+    <style>
+      :root {
+        color-scheme: dark;
+        --font-family: "Inter", "Manrope", "Segoe UI", system-ui, -apple-system,
+          BlinkMacSystemFont, sans-serif;
+        --surface-0: rgba(14, 16, 22, 0.9);
+        --surface-1: rgba(26, 28, 36, 0.85);
+        --border-subtle: rgba(255, 255, 255, 0.12);
+        --text-primary: #f5f7fb;
+        --text-muted: rgba(245, 247, 250, 0.7);
+        --accent: #0a84ff;
+        --danger: #ff453a;
+        --radius-lg: 1.2rem;
+        --space-md: 1rem;
+        --space-lg: 1.6rem;
+        --page-gradient: radial-gradient(120% 140% at top, #1b1e26 0%, #0b0d13 60%, #050609 100%);
+      }
+      body {
+        margin: 0;
+        background: var(--page-gradient);
+        font-family: var(--font-family);
+        color: var(--text-primary);
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: var(--space-lg);
+      }
+      .player-card {
+        width: min(960px, 100%);
+        background: var(--surface-1);
+        border-radius: var(--radius-lg);
+        border: 1px solid var(--border-subtle);
+        box-shadow: 0 24px 48px rgba(0, 0, 0, 0.45);
+        padding: var(--space-lg);
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-md);
+      }
+      .player-card header {
+        display: flex;
+        flex-direction: column;
+        gap: 0.35rem;
+      }
+      .muted {
+        color: var(--text-muted);
+      }
+      .playback-frame {
+        width: 100%;
+        border-radius: 0.9rem;
+        border: 1px solid var(--border-subtle);
+        background: #000;
+        min-height: 260px;
+      }
+      .meta-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        color: var(--text-muted);
+        font-size: 0.95rem;
+      }
+      .error {
+        color: var(--danger);
+        font-weight: 600;
+      }
+      a.link {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      a.link:hover,
+      a.link:focus-visible {
+        text-decoration: underline;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="player-card" role="document">
+      <header>
+        <h1 id="recording-title">Loading recording…</h1>
+        <div class="meta-list" id="recording-meta"></div>
+        <p class="muted" id="status-text">Preparing playback…</p>
+      </header>
+      <img id="playback-frame" class="playback-frame" alt="Recording playback" hidden />
+      <p class="muted">
+        <a class="link" href="/surveillance">Back to surveillance</a>
+      </p>
+    </div>
+    <script>
+      const params = new URLSearchParams(window.location.search);
+      const recordingName = params.get("name");
+      const title = document.getElementById("recording-title");
+      const metaList = document.getElementById("recording-meta");
+      const statusText = document.getElementById("status-text");
+      const playbackFrame = document.getElementById("playback-frame");
+      let playbackTimer = null;
+
+      function setStatus(message, tone = "info") {
+        if (tone === "error") {
+          statusText.classList.add("error");
+        } else {
+          statusText.classList.remove("error");
+        }
+        statusText.textContent = message;
+      }
+
+      function renderMeta(data) {
+        metaList.innerHTML = "";
+        const entries = [];
+        if (data.started_at) {
+          entries.push(`Started: ${new Date(data.started_at).toLocaleString()}`);
+        }
+        if (data.ended_at) {
+          entries.push(`Finished: ${new Date(data.ended_at).toLocaleString()}`);
+        }
+        if (typeof data.duration_seconds === "number") {
+          entries.push(`Duration: ${data.duration_seconds.toFixed(1)}s`);
+        }
+        if (typeof data.frame_count === "number") {
+          entries.push(`Frames: ${data.frame_count}`);
+        }
+        if (typeof data.fps === "number") {
+          entries.push(`Recorded at ${data.fps} fps`);
+        }
+        if (!entries.length) {
+          metaList.textContent = "No metadata available.";
+          return;
+        }
+        entries.forEach((text) => {
+          const span = document.createElement("span");
+          span.textContent = text;
+          metaList.appendChild(span);
+        });
+      }
+
+      function playFrames(frames, fps) {
+        if (!playbackFrame) {
+          return;
+        }
+        if (!Array.isArray(frames) || frames.length === 0) {
+          setStatus("Recording does not contain any frames.", "error");
+          playbackFrame.hidden = true;
+          return;
+        }
+        let index = 0;
+        const interval = fps && fps > 0 ? Math.max(40, Math.round(1000 / fps)) : 200;
+        playbackFrame.hidden = false;
+
+        const advance = () => {
+          const frame = frames[index];
+          playbackFrame.src = `data:image/jpeg;base64,${frame.jpeg}`;
+          index = (index + 1) % frames.length;
+          playbackTimer = window.setTimeout(advance, interval);
+        };
+
+        advance();
+      }
+
+      async function loadRecording() {
+        if (!recordingName) {
+          setStatus("Missing recording identifier.", "error");
+          return;
+        }
+        title.textContent = recordingName;
+        try {
+          const response = await fetch(
+            `/api/surveillance/recordings/${encodeURIComponent(recordingName)}`,
+            { cache: "no-store" },
+          );
+          if (!response.ok) {
+            throw new Error(`Request failed with ${response.status}`);
+          }
+          const payload = await response.json();
+          if (!payload || typeof payload !== "object") {
+            throw new Error("Invalid recording payload");
+          }
+          renderMeta(payload);
+          setStatus("Playing recording…");
+          playFrames(payload.frames, payload.fps);
+        } catch (error) {
+          console.error("Failed to load recording", error);
+          setStatus("Unable to load recording", "error");
+        }
+      }
+
+      window.addEventListener("beforeunload", () => {
+        if (playbackTimer) {
+          window.clearTimeout(playbackTimer);
+        }
+      });
+
+      loadRecording();
+    </script>
+  </body>
+</html>
