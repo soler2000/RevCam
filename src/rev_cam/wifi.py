@@ -223,6 +223,9 @@ class WiFiBackend:
     def stop_hotspot(self, profile: str | None) -> WiFiStatus:  # pragma: no cover - interface only
         raise NotImplementedError
 
+    def disconnect(self) -> None:  # pragma: no cover - interface only
+        raise NotImplementedError
+
     def forget(self, profile_or_ssid: str) -> None:  # pragma: no cover - interface only
         raise NotImplementedError
 
@@ -1160,6 +1163,22 @@ class NMCLIBackend(WiFiBackend):
             self._last_hotspot_profile = None
         return status
 
+    def disconnect(self) -> None:
+        interface = self._get_interface()
+        try:
+            self._run(["nmcli", "device", "disconnect", interface])
+        except WiFiError as exc:
+            message = str(exc).strip()
+            lowered = message.lower()
+            if "not authorized" in lowered or "not authorised" in lowered:
+                raise WiFiError(
+                    "Unable to disconnect from Wi-Fi: not authorized to control networking. "
+                    "Ensure RevCam has permission to manage NetworkManager."
+                ) from exc
+            if "is not active" in lowered or "already disconnected" in lowered:
+                return
+            raise
+
     def forget(self, profile_or_ssid: str) -> None:
         try:
             self._run(["nmcli", "connection", "delete", profile_or_ssid])
@@ -1426,10 +1445,26 @@ class WiFiManager:
         if not isinstance(profile_or_ssid, str) or not profile_or_ssid.strip():
             raise WiFiError("Network identifier must be a non-empty string")
         identifier = profile_or_ssid.strip()
+        try:
+            current_status = self._backend.get_status()
+        except WiFiError:
+            current_status = None
         self._backend.forget(identifier)
         if identifier == self._hotspot_profile:
             self._hotspot_profile = None
         self._credentials.forget_network(identifier)
+        should_disconnect = False
+        if isinstance(current_status, WiFiStatus):
+            if current_status.connected and not current_status.hotspot_active:
+                active_identifiers = {
+                    value.strip()
+                    for value in (current_status.ssid, current_status.profile)
+                    if isinstance(value, str) and value.strip()
+                }
+                if identifier in active_identifiers:
+                    should_disconnect = True
+        if should_disconnect:
+            self._backend.disconnect()
         status = self._fetch_status()
         return status
 
