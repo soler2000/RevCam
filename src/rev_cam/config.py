@@ -7,6 +7,7 @@ from dataclasses import dataclass, asdict
 from pathlib import Path
 from threading import Lock
 from typing import Any, Dict, Iterable, Mapping, Sequence
+from typing import Literal
 
 try:
     from .camera import CAMERA_SOURCES, DEFAULT_CAMERA_CHOICE
@@ -40,6 +41,15 @@ DEFAULT_OVERLAY_MASTER_ENABLED = True
 DEFAULT_BATTERY_OVERLAY_ENABLED = True
 DEFAULT_WIFI_OVERLAY_ENABLED = True
 DEFAULT_REVERSING_OVERLAY_ENABLED = True
+
+SURVEILLANCE_STANDARD_PRESETS: Mapping[str, tuple[int, int]] = {
+    "balanced": (6, 70),
+    "detail": (9, 85),
+    "endurance": (4, 60),
+}
+
+DEFAULT_SURVEILLANCE_PROFILE: Literal["standard", "expert"] = "standard"
+DEFAULT_SURVEILLANCE_PRESET = "balanced"
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,6 +130,72 @@ class StreamSettings:
 
     def to_dict(self) -> Dict[str, int]:
         return {"fps": int(self.fps), "jpeg_quality": int(self.jpeg_quality)}
+
+
+@dataclass(frozen=True, slots=True)
+class SurveillanceSettings:
+    """Encapsulates presets and expert controls for surveillance recordings."""
+
+    profile: Literal["standard", "expert"] = DEFAULT_SURVEILLANCE_PROFILE
+    preset: str = DEFAULT_SURVEILLANCE_PRESET
+    expert_fps: int = 6
+    expert_jpeg_quality: int = 75
+
+    def __post_init__(self) -> None:
+        profile = self.profile if self.profile in ("standard", "expert") else DEFAULT_SURVEILLANCE_PROFILE
+        preset = self.preset if self.preset in SURVEILLANCE_STANDARD_PRESETS else DEFAULT_SURVEILLANCE_PRESET
+        object.__setattr__(self, "profile", profile)
+        object.__setattr__(self, "preset", preset)
+
+        try:
+            fps = int(self.expert_fps)
+        except (TypeError, ValueError) as exc:  # pragma: no cover - defensive branch
+            raise ValueError("Surveillance expert fps must be an integer") from exc
+        if fps < 1:
+            fps = 1
+        elif fps > 30:
+            fps = 30
+
+        try:
+            quality = int(self.expert_jpeg_quality)
+        except (TypeError, ValueError) as exc:  # pragma: no cover - defensive branch
+            raise ValueError("Surveillance expert JPEG quality must be an integer") from exc
+        if quality < 30:
+            quality = 30
+        elif quality > 100:
+            quality = 100
+
+        object.__setattr__(self, "expert_fps", fps)
+        object.__setattr__(self, "expert_jpeg_quality", quality)
+
+    def resolved_values(self) -> tuple[int, int]:
+        """Return the effective fps and JPEG quality for surveillance recording."""
+
+        if self.profile == "standard":
+            return SURVEILLANCE_STANDARD_PRESETS.get(self.preset, SURVEILLANCE_STANDARD_PRESETS[DEFAULT_SURVEILLANCE_PRESET])
+        return (int(self.expert_fps), int(self.expert_jpeg_quality))
+
+    @property
+    def resolved_fps(self) -> int:
+        return self.resolved_values()[0]
+
+    @property
+    def resolved_jpeg_quality(self) -> int:
+        return self.resolved_values()[1]
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "profile": self.profile,
+            "preset": self.preset,
+            "expert_fps": int(self.expert_fps),
+            "expert_jpeg_quality": int(self.expert_jpeg_quality),
+        }
+
+    def serialise(self) -> dict[str, object]:
+        fps, jpeg = self.resolved_values()
+        payload = self.to_dict()
+        payload.update({"fps": int(fps), "jpeg_quality": int(jpeg)})
+        return payload
 
 
 @dataclass(frozen=True, slots=True)
@@ -234,6 +310,7 @@ DEFAULT_RESOLUTION_KEY = "1280x720"
 DEFAULT_RESOLUTION = RESOLUTION_PRESETS[DEFAULT_RESOLUTION_KEY]
 DEFAULT_STREAM_SETTINGS = StreamSettings()
 DEFAULT_REVERSING_AIDS = ReversingAidsConfig()
+DEFAULT_SURVEILLANCE_SETTINGS = SurveillanceSettings()
 
 
 def _parse_orientation(data: Mapping[str, Any]) -> Orientation:
@@ -350,6 +427,50 @@ def _parse_stream_settings(value: Any, *, default: StreamSettings) -> StreamSett
         raise ValueError("Stream JPEG quality must be between 1 and 100")
 
     return StreamSettings(fps=fps, jpeg_quality=quality)
+
+
+def _parse_surveillance_settings(
+    value: Any, *, default: SurveillanceSettings
+) -> SurveillanceSettings:
+    if value is None:
+        return default
+    if not isinstance(value, Mapping):
+        raise ValueError("Surveillance settings must be provided as a mapping")
+
+    current = default
+    profile_raw = value.get("profile", current.profile)
+    if isinstance(profile_raw, str):
+        profile_candidate = profile_raw.strip().lower()
+    else:
+        raise ValueError("Surveillance profile must be a string")
+    if profile_candidate not in ("standard", "expert"):
+        raise ValueError("Surveillance profile must be 'standard' or 'expert'")
+
+    preset_raw = value.get("preset", current.preset)
+    if isinstance(preset_raw, str):
+        preset_candidate = preset_raw.strip().lower()
+    else:
+        raise ValueError("Surveillance preset must be a string")
+    if preset_candidate not in SURVEILLANCE_STANDARD_PRESETS:
+        raise ValueError("Unknown surveillance preset")
+
+    expert_fps_raw = value.get("expert_fps", current.expert_fps)
+    expert_quality_raw = value.get("expert_jpeg_quality", current.expert_jpeg_quality)
+    try:
+        expert_fps = int(float(expert_fps_raw))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Surveillance expert fps must be an integer") from exc
+    try:
+        expert_quality = int(float(expert_quality_raw))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Surveillance expert JPEG quality must be an integer") from exc
+
+    return SurveillanceSettings(
+        profile=profile_candidate,
+        preset=preset_candidate,
+        expert_fps=expert_fps,
+        expert_jpeg_quality=expert_quality,
+    )
 
 
 def _parse_reversing_point(value: Any) -> ReversingAidPoint:
@@ -659,6 +780,7 @@ class ConfigManager:
             self._battery_limits,
             self._battery_capacity,
             self._stream_settings,
+            self._surveillance_settings,
             self._reversing_aids,
             self._overlays_master_enabled,
             self._battery_overlay_enabled,
@@ -684,6 +806,7 @@ class ConfigManager:
         BatteryLimits,
         int,
         StreamSettings,
+        SurveillanceSettings,
         ReversingAidsConfig,
         bool,
         bool,
@@ -704,6 +827,7 @@ class ConfigManager:
                 DEFAULT_BATTERY_LIMITS,
                 DEFAULT_BATTERY_CAPACITY_MAH,
                 DEFAULT_STREAM_SETTINGS,
+                DEFAULT_SURVEILLANCE_SETTINGS,
                 DEFAULT_REVERSING_AIDS,
                 DEFAULT_OVERLAY_MASTER_ENABLED,
                 DEFAULT_BATTERY_OVERLAY_ENABLED,
@@ -758,6 +882,11 @@ class ConfigManager:
                 stream_payload, default=DEFAULT_STREAM_SETTINGS
             )
 
+            surveillance_payload = payload.get("surveillance")
+            surveillance_settings = _parse_surveillance_settings(
+                surveillance_payload, default=DEFAULT_SURVEILLANCE_SETTINGS
+            )
+
             reversing_payload = payload.get("reversing_aids")
             reversing_aids = _parse_reversing_aids(
                 reversing_payload, default=DEFAULT_REVERSING_AIDS
@@ -805,6 +934,7 @@ class ConfigManager:
                 battery_limits,
                 battery_capacity,
                 stream_settings,
+                surveillance_settings,
                 reversing_aids,
                 overlay_master_enabled,
                 battery_overlay_enabled,
@@ -832,6 +962,7 @@ class ConfigManager:
                 "capacity_mah": self._battery_capacity,
             },
             "stream": self._stream_settings.to_dict(),
+            "surveillance": self._surveillance_settings.to_dict(),
             "reversing_aids": self._reversing_aids.to_dict(),
             "overlays": {
                 "master": self._overlays_master_enabled,
@@ -1037,6 +1168,19 @@ class ConfigManager:
             self._save()
         return settings
 
+    def get_surveillance_settings(self) -> SurveillanceSettings:
+        with self._lock:
+            return self._surveillance_settings
+
+    def set_surveillance_settings(
+        self, data: Mapping[str, Any] | SurveillanceSettings
+    ) -> SurveillanceSettings:
+        settings = _parse_surveillance_settings(data, default=self._surveillance_settings)
+        with self._lock:
+            self._surveillance_settings = settings
+            self._save()
+        return settings
+
     def get_reversing_aids(self) -> ReversingAidsConfig:
         with self._lock:
             return self._reversing_aids
@@ -1057,6 +1201,7 @@ __all__ = [
     "Orientation",
     "Resolution",
     "StreamSettings",
+    "SurveillanceSettings",
     "RESOLUTION_PRESETS",
     "DEFAULT_RESOLUTION",
     "DEFAULT_RESOLUTION_KEY",
@@ -1068,4 +1213,6 @@ __all__ = [
     "DistanceMounting",
     "DEFAULT_DISTANCE_MOUNTING",
     "DEFAULT_DISTANCE_USE_PROJECTED",
+    "DEFAULT_SURVEILLANCE_SETTINGS",
+    "SURVEILLANCE_STANDARD_PRESETS",
 ]

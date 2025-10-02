@@ -12,6 +12,7 @@ from rev_cam.config import (
     ReversingAidPoint,
     ReversingAidsConfig,
     StreamSettings,
+    SurveillanceSettings,
     generate_reversing_segments,
     DEFAULT_DISTANCE_OVERLAY_ENABLED,
     DEFAULT_WIFI_OVERLAY_ENABLED,
@@ -21,6 +22,8 @@ from rev_cam.config import (
     DEFAULT_DISTANCE_MOUNTING,
     DEFAULT_DISTANCE_USE_PROJECTED,
     DEFAULT_LEVELING_SETTINGS,
+    DEFAULT_SURVEILLANCE_SETTINGS,
+    SURVEILLANCE_STANDARD_PRESETS,
 )
 from rev_cam.distance import DistanceCalibration
 from rev_cam.trailer_leveling import LevelingSettings
@@ -201,6 +204,46 @@ def test_stream_settings_validation(tmp_path: Path) -> None:
         manager.set_stream_settings({"fps": 0})
     with pytest.raises(ValueError):
         manager.set_stream_settings({"jpeg_quality": 120})
+
+
+def test_default_surveillance_settings(tmp_path: Path) -> None:
+    manager = ConfigManager(tmp_path / "config.json")
+    settings = manager.get_surveillance_settings()
+    assert isinstance(settings, SurveillanceSettings)
+    assert settings.profile == "standard"
+    assert settings.preset == DEFAULT_SURVEILLANCE_SETTINGS.preset
+    preset_values = SURVEILLANCE_STANDARD_PRESETS[settings.preset]
+    assert settings.resolved_fps == preset_values[0]
+    assert settings.resolved_jpeg_quality == preset_values[1]
+
+
+def test_surveillance_settings_persistence(tmp_path: Path) -> None:
+    config_file = tmp_path / "config.json"
+    manager = ConfigManager(config_file)
+    updated = manager.set_surveillance_settings(
+        {"profile": "expert", "expert_fps": 12, "expert_jpeg_quality": 92}
+    )
+    assert isinstance(updated, SurveillanceSettings)
+    assert updated.profile == "expert"
+    assert updated.expert_fps == 12
+    assert updated.expert_jpeg_quality == 92
+    reloaded = ConfigManager(config_file)
+    reloaded_settings = reloaded.get_surveillance_settings()
+    assert reloaded_settings.profile == "expert"
+    assert reloaded_settings.expert_fps == 12
+    assert reloaded_settings.expert_jpeg_quality == 92
+
+
+def test_surveillance_settings_validation(tmp_path: Path) -> None:
+    manager = ConfigManager(tmp_path / "config.json")
+    with pytest.raises(ValueError):
+        manager.set_surveillance_settings({"profile": "invalid"})
+    with pytest.raises(ValueError):
+        manager.set_surveillance_settings({"preset": "unknown"})
+    with pytest.raises(ValueError):
+        manager.set_surveillance_settings({"expert_fps": "fast"})
+    with pytest.raises(ValueError):
+        manager.set_surveillance_settings({"expert_jpeg_quality": "sharp"})
 
 
 def test_default_reversing_aids(tmp_path: Path) -> None:

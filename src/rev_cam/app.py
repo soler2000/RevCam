@@ -28,6 +28,7 @@ from .config import (
     Resolution,
     RESOLUTION_PRESETS,
     StreamSettings,
+    SURVEILLANCE_STANDARD_PRESETS,
 )
 from .diagnostics import collect_diagnostics
 from .distance import DistanceCalibration, DistanceMonitor, create_distance_overlay
@@ -157,6 +158,15 @@ class BatteryCapacityPayload(BaseModel):
 class StreamSettingsPayload(BaseModel):
     fps: int | None = None
     jpeg_quality: int | None = None
+
+
+class SurveillanceSettingsPayload(BaseModel):
+    profile: Literal["standard", "expert"] | None = None
+    preset: str | None = None
+    fps: int | None = None
+    jpeg_quality: int | None = None
+    expert_fps: int | None = None
+    expert_jpeg_quality: int | None = None
 
 
 class WebRTCOfferPayload(BaseModel):
@@ -460,31 +470,35 @@ def create_app(
                 "endpoint": "/surveillance/preview.mjpeg",
                 "content_type": recording_manager.media_type,
             }
+        surveillance_settings = config_manager.get_surveillance_settings().serialise()
         return {
             "mode": current_mode.value,
             "recording": recording_manager.is_recording if recording_manager else False,
             "recordings": recordings,
             "preview": preview,
+            "settings": surveillance_settings,
         }
 
     async def _ensure_recording_manager() -> RecordingManager:
         nonlocal recording_manager
         if camera is None:
             raise RuntimeError("Camera unavailable for surveillance mode")
-        settings = config_manager.get_stream_settings()
+        surveillance_settings = config_manager.get_surveillance_settings()
+        fps = surveillance_settings.resolved_fps
+        jpeg_quality = surveillance_settings.resolved_jpeg_quality
         if recording_manager is None:
             recording_manager = RecordingManager(
                 camera=camera,
                 pipeline=pipeline,
-                fps=settings.fps,
-                jpeg_quality=settings.jpeg_quality,
+                fps=fps,
+                jpeg_quality=jpeg_quality,
                 directory=RECORDINGS_DIR,
             )
         else:
             recording_manager.camera = camera
             await recording_manager.apply_settings(
-                fps=settings.fps,
-                jpeg_quality=settings.jpeg_quality,
+                fps=fps,
+                jpeg_quality=jpeg_quality,
             )
         return recording_manager
 
@@ -914,6 +928,10 @@ def create_app(
     async def surveillance_player_page() -> str:
         return _load_static("surveillance_player.html")
 
+    @app.get("/surveillance/settings", response_class=HTMLResponse)
+    async def surveillance_settings_page() -> str:
+        return _load_static("surveillance_settings.html")
+
     @app.get("/images/{asset}")
     async def get_image(asset: str):
         safe_name = Path(asset).name
@@ -1128,9 +1146,10 @@ def create_app(
                 raise HTTPException(status_code=500, detail="Unable to apply streaming settings") from exc
         if recording_manager is not None:
             try:
+                surveillance_settings = config_manager.get_surveillance_settings()
                 await recording_manager.apply_settings(
-                    fps=settings.fps,
-                    jpeg_quality=settings.jpeg_quality,
+                    fps=surveillance_settings.resolved_fps,
+                    jpeg_quality=surveillance_settings.resolved_jpeg_quality,
                 )
             except Exception as exc:  # pragma: no cover - defensive logging
                 logger.exception("Failed to apply surveillance recording settings")
@@ -1612,6 +1631,42 @@ def create_app(
     @app.get("/api/surveillance/status")
     async def surveillance_status() -> dict[str, object]:
         return await _serialise_surveillance_status()
+
+    @app.get("/api/surveillance/settings")
+    async def get_surveillance_settings() -> dict[str, object]:
+        settings = config_manager.get_surveillance_settings()
+        presets = [
+            {"name": name, "fps": fps, "jpeg_quality": quality}
+            for name, (fps, quality) in SURVEILLANCE_STANDARD_PRESETS.items()
+        ]
+        return {"settings": settings.serialise(), "presets": presets}
+
+    @app.post("/api/surveillance/settings")
+    async def update_surveillance_settings(
+        payload: SurveillanceSettingsPayload,
+    ) -> dict[str, object]:
+        raw = payload.model_dump(exclude_none=True)
+        if "fps" in raw and "expert_fps" not in raw:
+            raw["expert_fps"] = raw.pop("fps")
+        if "jpeg_quality" in raw and "expert_jpeg_quality" not in raw:
+            raw["expert_jpeg_quality"] = raw.pop("jpeg_quality")
+        try:
+            settings = config_manager.set_surveillance_settings(raw)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if recording_manager is not None:
+            try:
+                await recording_manager.apply_settings(
+                    fps=settings.resolved_fps,
+                    jpeg_quality=settings.resolved_jpeg_quality,
+                )
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.exception("Failed to apply surveillance recording settings")
+                raise HTTPException(
+                    status_code=500,
+                    detail="Unable to apply surveillance settings",
+                ) from exc
+        return {"settings": settings.serialise()}
 
     @app.post("/api/surveillance/mode")
     async def set_surveillance_mode(payload: SurveillanceModePayload) -> dict[str, object]:

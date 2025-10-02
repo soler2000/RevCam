@@ -148,15 +148,89 @@
           playbackFrame.hidden = true;
           return;
         }
+        const playable = frames
+          .map((frame) => ({
+            jpeg: frame && typeof frame.jpeg === "string" ? frame.jpeg : null,
+            timestamp:
+              frame && typeof frame.timestamp === "number" && Number.isFinite(frame.timestamp)
+                ? Number(frame.timestamp)
+                : null,
+          }))
+          .filter((frame) => typeof frame.jpeg === "string" && frame.jpeg.length > 0);
+        if (!playable.length) {
+          setStatus("Recording frames are invalid.", "error");
+          playbackFrame.hidden = true;
+          return;
+        }
+
+        const fallbackInterval = fps && fps > 0 ? Math.max(40, Math.round(1000 / fps)) : 200;
+        const firstTimestamp = playable.find((frame) => frame.timestamp !== null)?.timestamp ?? null;
+        let lastTimestamp = null;
+        for (let idx = playable.length - 1; idx >= 0; idx -= 1) {
+          const candidate = playable[idx].timestamp;
+          if (candidate !== null) {
+            lastTimestamp = candidate;
+            break;
+          }
+        }
+        let cycleDurationMs = fallbackInterval * playable.length;
+        if (
+          firstTimestamp !== null &&
+          lastTimestamp !== null &&
+          lastTimestamp > firstTimestamp &&
+          Number.isFinite(lastTimestamp) &&
+          Number.isFinite(firstTimestamp)
+        ) {
+          cycleDurationMs = Math.max(
+            40,
+            Math.round((lastTimestamp - firstTimestamp) * 1000),
+          );
+        }
+        if (!Number.isFinite(cycleDurationMs) || cycleDurationMs <= 0) {
+          cycleDurationMs = fallbackInterval * playable.length;
+        }
+
+        const intervals = playable.map((frame, idx) => {
+          const nextFrame = playable[(idx + 1) % playable.length];
+          const currentTs = frame.timestamp;
+          const nextTs = nextFrame.timestamp;
+          let delay = fallbackInterval;
+          if (
+            currentTs !== null &&
+            nextTs !== null &&
+            Number.isFinite(currentTs) &&
+            Number.isFinite(nextTs) &&
+            nextTs >= currentTs
+          ) {
+            delay = Math.max(40, Math.round((nextTs - currentTs) * 1000));
+          } else if (
+            currentTs !== null &&
+            Number.isFinite(currentTs) &&
+            firstTimestamp !== null &&
+            Number.isFinite(firstTimestamp) &&
+            cycleDurationMs > 0
+          ) {
+            const elapsed = Math.max(0, Math.round((currentTs - firstTimestamp) * 1000));
+            const remaining = cycleDurationMs - elapsed;
+            if (remaining > 0 && Number.isFinite(remaining)) {
+              delay = Math.max(40, remaining);
+            }
+          }
+          if (!Number.isFinite(delay) || delay <= 0) {
+            delay = fallbackInterval;
+          }
+          return delay;
+        });
+
         let index = 0;
-        const interval = fps && fps > 0 ? Math.max(40, Math.round(1000 / fps)) : 200;
         playbackFrame.hidden = false;
 
         const advance = () => {
-          const frame = frames[index];
+          const frame = playable[index];
           playbackFrame.src = `data:image/jpeg;base64,${frame.jpeg}`;
-          index = (index + 1) % frames.length;
-          playbackTimer = window.setTimeout(advance, interval);
+          const delay = intervals[index] ?? fallbackInterval;
+          index = (index + 1) % playable.length;
+          playbackTimer = window.setTimeout(advance, delay);
         };
 
         advance();
