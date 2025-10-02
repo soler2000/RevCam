@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from rev_cam.app import create_app
 from rev_cam.wifi import (
+    DEFAULT_HOTSPOT_PASSWORD,
     WiFiCredentialStore,
     WiFiError,
     WiFiManager,
@@ -229,6 +230,7 @@ def test_wifi_status_endpoint(client: TestClient) -> None:
     assert payload["connected"] is True
     assert payload["ssid"] == "Home"
     assert payload["hotspot_active"] is False
+    assert payload["hotspot_password"] == DEFAULT_HOTSPOT_PASSWORD
 
 
 def test_wifi_scan_endpoint(client: TestClient) -> None:
@@ -377,11 +379,11 @@ def test_wifi_hotspot_password_persisted_in_status(client: TestClient) -> None:
 
     open_hotspot = client.post("/api/wifi/hotspot", json={"enabled": True})
     assert open_hotspot.status_code == 200
-    assert open_hotspot.json()["hotspot_password"] is None
+    assert open_hotspot.json()["hotspot_password"] == DEFAULT_HOTSPOT_PASSWORD
 
     refreshed = client.get("/api/wifi/status")
     assert refreshed.status_code == 200
-    assert refreshed.json()["hotspot_password"] is None
+    assert refreshed.json()["hotspot_password"] == DEFAULT_HOTSPOT_PASSWORD
 
 
 def test_wifi_hotspot_password_persisted_across_restart(
@@ -461,7 +463,7 @@ def test_wifi_hotspot_defaults_to_revcam_without_password(client: TestClient) ->
     assert backend.hotspot_attempts
     hotspot_ssid, hotspot_password = backend.hotspot_attempts[-1]
     assert hotspot_ssid == "RevCam"
-    assert hotspot_password is None
+    assert hotspot_password == DEFAULT_HOTSPOT_PASSWORD
 
 
 def test_wifi_hotspot_permission_error(client: TestClient) -> None:

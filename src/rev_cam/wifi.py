@@ -17,6 +17,9 @@ from .mdns import MDNSAdvertiser
 from .system_log import SystemLog, SystemLogEntry
 
 
+DEFAULT_HOTSPOT_PASSWORD = "Reversing123"
+
+
 class WiFiCredentialStore:
     """Persist Wi-Fi credentials to disk for reuse across restarts."""
 
@@ -1152,6 +1155,7 @@ class WiFiManager:
         hotspot_rollback_timeout: float | None = 120.0,
         mdns_advertiser: MDNSAdvertiser | None = None,
         default_hotspot_ssid: str = "RevCam",
+        default_hotspot_password: str = DEFAULT_HOTSPOT_PASSWORD,
         credential_store: WiFiCredentialStore | None = None,
         watchdog_boot_delay: float = 30.0,
         watchdog_interval: float = 30.0,
@@ -1164,7 +1168,21 @@ class WiFiManager:
         self._poll_interval = max(0.1, poll_interval)
         self._hotspot_profile: str | None = None
         self._credentials = credential_store or WiFiCredentialStore()
-        self._hotspot_password: str | None = self._credentials.get_hotspot_password()
+        cleaned_default_password = (
+            default_hotspot_password.strip()
+            if isinstance(default_hotspot_password, str)
+            else ""
+        )
+        self._default_hotspot_password = (
+            cleaned_default_password or DEFAULT_HOTSPOT_PASSWORD
+        )
+        stored_password = self._credentials.get_hotspot_password()
+        if isinstance(stored_password, str) and stored_password.strip():
+            self._hotspot_password = stored_password.strip()
+        else:
+            self._hotspot_password = self._default_hotspot_password
+            if stored_password != self._hotspot_password:
+                self._credentials.set_hotspot_password(self._hotspot_password)
         self._hotspot_rollback_timeout = (
             self._rollback_timeout
             if hotspot_rollback_timeout is None
@@ -1543,13 +1561,28 @@ class WiFiManager:
         if isinstance(ssid, str):
             cleaned_ssid = ssid.strip()
         cleaned_ssid = cleaned_ssid or self._default_hotspot_ssid
-        if password is not None and password.strip() and len(password.strip()) < 8:
+        provided_password = (
+            password.strip() if isinstance(password, str) and password.strip() else None
+        )
+        if provided_password is not None and len(provided_password) < 8:
             raise WiFiError("Hotspot password must be at least 8 characters")
-        cleaned_password = password.strip() if isinstance(password, str) and password.strip() else None
+        if provided_password is None:
+            stored_password = (
+                self._hotspot_password.strip()
+                if isinstance(self._hotspot_password, str)
+                and self._hotspot_password.strip()
+                else None
+            )
+            cleaned_password = stored_password or self._default_hotspot_password
+        else:
+            cleaned_password = provided_password
+        if len(cleaned_password) < 8:
+            raise WiFiError("Hotspot password must be at least 8 characters")
         attempt_metadata: dict[str, object | None] = {
             "target": cleaned_ssid,
             "development_mode": development_mode,
-            "password_provided": cleaned_password is not None,
+            "password_provided": provided_password is not None,
+            "using_default_password": cleaned_password == self._default_hotspot_password,
             "default_ssid": cleaned_ssid == self._default_hotspot_ssid,
         }
         if rollback_timeout is not None:
