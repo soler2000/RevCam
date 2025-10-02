@@ -2376,6 +2376,7 @@ class WiFiManager:
 
 
 __all__ = [
+    "WiFiCredentialStore",
     "WiFiError",
     "WiFiNetwork",
     "WiFiStatus",
