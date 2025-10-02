@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>RevCam Surveillance</title>
+    <link rel="icon" type="image/svg+xml" href="images/favicon.svg" />
+    <style>
+      :root {
+        color-scheme: dark;
+        --font-family: "Inter", "Manrope", "Segoe UI", system-ui, -apple-system,
+          BlinkMacSystemFont, sans-serif;
+        --line-height: 1.6;
+        --transition: 200ms ease;
+        --surface-0: rgba(14, 16, 22, 0.9);
+        --surface-1: rgba(26, 28, 36, 0.85);
+        --surface-soft: rgba(255, 255, 255, 0.06);
+        --border-subtle: rgba(255, 255, 255, 0.08);
+        --border-muted: rgba(255, 255, 255, 0.14);
+        --text-primary: #f5f7fb;
+        --text-muted: rgba(245, 247, 250, 0.7);
+        --accent: #0a84ff;
+        --accent-hover: #2f95ff;
+        --accent-active: #55adff;
+        --accent-soft: rgba(10, 132, 255, 0.15);
+        --accent-ring: rgba(10, 132, 255, 0.45);
+        --accent-shadow: rgba(10, 132, 255, 0.35);
+        --success: #34c759;
+        --danger: #ff453a;
+        --radius-md: 0.85rem;
+        --radius-lg: 1.2rem;
+        --radius-pill: 999px;
+        --space-sm: 0.5rem;
+        --space-md: 0.9rem;
+        --space-lg: 1.4rem;
+        --space-xl: 2.1rem;
+        --shadow-sm: 0 12px 24px rgba(0, 0, 0, 0.28);
+        --shadow-md: 0 26px 46px rgba(0, 0, 0, 0.4);
+        --page-gradient: radial-gradient(115% 140% at top, #1b1e26 0%, #0b0d13 60%, #050609 100%);
+      }
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family: var(--font-family);
+        line-height: var(--line-height);
+        background: var(--page-gradient);
+        color: var(--text-primary);
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+      }
+      header,
+      footer {
+        padding: var(--space-md) var(--space-xl);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-lg);
+        background: var(--surface-0);
+        border-bottom: 1px solid var(--border-subtle);
+        backdrop-filter: blur(18px) saturate(130%);
+        -webkit-backdrop-filter: blur(18px) saturate(130%);
+        box-shadow: var(--shadow-md);
+      }
+      footer {
+        border-top: 1px solid var(--border-subtle);
+        border-bottom: none;
+        margin-top: auto;
+        justify-content: center;
+      }
+      .brand-area {
+        display: flex;
+        align-items: center;
+        gap: var(--space-lg);
+        flex-wrap: wrap;
+      }
+      strong.brand {
+        font-size: 1.3rem;
+        letter-spacing: 0.05em;
+        color: var(--success);
+      }
+      .mode-toggle {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--space-sm);
+        padding: calc(var(--space-sm) * 0.8);
+        border-radius: var(--radius-pill);
+        background: var(--surface-1);
+        border: 1px solid var(--border-muted);
+        box-shadow: var(--shadow-sm);
+      }
+      .mode-toggle-button {
+        appearance: none;
+        border: none;
+        background: transparent;
+        color: var(--text-muted);
+        font-weight: 600;
+        padding: 0.4rem var(--space-lg);
+        border-radius: var(--radius-pill);
+        cursor: pointer;
+        transition: background var(--transition), color var(--transition), box-shadow var(--transition);
+      }
+      .mode-toggle-button[aria-pressed="true"] {
+        background: var(--accent);
+        color: #fff;
+        box-shadow: 0 0 0 1px var(--accent-ring) inset, 0 10px 24px var(--accent-shadow);
+      }
+      .mode-toggle-button:not([aria-pressed="true"]):hover,
+      .mode-toggle-button:not([aria-pressed="true"]):focus-visible {
+        background: var(--surface-soft);
+        color: var(--text-primary);
+      }
+      .mode-toggle-button:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }
+      .mode-toggle-button:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+      .status-message {
+        font-weight: 600;
+        color: var(--text-muted);
+        min-width: 0;
+      }
+      .status-message[data-tone="busy"] {
+        color: var(--accent);
+      }
+      .status-message[data-tone="error"] {
+        color: var(--danger);
+      }
+      main {
+        padding: var(--space-xl);
+        display: grid;
+        grid-template-columns: minmax(280px, 1fr) minmax(260px, 320px);
+        gap: var(--space-xl);
+      }
+      .preview-card {
+        background: var(--surface-1);
+        border-radius: var(--radius-lg);
+        border: 1px solid var(--border-subtle);
+        padding: var(--space-lg);
+        box-shadow: var(--shadow-md);
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-md);
+      }
+      .preview-card img {
+        width: 100%;
+        border-radius: var(--radius-md);
+        border: 1px solid var(--border-subtle);
+        background: #000;
+        display: block;
+      }
+      .controls {
+        display: flex;
+        align-items: center;
+        gap: var(--space-sm);
+        flex-wrap: wrap;
+      }
+      button.action {
+        background: linear-gradient(135deg, var(--accent), var(--accent-hover));
+        color: #fff;
+        border: none;
+        padding: 0.65rem 1.5rem;
+        border-radius: var(--radius-pill);
+        font-weight: 600;
+        cursor: pointer;
+        transition: background var(--transition), box-shadow var(--transition), transform var(--transition);
+      }
+      button.action:not(:disabled):hover {
+        background: linear-gradient(135deg, var(--accent-hover), var(--accent-active));
+        transform: translateY(-1px);
+        box-shadow: 0 12px 24px var(--accent-shadow);
+      }
+      button.action:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+      .recordings-card {
+        background: var(--surface-1);
+        border-radius: var(--radius-lg);
+        border: 1px solid var(--border-subtle);
+        padding: var(--space-lg);
+        box-shadow: var(--shadow-md);
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-md);
+        max-height: 70vh;
+        overflow: hidden;
+      }
+      .recordings-header {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: var(--space-sm);
+      }
+      .recordings-list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-sm);
+      }
+      .recording-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-sm);
+        background: var(--surface-soft);
+        border-radius: var(--radius-md);
+        padding: var(--space-sm) var(--space-md);
+        border: 1px solid var(--border-subtle);
+      }
+      .recording-meta {
+        display: flex;
+        flex-direction: column;
+        gap: 0.2rem;
+      }
+      .recording-name {
+        font-weight: 600;
+      }
+      .recording-details {
+        color: var(--text-muted);
+        font-size: 0.85rem;
+      }
+      .open-recording {
+        background: transparent;
+        border: 1px solid var(--border-muted);
+        color: var(--text-primary);
+        border-radius: var(--radius-pill);
+        padding: 0.35rem 1rem;
+        cursor: pointer;
+        transition: border-color var(--transition), color var(--transition);
+      }
+      .open-recording:hover,
+      .open-recording:focus-visible {
+        border-color: var(--accent);
+        color: var(--accent);
+        outline: none;
+      }
+      .muted {
+        color: var(--text-muted);
+      }
+      a.link {
+        color: var(--accent);
+        text-decoration: none;
+        font-weight: 600;
+      }
+      a.link:hover,
+      a.link:focus-visible {
+        text-decoration: underline;
+      }
+      @media (max-width: 960px) {
+        main {
+          grid-template-columns: 1fr;
+        }
+        .recordings-card {
+          max-height: none;
+        }
+      }
+      @media (max-width: 640px) {
+        header,
+        footer {
+          flex-direction: column;
+          align-items: stretch;
+          text-align: center;
+        }
+        .brand-area {
+          justify-content: center;
+        }
+        main {
+          padding: var(--space-lg);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="brand-area">
+        <strong class="brand">RevCam</strong>
+        <div class="mode-toggle" data-mode-toggle role="group" aria-label="Viewing mode">
+          <button class="mode-toggle-button" type="button" data-mode="revcam" aria-pressed="false">
+            RevCam
+          </button>
+          <button class="mode-toggle-button" type="button" data-mode="surveillance" aria-pressed="true">
+            Surveillance
+          </button>
+        </div>
+      </div>
+      <div class="status-message" id="status-message" data-tone="busy">Initialising…</div>
+    </header>
+    <main>
+      <section class="preview-card">
+        <h1>Surveillance preview</h1>
+        <img id="surveillance-preview" alt="Surveillance preview" hidden />
+        <p class="muted" id="preview-message">Preparing surveillance stream…</p>
+        <div class="controls">
+          <button class="action" type="button" id="record-button" aria-pressed="false">
+            Start recording
+          </button>
+        </div>
+      </section>
+      <section class="recordings-card">
+        <div class="recordings-header">
+          <h2>Recordings</h2>
+          <button class="open-recording" type="button" id="refresh-recordings">Refresh</button>
+        </div>
+        <p class="muted" id="recordings-empty">No recordings available yet.</p>
+        <ul class="recordings-list" id="recordings-list" aria-live="polite"></ul>
+      </section>
+    </main>
+    <footer>
+      <a class="link" href="/">Back to live view</a>
+    </footer>
+    <script>
+      const statusMessage = document.getElementById("status-message");
+      const previewImage = document.getElementById("surveillance-preview");
+      const previewMessage = document.getElementById("preview-message");
+      const recordButton = document.getElementById("record-button");
+      const recordingsList = document.getElementById("recordings-list");
+      const recordingsEmpty = document.getElementById("recordings-empty");
+      const refreshButton = document.getElementById("refresh-recordings");
+      const modeToggle = document.querySelector("[data-mode-toggle]");
+      const modeButtons = modeToggle
+        ? Array.from(modeToggle.querySelectorAll(".mode-toggle-button"))
+        : [];
+      let currentMode = "surveillance";
+      let isRecording = false;
+      let previewUrl = null;
+
+      function setStatus(message, tone = "info") {
+        if (!statusMessage) {
+          return;
+        }
+        statusMessage.textContent = message;
+        statusMessage.dataset.tone = tone;
+      }
+
+      function updateModeButtons(mode) {
+        modeButtons.forEach((button) => {
+          const target = button.dataset.mode || "";
+          button.setAttribute("aria-pressed", String(target === mode));
+        });
+      }
+
+      async function changeMode(target) {
+        const desired = target === "revcam" ? "revcam" : "surveillance";
+        if (desired === currentMode) {
+          if (desired === "revcam") {
+            window.location.href = "/";
+          }
+          return;
+        }
+        modeButtons.forEach((button) => {
+          button.disabled = true;
+        });
+        updateModeButtons(desired);
+        try {
+          const response = await fetch("/api/surveillance/mode", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ mode: desired }),
+          });
+          if (!response.ok) {
+            throw new Error(`Mode update failed with ${response.status}`);
+          }
+          if (desired === "revcam") {
+            window.location.href = "/";
+            return;
+          }
+          currentMode = desired;
+          setStatus("Surveillance mode ready", "busy");
+          await loadStatus();
+        } catch (error) {
+          console.error("Viewing mode toggle error", error);
+          updateModeButtons(currentMode);
+          setStatus("Unable to update viewing mode", "error");
+        } finally {
+          modeButtons.forEach((button) => {
+            button.disabled = false;
+          });
+        }
+      }
+
+      function updatePreview(preview) {
+        if (!preview || !preview.endpoint) {
+          if (previewImage) {
+            previewImage.hidden = true;
+            previewImage.removeAttribute("src");
+          }
+          previewUrl = null;
+          previewMessage.textContent = "Preview unavailable.";
+          return;
+        }
+        const nextUrl = `${preview.endpoint}?v=${Date.now()}`;
+        if (previewUrl !== nextUrl && previewImage) {
+          previewUrl = nextUrl;
+          previewImage.src = nextUrl;
+          previewImage.hidden = false;
+        }
+        previewMessage.textContent = "Live surveillance preview.";
+      }
+
+      function updateRecordButton() {
+        if (!recordButton) {
+          return;
+        }
+        recordButton.textContent = isRecording ? "Stop recording" : "Start recording";
+        recordButton.setAttribute("aria-pressed", String(isRecording));
+      }
+
+      function renderRecordings(records) {
+        recordingsList.innerHTML = "";
+        if (!Array.isArray(records) || records.length === 0) {
+          recordingsEmpty.hidden = false;
+          return;
+        }
+        recordingsEmpty.hidden = true;
+        records.forEach((record) => {
+          const item = document.createElement("li");
+          item.className = "recording-item";
+          const meta = document.createElement("div");
+          meta.className = "recording-meta";
+          const name = document.createElement("span");
+          name.className = "recording-name";
+          name.textContent = record.name || "Recording";
+          const details = document.createElement("span");
+          details.className = "recording-details";
+          const started = record.started_at ? new Date(record.started_at) : null;
+          const durationSeconds = typeof record.duration_seconds === "number" ? record.duration_seconds : null;
+          const formatted = [
+            started ? started.toLocaleString() : null,
+            durationSeconds != null ? `${durationSeconds.toFixed(1)}s` : null,
+          ].filter(Boolean);
+          details.textContent = formatted.join(" • ") || "Pending metadata";
+          meta.appendChild(name);
+          meta.appendChild(details);
+          const open = document.createElement("button");
+          open.type = "button";
+          open.className = "open-recording";
+          open.textContent = "Open";
+          open.addEventListener("click", () => {
+            const href = `/surveillance/player?name=${encodeURIComponent(record.name)}`;
+            window.open(href, "_blank", "noopener");
+          });
+          item.appendChild(meta);
+          item.appendChild(open);
+          recordingsList.appendChild(item);
+        });
+      }
+
+      async function loadStatus() {
+        try {
+          setStatus("Loading surveillance status…", "busy");
+          const response = await fetch("/api/surveillance/status", { cache: "no-store" });
+          if (!response.ok) {
+            throw new Error(`Status request failed with ${response.status}`);
+          }
+          const payload = await response.json();
+          if (payload && typeof payload.mode === "string") {
+            currentMode = payload.mode === "surveillance" ? "surveillance" : "revcam";
+            updateModeButtons(currentMode);
+            if (currentMode !== "surveillance") {
+              window.location.replace("/");
+              return;
+            }
+          }
+          isRecording = Boolean(payload && payload.recording);
+          updateRecordButton();
+          updatePreview(payload ? payload.preview : null);
+          renderRecordings(payload && Array.isArray(payload.recordings) ? payload.recordings : []);
+          setStatus(isRecording ? "Recording" : "Surveillance ready", isRecording ? "busy" : "info");
+        } catch (error) {
+          console.error("Failed to load surveillance status", error);
+          setStatus("Unable to load surveillance status", "error");
+        }
+      }
+
+      if (recordButton) {
+        recordButton.addEventListener("click", async () => {
+          recordButton.disabled = true;
+          try {
+            const endpoint = isRecording
+              ? "/api/surveillance/recordings/stop"
+              : "/api/surveillance/recordings/start";
+            const response = await fetch(endpoint, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+            });
+            if (!response.ok) {
+              throw new Error(`Recording request failed with ${response.status}`);
+            }
+            await loadStatus();
+          } catch (error) {
+            console.error("Recording control error", error);
+            setStatus("Recording request failed", "error");
+          } finally {
+            recordButton.disabled = false;
+          }
+        });
+      }
+
+      if (refreshButton) {
+        refreshButton.addEventListener("click", () => {
+          loadStatus();
+        });
+      }
+
+      modeButtons.forEach((button) => {
+        button.addEventListener("click", () => {
+          const target = button.dataset.mode || "revcam";
+          changeMode(target).catch((error) =>
+            console.error("Viewing mode change failure", error),
+          );
+        });
+      });
+
+      loadStatus();
+    </script>
+  </body>
+</html>
