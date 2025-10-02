@@ -35,6 +35,7 @@ from .reversing_aids import create_reversing_aids_overlay
 from .sensor_fusion import Gy85KalmanFilter, SensorSample, Vector3
 from .pipeline import FramePipeline
 from .streaming import MJPEGStreamer, WebRTCManager, encode_frame_to_jpeg
+from .system_log import SystemLog
 from .version import APP_VERSION
 from .wifi import WiFiCredentialStore, WiFiError, WiFiManager
 from .trailer_leveling import evaluate_leveling
@@ -269,6 +270,23 @@ def create_app(
     else:
         i2c_bus_override = None
 
+    shared_system_log: SystemLog
+    if wifi_manager is None:
+        credentials_path = config_path.with_name("wifi_credentials.json")
+        shared_system_log = SystemLog()
+        wifi_manager = WiFiManager(
+            credential_store=WiFiCredentialStore(credentials_path),
+            system_log=shared_system_log,
+        )
+    else:
+        existing_log = getattr(wifi_manager, "system_log", None)
+        if isinstance(existing_log, SystemLog):
+            shared_system_log = existing_log
+        else:
+            shared_system_log = SystemLog()
+            if hasattr(wifi_manager, "_system_log"):
+                wifi_manager._system_log = shared_system_log
+
     battery_monitor = BatteryMonitor(
         capacity_mah=config_manager.get_battery_capacity(),
         i2c_bus=i2c_bus_override,
@@ -281,10 +299,8 @@ def create_app(
     distance_monitor = DistanceMonitor(
         i2c_bus=i2c_bus_override,
         calibration=config_manager.get_distance_calibration(),
+        system_log=shared_system_log,
     )
-    if wifi_manager is None:
-        credentials_path = config_path.with_name("wifi_credentials.json")
-        wifi_manager = WiFiManager(credential_store=WiFiCredentialStore(credentials_path))
 
     pipeline = FramePipeline(
         lambda: config_manager.get_orientation(),
@@ -372,6 +388,7 @@ def create_app(
     app.state.distance_monitor = distance_monitor
     app.state.battery_supervisor = battery_supervisor
     app.state.led_ring = led_ring
+    app.state.system_log = shared_system_log
 
     async def _set_ready_pattern() -> None:
         available = streamer is not None or webrtc_manager is not None
@@ -423,15 +440,35 @@ def create_app(
         return percent / 100.0
 
     def _record_camera_error(source: str, message: str | None) -> None:
+        previous = camera_errors.get(source)
+        cleaned: str | None
         if message:
-            camera_errors[source] = message
+            cleaned = str(message).strip()
+            camera_errors[source] = cleaned
         else:
+            cleaned = None
             camera_errors.pop(source, None)
 
         if not camera_errors:
             has_error = False
         else:
             has_error = True
+
+        if isinstance(shared_system_log, SystemLog):
+            if cleaned and cleaned != previous:
+                shared_system_log.record(
+                    "camera",
+                    "camera_error",
+                    f"Camera source {source} reported an error.",
+                    metadata={"source": source, "error": cleaned},
+                )
+            elif cleaned is None and previous is not None:
+                shared_system_log.record(
+                    "camera",
+                    "camera_recovered",
+                    f"Camera source {source} recovered.",
+                    metadata={"source": source},
+                )
 
         try:
             loop = asyncio.get_running_loop()
@@ -569,6 +606,12 @@ def create_app(
     async def startup() -> None:  # pragma: no cover - framework hook
         nonlocal camera, active_camera_choice, streamer, webrtc_manager, active_resolution
         nonlocal stream_error, webrtc_error
+        if isinstance(shared_system_log, SystemLog):
+            shared_system_log.record(
+                "system",
+                "startup",
+                "RevCam application starting up.",
+            )
         await led_ring.set_pattern("boot")
         try:
             await run_in_threadpool(wifi_manager.auto_connect_known_networks)
@@ -617,10 +660,30 @@ def create_app(
             webrtc_error = None
         await _set_ready_pattern()
         battery_supervisor.start()
+        if isinstance(shared_system_log, SystemLog):
+            startup_metadata = {
+                "camera": active_camera_choice,
+                "resolution": active_resolution.key()
+                if hasattr(active_resolution, "key")
+                else None,
+                "stream": stream_settings.to_dict(),
+            }
+            shared_system_log.record(
+                "system",
+                "startup_complete",
+                "RevCam startup sequence completed.",
+                metadata={k: v for k, v in startup_metadata.items() if v is not None},
+            )
 
     @app.on_event("shutdown")
     async def shutdown() -> None:  # pragma: no cover - framework hook
         nonlocal streamer, webrtc_manager
+        if isinstance(shared_system_log, SystemLog):
+            shared_system_log.record(
+                "system",
+                "shutdown",
+                "RevCam application shutting down.",
+            )
         await led_ring.set_pattern("boot")
         if streamer is not None:
             await streamer.aclose()
@@ -636,6 +699,13 @@ def create_app(
         if hasattr(wifi_manager, "close"):
             await run_in_threadpool(wifi_manager.close)
         await led_ring.aclose()
+        if isinstance(shared_system_log, SystemLog):
+            shared_system_log.record(
+                "system",
+                "shutdown_complete",
+                "RevCam shutdown sequence completed.",
+                metadata={"camera": active_camera_choice},
+            )
 
     @app.get("/", response_class=HTMLResponse)
     async def index() -> str:
@@ -1120,6 +1190,20 @@ def create_app(
         except WiFiError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         return status.to_dict()
+
+    @app.get("/api/logs")
+    async def get_system_log_entries(
+        limit: int = 100, category: str | None = None
+    ) -> dict[str, object]:
+        try:
+            entries = await run_in_threadpool(
+                shared_system_log.tail, limit, category=category
+            )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.warning("Unable to load system log: %s", exc)
+            raise HTTPException(status_code=503, detail="Unable to load system log") from exc
+        ordered = list(reversed(entries))
+        return {"entries": [entry.to_dict() for entry in ordered]}
 
     @app.get("/api/wifi/log")
     async def get_wifi_log(limit: int = 50) -> dict[str, object]:
