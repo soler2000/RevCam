@@ -512,6 +512,8 @@ def test_wifi_log_records_connection_and_hotspot_events(client: TestClient) -> N
     log_response = client.get("/api/wifi/log")
     assert log_response.status_code == 200
     entries = log_response.json().get("entries", [])
+    assert entries
+    assert all(entry.get("category") == "network" for entry in entries)
     events = {entry.get("event") for entry in entries}
     assert "connect_attempt" in events
     assert "connect_rollback" in events or "connect_success" in events

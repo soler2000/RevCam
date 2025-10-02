@@ -3,17 +3,18 @@
 from __future__ import annotations
 
 import logging
-from collections import deque
-from dataclasses import dataclass
 import json
 import math
 import subprocess
 import threading
 import time
 from pathlib import Path
+from collections import deque
+from dataclasses import dataclass
 from typing import Deque, Iterable, Sequence
 
 from .mdns import MDNSAdvertiser
+from .system_log import SystemLog, SystemLogEntry
 
 
 class WiFiCredentialStore:
@@ -196,29 +197,6 @@ class WiFiStatus:
             "detail": self.detail,
             "hotspot_password": self.hotspot_password,
         }
-
-
-@dataclass(slots=True)
-class WiFiLogEntry:
-    """Represents a Wi-Fi operation event for troubleshooting."""
-
-    timestamp: float
-    event: str
-    message: str
-    status: dict[str, object | None] | None = None
-    metadata: dict[str, object | None] | None = None
-
-    def to_dict(self) -> dict[str, object | None]:
-        payload: dict[str, object | None] = {
-            "timestamp": self.timestamp,
-            "event": self.event,
-            "message": self.message,
-        }
-        if self.status is not None:
-            payload["status"] = self.status
-        if self.metadata:
-            payload["metadata"] = self.metadata
-        return payload
 
 
 class WiFiBackend:
@@ -1158,7 +1136,8 @@ class WiFiManager:
         watchdog_boot_delay: float = 30.0,
         watchdog_interval: float = 30.0,
         watchdog_retry_delay: float = 5.0,
-        log_path: Path | str | None = Path("data/wifi_log.jsonl"),
+        log_path: Path | str | None = Path("data/system_log.jsonl"),
+        system_log: SystemLog | None = None,
     ) -> None:
         self._backend = backend or NMCLIBackend()
         self._rollback_timeout = rollback_timeout
@@ -1182,21 +1161,13 @@ class WiFiManager:
                     "mDNS advertising disabled: %s", exc
                 )
                 self._mdns = None
-        self._log: Deque[WiFiLogEntry] = deque(maxlen=200)
+        self._log: Deque[SystemLogEntry] = deque(maxlen=200)
         self._log_lock = threading.Lock()
-        self._log_path: Path | None
-        if log_path is None:
-            self._log_path = None
+        if isinstance(system_log, SystemLog):
+            self._system_log = system_log
         else:
-            path = Path(log_path)
-            try:
-                path.parent.mkdir(parents=True, exist_ok=True)
-            except OSError as exc:  # pragma: no cover - filesystem errors rare
-                logging.getLogger(__name__).warning("Unable to prepare Wi-Fi log directory: %s", exc)
-                self._log_path = None
-            else:
-                self._log_path = path
-                self._load_persistent_log()
+            self._system_log = SystemLog(path=log_path, max_entries=1000)
+        self._restore_network_log()
         self._watchdog_thread: threading.Thread | None = None
         self._watchdog_stop_event: threading.Event | None = None
         self._watchdog_boot_delay = max(0.0, watchdog_boot_delay)
@@ -2000,6 +1971,14 @@ class WiFiManager:
                 entries = entries[-limit_value:]
         return [entry.to_dict() for entry in reversed(entries)]
 
+    def _restore_network_log(self) -> None:
+        entries = self._system_log.tail(self._log.maxlen, category="network")
+        if not entries:
+            return
+        with self._log_lock:
+            for entry in entries:
+                self._log.append(entry)
+
     def _record_log(
         self,
         event: str,
@@ -2024,16 +2003,15 @@ class WiFiManager:
             }
         else:
             metadata_payload = None
-        entry = WiFiLogEntry(
-            timestamp=time.time(),
-            event=event,
-            message=message,
+        entry = self._system_log.record(
+            "network",
+            event,
+            message,
             status=status_payload,
             metadata=metadata_payload,
         )
         with self._log_lock:
             self._log.append(entry)
-            self._append_persistent_log(entry)
         logger = logging.getLogger(__name__)
         if metadata_payload:
             logger.info("Wi-Fi event %s: %s | metadata=%s", event, message, metadata_payload)
@@ -2047,32 +2025,6 @@ class WiFiManager:
             self._mdns.advertise(status.ip_address)
         except Exception:  # pragma: no cover - best effort logging
             logging.getLogger(__name__).debug("mDNS advertise failed", exc_info=True)
-
-    def _load_persistent_log(self) -> None:
-        if self._log_path is None or not self._log_path.exists():
-            return
-        try:
-            with self._log_path.open("r", encoding="utf-8") as handle:
-                lines = handle.readlines()
-        except OSError as exc:  # pragma: no cover - best effort logging
-            logging.getLogger(__name__).warning("Unable to load Wi-Fi event log: %s", exc)
-            return
-        restored: Deque[WiFiLogEntry] = deque(maxlen=self._log.maxlen)
-        for raw_line in lines:
-            line = raw_line.strip()
-            if not line:
-                continue
-            try:
-                payload = json.loads(line)
-            except ValueError:
-                continue
-            entry = self._deserialize_log_entry(payload)
-            if entry is not None:
-                restored.append(entry)
-        if restored:
-            with self._log_lock:
-                for entry in restored:
-                    self._log.append(entry)
 
     def _collect_hotspot_error_context(
         self,
@@ -2201,41 +2153,6 @@ class WiFiManager:
         except (TypeError, ValueError):
             return None
 
-    def _deserialize_log_entry(self, payload: object) -> WiFiLogEntry | None:
-        if not isinstance(payload, dict):
-            return None
-        event = payload.get("event")
-        message = payload.get("message")
-        timestamp = payload.get("timestamp")
-        if not isinstance(event, str) or not isinstance(message, str):
-            return None
-        try:
-            ts_value = float(timestamp) if timestamp is not None else time.time()
-        except (TypeError, ValueError):
-            ts_value = time.time()
-        status_payload = payload.get("status")
-        if not isinstance(status_payload, dict):
-            status_payload = None
-        metadata_payload = payload.get("metadata")
-        if not isinstance(metadata_payload, dict):
-            metadata_payload = None
-        return WiFiLogEntry(
-            timestamp=ts_value,
-            event=event,
-            message=message,
-            status=status_payload,
-            metadata=metadata_payload,
-        )
-
-    def _append_persistent_log(self, entry: WiFiLogEntry) -> None:
-        if self._log_path is None:
-            return
-        try:
-            with self._log_path.open("a", encoding="utf-8") as handle:
-                handle.write(json.dumps(entry.to_dict(), separators=(",", ":")) + "\n")
-        except OSError as exc:  # pragma: no cover - best effort logging
-            logging.getLogger(__name__).warning("Unable to persist Wi-Fi event log: %s", exc)
-
 
 __all__ = [
     "WiFiError",
@@ -2244,5 +2161,4 @@ __all__ = [
     "WiFiBackend",
     "NMCLIBackend",
     "WiFiManager",
-    "WiFiLogEntry",
 ]

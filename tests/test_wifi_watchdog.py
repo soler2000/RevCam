@@ -121,7 +121,7 @@ def watchdog_manager(tmp_path: Path) -> tuple[WiFiManager, WatchdogBackend, WiFi
         watchdog_boot_delay=0.02,
         watchdog_interval=0.05,
         watchdog_retry_delay=0.01,
-        log_path=(tmp_path / "watchdog" / "wifi_log.jsonl"),
+        log_path=(tmp_path / "watchdog" / "system_log.jsonl"),
     )
     return manager, backend, credentials
 
@@ -355,7 +355,7 @@ def test_watchdog_persistent_log(tmp_path: Path) -> None:
     backend = WatchdogBackend()
     base_dir = (tmp_path / "watchdog").resolve()
     credentials = WiFiCredentialStore(base_dir / "wifi.json")
-    log_path = base_dir / "wifi_log.jsonl"
+    log_path = base_dir / "system_log.jsonl"
     manager = WiFiManager(
         backend=backend,
         credential_store=credentials,
@@ -383,7 +383,10 @@ def test_watchdog_persistent_log(tmp_path: Path) -> None:
     )
     try:
         entries = restarted.get_connection_log()
-        assert any(entry["event"] == "test_event" for entry in entries)
+        assert any(
+            entry["event"] == "test_event" and entry.get("category") == "network"
+            for entry in entries
+        )
     finally:
         restarted.close()
 
@@ -417,7 +420,7 @@ def test_enable_hotspot_error_metadata(tmp_path: Path) -> None:
         watchdog_boot_delay=0.02,
         watchdog_interval=0.05,
         watchdog_retry_delay=0.01,
-        log_path=base_dir / "wifi_log.jsonl",
+        log_path=base_dir / "system_log.jsonl",
     )
     with pytest.raises(WiFiError):
         manager.enable_hotspot()
