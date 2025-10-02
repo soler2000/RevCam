@@ -484,52 +484,39 @@ class NMCLIBackend(WiFiBackend):
         interface = self._get_interface()
         connection_name = "RevCam Hotspot"
         password_provided = bool(password)
-        if password_provided:
-            args = [
-                "nmcli",
-                "device",
-                "wifi",
-                "hotspot",
-                "ifname",
+        attempt_history: list[dict[str, object | None]] | None = None
+        try:
+            attempt_history = self._prepare_hotspot_profile(
                 interface,
-                "con-name",
                 connection_name,
-                "ssid",
                 ssid,
-                "password",
-                password,
-            ]
-            self._run(args)
-        else:
-            attempt_history: list[dict[str, object | None]] | None = None
+                password if password_provided else None,
+            )
             try:
-                attempt_history = self._prepare_open_hotspot_profile(
-                    interface, connection_name, ssid
+                self._run(["nmcli", "connection", "down", connection_name])
+            except WiFiError:
+                # Connection might not be active yet; ignore and proceed.
+                pass
+            self._run(["nmcli", "connection", "up", connection_name])
+        except WiFiError as exc:
+            if (
+                attempt_history
+                and not hasattr(exc, "details")
+                and isinstance(attempt_history, list)
+            ):
+                setattr(
+                    exc,
+                    "details",
+                    {
+                        "connection": connection_name,
+                        "attempts": attempt_history,
+                    },
                 )
-                try:
-                    self._run(["nmcli", "connection", "down", connection_name])
-                except WiFiError:
-                    # Connection might not be active yet; ignore and proceed.
-                    pass
-                self._run(["nmcli", "connection", "up", connection_name])
-            except WiFiError as exc:
-                if (
-                    attempt_history
-                    and not hasattr(exc, "details")
-                    and isinstance(attempt_history, list)
-                ):
-                    setattr(
-                        exc,
-                        "details",
-                        {
-                            "connection": connection_name,
-                            "attempts": attempt_history,
-                        },
-                    )
-                wrapped = WiFiError(f"Unable to configure open hotspot: {exc}")
-                if hasattr(exc, "details"):
-                    setattr(wrapped, "details", getattr(exc, "details"))
-                raise wrapped from exc
+            descriptor = "secure" if password_provided else "open"
+            wrapped = WiFiError(f"Unable to configure {descriptor} hotspot: {exc}")
+            if hasattr(exc, "details"):
+                setattr(wrapped, "details", getattr(exc, "details"))
+            raise wrapped from exc
         status = self.get_status()
         status.profile = connection_name
         status.mode = "access-point"
@@ -939,13 +926,18 @@ class NMCLIBackend(WiFiBackend):
         diagnostics["requires_secret"] = self._security_values_require_secret(values)
         return diagnostics
 
-    def _prepare_open_hotspot_profile(
-        self, interface: str, connection_name: str, ssid: str
+    def _prepare_hotspot_profile(
+        self,
+        interface: str,
+        connection_name: str,
+        ssid: str,
+        password: str | None,
     ) -> list[dict[str, object | None]]:
-        """Rebuild the hotspot profile for an open network and clear secrets."""
+        """Rebuild the hotspot profile with shared networking."""
 
         profile_steps: list[dict[str, object | None]] = []
         configure_steps: list[dict[str, object | None]] = []
+        security_steps: list[dict[str, object | None]] = []
 
         def _clone(steps: list[dict[str, object | None]]) -> list[dict[str, object | None]]:
             return [dict(step) for step in steps]
@@ -957,6 +949,10 @@ class NMCLIBackend(WiFiBackend):
             if configure_steps:
                 attempts.append(
                     {"stage": "configure", "steps": _clone(configure_steps)}
+                )
+            if security_steps:
+                attempts.append(
+                    {"stage": "initial", "steps": _clone(security_steps)}
                 )
             return attempts
 
@@ -1004,9 +1000,11 @@ class NMCLIBackend(WiFiBackend):
             "yes",
             "ssid",
             ssid,
-            "wifi-sec.key-mgmt",
-            "none",
         ]
+        if password:
+            add_command.extend(["wifi-sec.key-mgmt", "wpa-psk"])
+        else:
+            add_command.extend(["wifi-sec.key-mgmt", "none"])
         try:
             self._run(add_command)
         except WiFiError as exc:
@@ -1081,25 +1079,74 @@ class NMCLIBackend(WiFiBackend):
                     }
                 )
 
-        security_cleared, security_attempts = self._reset_hotspot_security(
-            connection_name
-        )
-        attempts = _build_attempts()
-        attempts.append(
-            {
-                "stage": "initial",
-                "steps": [dict(step) for step in security_attempts],
-            }
-        )
-        if not security_cleared:
-            failure = WiFiError("Unable to clear hotspot security configuration")
-            setattr(
-                failure,
-                "details",
-                {"connection": connection_name, "attempts": attempts},
+        if password:
+            security_settings = [
+                ("802-11-wireless-security.key-mgmt", "wpa-psk"),
+                ("802-11-wireless-security.auth-alg", "open"),
+                ("802-11-wireless-security.proto", "rsn"),
+                ("802-11-wireless-security.group", "ccmp"),
+                ("802-11-wireless-security.pairwise", "ccmp"),
+                ("802-11-wireless-security.psk", password),
+                ("802-11-wireless-security.psk-flags", "0"),
+            ]
+            for property_name, value in security_settings:
+                command = [
+                    "nmcli",
+                    "connection",
+                    "modify",
+                    connection_name,
+                    property_name,
+                    value,
+                ]
+                try:
+                    self._run(command)
+                except WiFiError as exc:
+                    message = str(exc).strip() or None
+                    security_steps.append(
+                        {
+                            "action": "set",
+                            "property": property_name,
+                            "value": "<hidden>"
+                            if property_name.endswith(".psk")
+                            else value,
+                            "result": "error",
+                            "error": message,
+                        }
+                    )
+                    attempts = _build_attempts()
+                    setattr(
+                        exc,
+                        "details",
+                        {"connection": connection_name, "attempts": attempts},
+                    )
+                    raise
+                else:
+                    security_steps.append(
+                        {
+                            "action": "set",
+                            "property": property_name,
+                            "value": "<hidden>"
+                            if property_name.endswith(".psk")
+                            else value,
+                            "result": "success",
+                        }
+                    )
+        else:
+            security_cleared, security_attempts = self._reset_hotspot_security(
+                connection_name
             )
-            raise failure
-        return attempts
+            security_steps.extend(security_attempts)
+            if not security_cleared:
+                attempts = _build_attempts()
+                failure = WiFiError("Unable to clear hotspot security configuration")
+                setattr(
+                    failure,
+                    "details",
+                    {"connection": connection_name, "attempts": attempts},
+                )
+                raise failure
+
+        return _build_attempts()
 
     def stop_hotspot(self, profile: str | None) -> WiFiStatus:
         connection_name = profile or self._last_hotspot_profile or "RevCam Hotspot"

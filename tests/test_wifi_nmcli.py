@@ -267,7 +267,7 @@ def test_nmcli_start_hotspot_errors_when_secrets_remain(
     ] in commands
 
 
-def test_nmcli_start_hotspot_with_password_uses_nmcli_hotspot(
+def test_nmcli_start_hotspot_with_password_recreates_profile(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     backend = NMCLIBackend(interface="wlan0")
@@ -295,20 +295,49 @@ def test_nmcli_start_hotspot_with_password_uses_nmcli_hotspot(
     status = backend.start_hotspot("RevCam", "supersecret")
 
     assert status.hotspot_active is True
-    assert commands[0] == [
+    assert ["nmcli", "connection", "delete", "RevCam Hotspot"] in commands
+    assert [
         "nmcli",
-        "device",
+        "connection",
+        "add",
+        "type",
         "wifi",
-        "hotspot",
         "ifname",
         "wlan0",
         "con-name",
         "RevCam Hotspot",
+        "autoconnect",
+        "yes",
         "ssid",
         "RevCam",
-        "password",
+        "wifi-sec.key-mgmt",
+        "wpa-psk",
+    ] in commands
+    assert [
+        "nmcli",
+        "connection",
+        "modify",
+        "RevCam Hotspot",
+        "ipv4.method",
+        "shared",
+    ] in commands
+    assert [
+        "nmcli",
+        "connection",
+        "modify",
+        "RevCam Hotspot",
+        "802-11-wireless-security.key-mgmt",
+        "wpa-psk",
+    ] in commands
+    assert [
+        "nmcli",
+        "connection",
+        "modify",
+        "RevCam Hotspot",
+        "802-11-wireless-security.psk",
         "supersecret",
-    ]
+    ] in commands
+    assert ["nmcli", "connection", "up", "RevCam Hotspot"] in commands
 
 
 def test_nmcli_start_hotspot_handles_missing_security_property_errors(
