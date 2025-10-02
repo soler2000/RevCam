@@ -958,7 +958,7 @@
       .password-toggle[data-visible="false"] .icon-eye-off {
         display: none;
       }
-      #wifi-log-section {
+      #system-log-section {
         margin-top: var(--stack-gap-lg);
         padding: var(--stack-gap-lg);
         border-radius: var(--radius-lg);
@@ -968,18 +968,18 @@
         flex-direction: column;
         gap: var(--stack-gap);
       }
-      #wifi-log-section h3 {
+      #system-log-section h3 {
         margin-bottom: 0;
       }
-      #wifi-log-empty {
+      #system-log-empty {
         margin: 0;
         font-size: 0.9rem;
         color: var(--text-muted);
       }
-      #wifi-log-empty.error {
+      #system-log-empty.error {
         color: var(--danger);
       }
-      #wifi-log {
+      #system-log {
         list-style: none;
         margin: 0;
         padding: 0;
@@ -989,7 +989,7 @@
         max-height: 18rem;
         overflow-y: auto;
       }
-      #wifi-log li {
+      #system-log li {
         padding: var(--space-md) var(--space-lg);
         border-radius: var(--radius-md);
         background: var(--surface-panel);
@@ -998,22 +998,29 @@
         flex-direction: column;
         gap: var(--space-xs);
       }
-      #wifi-log li time {
+      #system-log li time {
         font-size: 0.8rem;
         color: var(--text-muted);
         letter-spacing: 0.01em;
       }
-      #wifi-log li .log-event {
+      #system-log li .log-event {
         font-size: 0.75rem;
         text-transform: uppercase;
         letter-spacing: 0.08em;
         color: var(--accent);
       }
-      #wifi-log li .log-message {
+      #system-log li .log-category {
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        font-weight: 600;
+        color: var(--text-muted);
+      }
+      #system-log li .log-message {
         font-size: 0.95rem;
         line-height: 1.5;
       }
-      #wifi-log li .log-extra {
+      #system-log li .log-extra {
         font-size: 0.8rem;
         color: var(--text-muted);
       }
@@ -1654,6 +1661,18 @@
                   tabindex="-1"
                 >
                   Network
+                </button>
+                <button
+                  type="button"
+                  class="tab-button"
+                  role="tab"
+                  id="tab-logs"
+                  aria-controls="panel-logs"
+                  aria-selected="false"
+                  data-tab="logs"
+                  tabindex="-1"
+                >
+                  Logs
                 </button>
                 <button
                   type="button"
@@ -2485,11 +2504,24 @@
                 <button type="button" id="wifi-disable-hotspot" class="secondary-button">Disable hotspot</button>
               </div>
             </section>
-            <section id="wifi-log-section">
-              <h3>Recent Wi-Fi activity</h3>
-              <p id="wifi-log-empty" class="muted">No Wi-Fi events recorded yet.</p>
-              <ol id="wifi-log"></ol>
-            </section>
+          </section>
+        </section>
+
+        <section
+          id="panel-logs"
+          class="tab-panel"
+          role="tabpanel"
+          aria-labelledby="tab-logs"
+          data-tab="logs"
+          hidden
+        >
+          <section id="system-log-section" class="card">
+            <h2>System log</h2>
+            <p class="muted helper-text">
+              Persistent network, camera, distance, and startup events recorded for troubleshooting.
+            </p>
+            <p id="system-log-empty" class="muted">No system events recorded yet.</p>
+            <ol id="system-log"></ol>
           </section>
         </section>
 
@@ -3256,8 +3288,8 @@
       const DEFAULT_HOTSPOT_SSID = "RevCam";
       const wifiEnableHotspot = document.getElementById("wifi-enable-hotspot");
       const wifiDisableHotspot = document.getElementById("wifi-disable-hotspot");
-      const wifiLogList = document.getElementById("wifi-log");
-      const wifiLogEmpty = document.getElementById("wifi-log-empty");
+      const systemLogList = document.getElementById("system-log");
+      const systemLogEmpty = document.getElementById("system-log-empty");
       const wifiConnectSsidInput = wifiConnectForm
         ? wifiConnectForm.querySelector('input[name="ssid"]')
         : null;
@@ -3272,9 +3304,9 @@
       if (wifiHotspotSsid && !wifiHotspotSsid.value) {
         wifiHotspotSsid.value = DEFAULT_HOTSPOT_SSID;
       }
-      const WIFI_LOG_DEFAULT_EMPTY_MESSAGE = wifiLogEmpty
-        ? wifiLogEmpty.textContent || "No Wi-Fi events recorded yet."
-        : "No Wi-Fi events recorded yet.";
+      const SYSTEM_LOG_DEFAULT_EMPTY_MESSAGE = systemLogEmpty
+        ? systemLogEmpty.textContent || "No system events recorded yet."
+        : "No system events recorded yet.";
 
       function setHotspotPasswordVisibility(visible) {
         if (!wifiHotspotPassword || !wifiHotspotPasswordToggle) {
@@ -6866,31 +6898,31 @@
         return parts.join(" • ");
       }
 
-      function setWifiLogEmpty(message, isError = false) {
-        if (!wifiLogEmpty) {
+      function setSystemLogEmpty(message, isError = false) {
+        if (!systemLogEmpty) {
           return;
         }
-        wifiLogEmpty.hidden = false;
-        wifiLogEmpty.textContent = message || WIFI_LOG_DEFAULT_EMPTY_MESSAGE;
+        systemLogEmpty.hidden = false;
+        systemLogEmpty.textContent = message || SYSTEM_LOG_DEFAULT_EMPTY_MESSAGE;
         if (isError) {
-          wifiLogEmpty.classList.add("error");
+          systemLogEmpty.classList.add("error");
         } else {
-          wifiLogEmpty.classList.remove("error");
+          systemLogEmpty.classList.remove("error");
         }
       }
 
-      function renderWifiLog(entries) {
-        if (!wifiLogList) {
+      function renderSystemLog(entries) {
+        if (!systemLogList) {
           return;
         }
-        wifiLogList.innerHTML = "";
+        systemLogList.innerHTML = "";
         if (!Array.isArray(entries) || entries.length === 0) {
-          setWifiLogEmpty(WIFI_LOG_DEFAULT_EMPTY_MESSAGE, false);
+          setSystemLogEmpty(SYSTEM_LOG_DEFAULT_EMPTY_MESSAGE, false);
           return;
         }
-        if (wifiLogEmpty) {
-          wifiLogEmpty.hidden = true;
-          wifiLogEmpty.classList.remove("error");
+        if (systemLogEmpty) {
+          systemLogEmpty.hidden = true;
+          systemLogEmpty.classList.remove("error");
         }
         for (const entry of entries) {
           const item = document.createElement("li");
@@ -6908,6 +6940,11 @@
             }
             header.appendChild(timeEl);
           }
+          const categoryEl = document.createElement("span");
+          categoryEl.className = "log-category";
+          const categoryValue = entry && entry.category ? String(entry.category) : "general";
+          categoryEl.textContent = categoryValue;
+          header.appendChild(categoryEl);
           const eventEl = document.createElement("span");
           eventEl.className = "log-event";
           eventEl.textContent = entry && entry.event ? String(entry.event) : "event";
@@ -6931,26 +6968,26 @@
             statusEl.textContent = statusText;
             item.appendChild(statusEl);
           }
-          wifiLogList.appendChild(item);
+          systemLogList.appendChild(item);
         }
       }
 
-      async function refreshWifiLog() {
-        if (!wifiLogList) {
+      async function refreshSystemLog() {
+        if (!systemLogList) {
           return;
         }
         try {
-          const response = await fetch("/api/wifi/log?limit=50", { cache: "no-store" });
+          const response = await fetch("/api/logs?limit=100", { cache: "no-store" });
           if (!response.ok) {
-            throw new Error("Unable to load Wi-Fi log.");
+            throw new Error("Unable to load system log.");
           }
           const data = await response.json();
           const entries = Array.isArray(data.entries) ? data.entries : [];
-          renderWifiLog(entries);
+          renderSystemLog(entries);
         } catch (err) {
           console.error(err);
-          renderWifiLog([]);
-          setWifiLogEmpty("Unable to load Wi-Fi log.", true);
+          renderSystemLog([]);
+          setSystemLogEmpty("Unable to load system log.", true);
         }
       }
 
@@ -7197,7 +7234,7 @@
             wifiSummary.textContent = message;
           }
         } finally {
-          await refreshWifiLog();
+          await refreshSystemLog();
         }
         return status;
       }

@@ -549,6 +549,7 @@ class NMCLIBackend(WiFiBackend):
 
         logger = logging.getLogger(__name__)
         steps: list[dict[str, object | None]] = []
+        removal_success = False
         try:
             self._run(
                 [
@@ -561,7 +562,7 @@ class NMCLIBackend(WiFiBackend):
             )
         except WiFiError as exc:
             message = str(exc).strip() or None
-            if self._is_missing_security_property_error(message):
+            if self._is_missing_security_setting_error(message):
                 steps.append(
                     {
                         "property": property_name,
@@ -576,21 +577,22 @@ class NMCLIBackend(WiFiBackend):
                     connection_name,
                     message,
                 )
-                return True, steps
-            steps.append(
-                {
-                    "property": property_name,
-                    "action": "remove",
-                    "result": "error",
-                    "error": message,
-                }
-            )
-            logger.debug(
-                "Unable to remove hotspot security property %s from %s: %s",
-                property_name,
-                connection_name,
-                message,
-            )
+                removal_success = True
+            else:
+                steps.append(
+                    {
+                        "property": property_name,
+                        "action": "remove",
+                        "result": "error",
+                        "error": message,
+                    }
+                )
+                logger.debug(
+                    "Unable to remove hotspot security property %s from %s: %s",
+                    property_name,
+                    connection_name,
+                    message,
+                )
         else:
             steps.append(
                 {
@@ -599,9 +601,9 @@ class NMCLIBackend(WiFiBackend):
                     "result": "success",
                 }
             )
-            return True, steps
+            removal_success = True
         if fallback_value is None:
-            return False, steps
+            return removal_success, steps
         try:
             self._run(
                 [
@@ -647,6 +649,11 @@ class NMCLIBackend(WiFiBackend):
         if not message:
             return False
         normalized = message.strip().lower()
+        if (
+            "value for '-802-11-wireless-security" in normalized
+            and "missing" in normalized
+        ):
+            return True
         return any(
             token in normalized
             for token in (
@@ -658,6 +665,17 @@ class NMCLIBackend(WiFiBackend):
                 "property is not found",
             )
         )
+
+    @staticmethod
+    def _is_missing_security_setting_error(message: str | None) -> bool:
+        if not message:
+            return False
+        normalized = message.strip().lower()
+        if NMCLIBackend._is_missing_security_property_error(message):
+            return True
+        if "invalid <setting>." in normalized and "802-11-wireless-security" in normalized:
+            return True
+        return False
 
     def _fetch_connection_security_fields(
         self, connection_name: str
@@ -757,12 +775,12 @@ class NMCLIBackend(WiFiBackend):
         cleared_any = False
         for property_name, fallback in (
             ("802-11-wireless-security.auth-alg", "open"),
-            ("802-11-wireless-security.psk", None),
+            ("802-11-wireless-security.psk", ""),
             ("802-11-wireless-security.psk-flags", "0"),
-            ("802-11-wireless-security.wep-key0", None),
-            ("802-11-wireless-security.wep-key1", None),
-            ("802-11-wireless-security.wep-key2", None),
-            ("802-11-wireless-security.wep-key3", None),
+            ("802-11-wireless-security.wep-key0", ""),
+            ("802-11-wireless-security.wep-key1", ""),
+            ("802-11-wireless-security.wep-key2", ""),
+            ("802-11-wireless-security.wep-key3", ""),
             ("802-11-wireless-security.wep-key-flags", "0"),
             ("802-11-wireless-security.wep-key-type", None),
             ("802-11-wireless-security.wep-tx-keyidx", "0"),
@@ -1179,6 +1197,12 @@ class WiFiManager:
             initial_status = None
         if initial_status:
             self._update_mdns(initial_status)
+
+    @property
+    def system_log(self) -> SystemLog:
+        """Expose the shared system log instance."""
+
+        return self._system_log
 
     # ------------------------------ operations -----------------------------
     def get_status(self) -> WiFiStatus:

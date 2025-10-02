@@ -258,11 +258,15 @@ def test_wifi_scan_marks_stored_credentials(tmp_path: Path) -> None:
     assert any(network.ssid == "Home" and network.stored_credentials for network in networks)
 
 
-def test_wifi_log_endpoint_initially_empty(client: TestClient) -> None:
-    response = client.get("/api/wifi/log")
+def test_system_log_endpoint_includes_startup(client: TestClient) -> None:
+    response = client.get("/api/logs")
     assert response.status_code == 200
     payload = response.json()
-    assert payload == {"entries": []}
+    entries = payload.get("entries", [])
+    assert entries
+    events = {entry.get("event") for entry in entries}
+    assert "startup" in events or "startup_complete" in events
+    assert any(entry.get("category") == "system" for entry in entries)
 
 
 def test_wifi_connect_development_mode_rolls_back(client: TestClient) -> None:
@@ -519,6 +523,13 @@ def test_wifi_log_records_connection_and_hotspot_events(client: TestClient) -> N
     assert "connect_rollback" in events or "connect_success" in events
     assert "hotspot_enable_attempt" in events
     assert "hotspot_disabled" in events
+
+    system_response = client.get("/api/logs")
+    assert system_response.status_code == 200
+    system_entries = system_response.json().get("entries", [])
+    system_events = {entry.get("event") for entry in system_entries}
+    assert "connect_attempt" in system_events
+    assert "hotspot_enable_attempt" in system_events
 
 
 def test_wifi_network_password_reused_from_store(tmp_path: Path) -> None:
