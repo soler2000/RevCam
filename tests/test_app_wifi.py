@@ -559,6 +559,64 @@ def test_wifi_network_password_reused_from_store(tmp_path: Path) -> None:
     assert new_backend.connect_attempts[-1] == ("Cafe", "beanjuice123")
 
 
+def test_connect_waits_for_ip_before_returning(
+    tmp_path: Path,
+    mdns_advertiser: FakeMDNSAdvertiser,
+) -> None:
+    class _DelayedIPBackend(FakeWiFiBackend):
+        def __init__(self) -> None:
+            super().__init__()
+            self._pending_statuses: list[WiFiStatus] = []
+
+        def connect(self, ssid: str, password: str | None) -> WiFiStatus:
+            self.connect_attempts.append((ssid, password))
+            self.status = WiFiStatus(
+                connected=True,
+                ssid=ssid,
+                signal=60,
+                ip_address=None,
+                mode="station",
+                hotspot_active=False,
+                profile=ssid,
+                detail="Waiting for network address",
+            )
+            self._pending_statuses = [
+                WiFiStatus(
+                    connected=True,
+                    ssid=ssid,
+                    signal=60,
+                    ip_address="10.0.0.5",
+                    mode="station",
+                    hotspot_active=False,
+                    profile=ssid,
+                    detail="Network address acquired",
+                )
+            ]
+            return self.status
+
+        def get_status(self) -> WiFiStatus:
+            if self._pending_statuses:
+                self.status = self._pending_statuses.pop(0)
+            return self.status
+
+    backend = _DelayedIPBackend()
+    manager = WiFiManager(
+        backend=backend,
+        rollback_timeout=0.05,
+        poll_interval=0.001,
+        hotspot_rollback_timeout=0.05,
+        mdns_advertiser=mdns_advertiser,
+        credential_store=WiFiCredentialStore(tmp_path / "wifi_credentials.json"),
+    )
+
+    status = manager.connect("Office", "letmein")
+
+    assert status.ip_address == "10.0.0.5"
+    assert mdns_advertiser.calls
+    assert any(call is None for call in mdns_advertiser.calls)
+    assert mdns_advertiser.calls[-1] == "10.0.0.5"
+
+
 def test_auto_connect_prefers_strongest_known_network(
     tmp_path: Path,
     wifi_backend: FakeWiFiBackend,

@@ -1494,6 +1494,17 @@ class WiFiManager:
                 pass
         status = self._apply_hotspot_password(status)
         self._update_mdns(status)
+        if status.connected and not status.hotspot_active and not status.ip_address:
+            sync_timeout = min(0.5, max(self._poll_interval * 2, 0.1))
+            awaited = self._await_station_ip(
+                initial_status=status,
+                timeout=sync_timeout,
+                sleep_interval=self._poll_interval,
+            )
+            if isinstance(awaited, WiFiStatus):
+                status = awaited
+            if status.connected and not status.hotspot_active and not status.ip_address:
+                self._schedule_ip_refresh(initial_status=status)
         rollback_requested = development_mode or (rollback_timeout is not None)
         effective_timeout = None
         if development_mode:
@@ -2057,6 +2068,75 @@ class WiFiManager:
         if update_mdns:
             self._update_mdns(status)
         return status
+
+    def _await_station_ip(
+        self,
+        *,
+        initial_status: WiFiStatus | None = None,
+        timeout: float | None = None,
+        sleep_interval: float | None = None,
+    ) -> WiFiStatus | None:
+        """Poll for an IP address after connecting to a network.
+
+        Some successful joins report connectivity before DHCP assigns an
+        address. Polling lets us refresh mDNS advertisements as soon as the
+        lease arrives so controller devices can rediscover the camera.
+        """
+
+        if timeout is None:
+            timeout = max(5.0, self._poll_interval * 5)
+        if timeout <= 0:
+            return initial_status
+        deadline = time.monotonic() + timeout
+        last_status = initial_status
+        interval = sleep_interval if sleep_interval is not None else self._poll_interval
+        interval = max(0.001, interval)
+        while time.monotonic() < deadline:
+            time.sleep(interval)
+            try:
+                candidate = self._fetch_status(update_mdns=True)
+            except WiFiError:
+                continue
+            last_status = candidate
+            if (
+                candidate.ip_address
+                or not candidate.connected
+                or candidate.hotspot_active
+            ):
+                return candidate
+        return last_status
+
+    def _schedule_ip_refresh(
+        self,
+        *,
+        initial_status: WiFiStatus,
+        timeout: float | None = None,
+    ) -> None:
+        """Refresh the connection status in the background until IP assigned."""
+
+        if timeout is None:
+            timeout = 5.0
+        if timeout <= 0:
+            return
+
+        def _worker() -> None:
+            try:
+                self._await_station_ip(
+                    initial_status=initial_status,
+                    timeout=timeout,
+                    sleep_interval=max(self._poll_interval, 0.25),
+                )
+            except Exception:  # pragma: no cover - defensive thread guard
+                logging.getLogger(__name__).debug(
+                    "Background IP refresh failed", exc_info=True
+                )
+
+        thread = threading.Thread(
+            target=_worker,
+            name="wifi-ip-refresh",
+            daemon=True,
+        )
+        thread.start()
 
     def _apply_hotspot_password(self, status: WiFiStatus | None) -> WiFiStatus:
         if isinstance(status, WiFiStatus):
