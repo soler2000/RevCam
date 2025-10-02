@@ -98,6 +98,23 @@ def test_nmcli_start_hotspot_opens_network_without_password(
     assert [
         "nmcli",
         "connection",
+        "add",
+        "type",
+        "wifi",
+        "ifname",
+        "wlan0",
+        "con-name",
+        "RevCam Hotspot",
+        "autoconnect",
+        "yes",
+        "ssid",
+        "RevCam",
+        "wifi-sec.key-mgmt",
+        "none",
+    ] in commands
+    assert [
+        "nmcli",
+        "connection",
         "modify",
         "RevCam Hotspot",
         "-802-11-wireless-security",
@@ -169,6 +186,23 @@ def test_nmcli_start_hotspot_open_network_fallback(monkeypatch: pytest.MonkeyPat
     assert [
         "nmcli",
         "connection",
+        "add",
+        "type",
+        "wifi",
+        "ifname",
+        "wlan0",
+        "con-name",
+        "RevCam Hotspot",
+        "autoconnect",
+        "yes",
+        "ssid",
+        "RevCam",
+        "wifi-sec.key-mgmt",
+        "none",
+    ] in commands
+    assert [
+        "nmcli",
+        "connection",
         "modify",
         "RevCam Hotspot",
         "802-11-wireless-security.key-mgmt",
@@ -228,6 +262,8 @@ def test_nmcli_start_hotspot_errors_when_secrets_remain(
         "yes",
         "ssid",
         "RevCam",
+        "wifi-sec.key-mgmt",
+        "none",
     ] in commands
 
 

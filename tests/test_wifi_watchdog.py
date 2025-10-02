@@ -307,6 +307,7 @@ def test_watchdog_reports_failure_when_hotspot_errors(
             assert metadata.get("attempt") == index
             assert metadata.get("trigger") == "watchdog"
             assert "error_details" in metadata
+            assert "error_details_json" in metadata
             assert metadata["error_details"]["connection"] == "RevCam Hotspot"
             diag_state = metadata.get("diagnostics", {}).get("state")
             assert diag_state in {"first-attempt", "second-attempt"}
@@ -314,6 +315,25 @@ def test_watchdog_reports_failure_when_hotspot_errors(
             summary = metadata.get("diagnostics_summary")
             assert isinstance(summary, str) and summary
             assert "initial" in summary
+            requires_secret_step = False
+            error_details = metadata.get("error_details")
+            attempts_payload = []
+            if isinstance(error_details, dict):
+                attempts_payload = error_details.get("attempts", []) or []
+            for attempt in attempts_payload:
+                if not isinstance(attempt, dict):
+                    continue
+                for step in attempt.get("steps", []) or []:
+                    if not isinstance(step, dict):
+                        continue
+                    if step.get("error") == "hotspot security still expects secrets":
+                        requires_secret_step = True
+                        break
+                if requires_secret_step:
+                    break
+            if requires_secret_step:
+                assert "hotspot security still expects secrets" in summary
+            assert "diagnostics_json" in metadata
         assert diag_states
         assert diag_states.issubset({"first-attempt", "second-attempt"})
         final_entry = next(
@@ -325,6 +345,8 @@ def test_watchdog_reports_failure_when_hotspot_errors(
         assert isinstance(attempts, list) and len(attempts) >= 2
         assert attempts[0].get("attempt") == 1
         assert attempts[1].get("attempt") == 2
+        assert "diagnostics_json" in final_metadata
+        assert "error_details_json" in final_metadata
     finally:
         manager.close()
 

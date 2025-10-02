@@ -849,21 +849,23 @@ class NMCLIBackend(WiFiBackend):
             )
             return success, attempts
         requires_secret = self._security_values_require_secret(values)
-        attempts.append(
-            {
-                "connection": connection_name,
-                "action": "inspect",
-                "result": "success",
-                "values": values,
-                "requires_secret": requires_secret,
-            }
-        )
+        inspect_step: dict[str, object | None] = {
+            "connection": connection_name,
+            "action": "inspect",
+            "values": values,
+            "requires_secret": requires_secret,
+        }
         if requires_secret:
+            inspect_step["result"] = "error"
+            inspect_step["error"] = "hotspot security still expects secrets"
             logger.debug(
                 "Hotspot connection %s still references secrets after reset",
                 connection_name,
             )
+            attempts.append(inspect_step)
             return False, attempts
+        inspect_step["result"] = "success"
+        attempts.append(inspect_step)
         return True, attempts
 
     @staticmethod
@@ -1001,6 +1003,8 @@ class NMCLIBackend(WiFiBackend):
             "yes",
             "ssid",
             ssid,
+            "wifi-sec.key-mgmt",
+            "none",
         ]
         try:
             self._run(add_command)
@@ -1935,7 +1939,21 @@ class WiFiManager:
             current_status = self._fetch_status(update_mdns=False)
         except WiFiError:
             current_status = None
-        final_metadata = {"attempts": failure_attempts} if failure_attempts else None
+        final_metadata: dict[str, object | None] | None = None
+        if failure_attempts:
+            final_metadata = {"attempts": failure_attempts}
+            latest = failure_attempts[-1]
+            if isinstance(latest, dict):
+                for key in (
+                    "diagnostics_summary",
+                    "diagnostics",
+                    "diagnostics_json",
+                    "error_details",
+                    "error_details_json",
+                ):
+                    value = latest.get(key) if latest else None
+                    if value is not None:
+                        final_metadata.setdefault(key, value)
         self._record_log(
             "hotspot_watchdog_hotspot_failed",
             "Hotspot could not be enabled after watchdog retries.",
@@ -2067,6 +2085,9 @@ class WiFiManager:
         details = getattr(exc, "details", None)
         if details:
             metadata["error_details"] = details
+            stringified = self._stringify_metadata(details)
+            if stringified:
+                metadata.setdefault("error_details_json", stringified)
         diagnostics: dict[str, object | None] | None = None
         backend_diag = getattr(self._backend, "hotspot_diagnostics", None)
         if callable(backend_diag):
@@ -2079,6 +2100,9 @@ class WiFiManager:
                 diagnostics = None
         if diagnostics:
             metadata.setdefault("diagnostics", diagnostics)
+            diag_string = self._stringify_metadata(diagnostics)
+            if diag_string:
+                metadata.setdefault("diagnostics_json", diag_string)
         summary = self._summarize_hotspot_error_context(metadata)
         if summary:
             metadata.setdefault("diagnostics_summary", summary)
@@ -2169,6 +2193,13 @@ class WiFiManager:
         if not pieces:
             return None
         return ", ".join(pieces)
+
+    @staticmethod
+    def _stringify_metadata(value: object) -> str | None:
+        try:
+            return json.dumps(value, indent=2, sort_keys=True)
+        except (TypeError, ValueError):
+            return None
 
     def _deserialize_log_entry(self, payload: object) -> WiFiLogEntry | None:
         if not isinstance(payload, dict):
