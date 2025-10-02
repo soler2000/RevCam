@@ -11,6 +11,8 @@ from statistics import median
 from threading import Event, Lock, Thread, current_thread
 from typing import Callable, Deque
 
+from .system_log import SystemLog
+
 try:  # pragma: no cover - optional dependency on numpy for overlays
     import numpy as _np
 except ImportError:  # pragma: no cover - optional dependency
@@ -140,6 +142,7 @@ class DistanceMonitor:
         max_distance_m: float = 8.0,
         update_interval: float = 0.05,
         auto_start: bool = True,
+        system_log: SystemLog | None = None,
     ) -> None:
         if not (0.0 < smoothing_alpha <= 1.0):
             raise ValueError("smoothing_alpha must be between 0 and 1")
@@ -172,6 +175,7 @@ class DistanceMonitor:
         self._stop_event = Event()
         self._sampling_thread: Thread | None = None
         self._auto_start = bool(auto_start)
+        self._system_log = system_log
         if calibration is None:
             self._calibration = DistanceCalibration()
         else:
@@ -362,8 +366,16 @@ class DistanceMonitor:
         self._release_owned_i2c_bus()
 
     def _clear_error_state(self) -> None:
+        previous_error = self._last_error
         self._last_error = None
         self._last_logged_error = None
+        if previous_error and isinstance(self._system_log, SystemLog):
+            self._system_log.record(
+                "distance",
+                "distance_recovered",
+                "Distance monitor recovered.",
+                metadata={"previous_error": previous_error},
+            )
 
     def _record_error(
         self, message: str, *, level: int = logging.ERROR, exc_info: bool = False
@@ -374,6 +386,13 @@ class DistanceMonitor:
         self._last_error = detail
         if detail != self._last_logged_error:
             self._logger.log(level, detail, exc_info=exc_info)
+            if isinstance(self._system_log, SystemLog):
+                self._system_log.record(
+                    "distance",
+                    "distance_error",
+                    detail,
+                    metadata={"thread": current_thread().name},
+                )
             self._last_logged_error = detail
         return detail
 
