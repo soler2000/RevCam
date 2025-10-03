@@ -190,3 +190,9 @@ def test_surveillance_status_storage(client: TestClient) -> None:
     resume_state = payload.get("resume_state")
     assert isinstance(resume_state, dict)
     assert resume_state.get("mode") in {"revcam", "surveillance"}
+
+
+def test_surveillance_timeline_page(client: TestClient) -> None:
+    response = client.get("/surveillance/timeline")
+    assert response.status_code == 200
+    assert "Recording timeline" in response.text

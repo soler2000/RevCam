@@ -199,6 +199,12 @@
         justify-content: space-between;
         gap: var(--space-sm);
       }
+      .recordings-actions {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--space-sm);
+        flex-wrap: wrap;
+      }
       .recordings-list {
         list-style: none;
         margin: 0;
@@ -248,6 +254,10 @@
         padding: 0.35rem 1rem;
         cursor: pointer;
         transition: border-color var(--transition), color var(--transition);
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        text-decoration: none;
       }
       .open-recording:hover,
       .open-recording:focus-visible {
@@ -347,7 +357,14 @@
       <section class="recordings-card">
         <div class="recordings-header">
           <h2>Recordings</h2>
-          <button class="open-recording" type="button" id="refresh-recordings">Refresh</button>
+          <div class="recordings-actions">
+            <a class="open-recording" href="/surveillance/timeline" role="button"
+              >Timeline view</a
+            >
+            <button class="open-recording" type="button" id="refresh-recordings">
+              Refresh
+            </button>
+          </div>
         </div>
         <p class="muted" id="recordings-empty">No recordings available yet.</p>
         <ul class="recordings-list" id="recordings-list" aria-live="polite"></ul>
