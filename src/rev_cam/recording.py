@@ -236,6 +236,7 @@ class MotionDetector:
     _recorded_frames: int = field(init=False, default=0)
     _decimation_drops: int = field(init=False, default=0)
     _decimation_remaining: int = field(init=False, default=0)
+    _last_trigger_was_motion: bool = field(init=False, default=False)
 
     def __post_init__(self) -> None:
         self.enabled = bool(self.enabled)
@@ -286,6 +287,7 @@ class MotionDetector:
         self._recorded_frames = 0
         self._decimation_drops = 0
         self._decimation_remaining = 0
+        self._last_trigger_was_motion = False
 
     def should_record(self, frame, timestamp: float) -> bool:
         """Return ``True`` when the frame should be persisted."""
@@ -293,14 +295,17 @@ class MotionDetector:
         if not self.enabled or _np is None:
             self._last_active_monotonic = timestamp
             self._paused = False
+            self._last_trigger_was_motion = True
             return True
 
         try:
             array = _np.asarray(frame)
         except Exception:  # pragma: no cover - defensive guard
+            self._last_trigger_was_motion = False
             return True
 
         if array.size == 0:
+            self._last_trigger_was_motion = False
             return True
 
         if array.ndim == 3:
@@ -322,6 +327,7 @@ class MotionDetector:
             self._last_active_monotonic = timestamp
             self._paused = False
             self._decimation_remaining = max(0, self.frame_decimation - 1)
+            self._last_trigger_was_motion = False
             return True
 
         difference = _np.abs(sample - previous)
@@ -332,6 +338,7 @@ class MotionDetector:
             if self._paused:
                 self._paused = False
                 self._decimation_remaining = 0
+            self._last_trigger_was_motion = True
         else:
             last_active = self._last_active_monotonic
             if last_active is None:
@@ -342,7 +349,9 @@ class MotionDetector:
                     self._pause_events += 1
                 self._decimation_remaining = 0
                 self._skipped_frames += 1
+                self._last_trigger_was_motion = False
                 return False
+            self._last_trigger_was_motion = False
 
         if self.frame_decimation > 1:
             if self._decimation_remaining > 0:
@@ -373,6 +382,11 @@ class MotionDetector:
             "recorded_frames": int(self._recorded_frames),
             "decimation_drops": int(self._decimation_drops),
         }
+
+    def triggered_motion(self) -> bool:
+        """Return ``True`` when the most recent frame triggered motion detection."""
+
+        return bool(self._last_trigger_was_motion)
 
     def _calculate_threshold(self) -> float:
         # Larger sensitivity lowers the activity threshold.
@@ -435,6 +449,7 @@ class RecordingManager:
     motion_sensitivity: int = 50
     motion_inactivity_timeout_seconds: float = 2.5
     motion_frame_decimation: int = 1
+    motion_post_event_seconds: float = 2.0
     on_stop: Callable[[dict[str, object]], Awaitable[None]] | None = None
     _subscribers: set[asyncio.Queue[bytes]] = field(init=False, default_factory=set)
     _producer_task: asyncio.Task[None] | None = field(init=False, default=None)
@@ -466,9 +481,17 @@ class RecordingManager:
     _last_finalised_metadata: dict[str, object] | None = field(
         init=False, default=None
     )
+    _active_finalise_tasks: set[asyncio.Task[dict[str, object]]] = field(
+        init=False, default_factory=set
+    )
     _session_motion_override: bool = field(init=False, default=False)
     _active_motion_enabled: bool = field(init=False, default=False)
     _motion_state: str | None = field(init=False, default=None)
+    _motion_event_base: str | None = field(init=False, default=None)
+    _motion_event_index: int = field(init=False, default=0)
+    _current_motion_event_index: int = field(init=False, default=0)
+    _motion_event_active: bool = field(init=False, default=False)
+    _motion_event_pending_stop: float | None = field(init=False, default=None)
 
     def __post_init__(self) -> None:
         if self.fps <= 0:
@@ -486,6 +509,9 @@ class RecordingManager:
         )
         self.motion_frame_decimation = MotionDetector._normalise_frame_decimation(
             self.motion_frame_decimation
+        )
+        self.motion_post_event_seconds = self._normalise_post_event_duration(
+            self.motion_post_event_seconds
         )
         self._motion_detector = MotionDetector(
             enabled=self.motion_detection_enabled,
@@ -505,8 +531,9 @@ class RecordingManager:
 
     @property
     def is_processing(self) -> bool:
-        task = self._finalise_task
-        return task is not None and not task.done()
+        if not self._active_finalise_tasks:
+            return False
+        return any(not task.done() for task in list(self._active_finalise_tasks))
 
     @property
     def motion_session_active(self) -> bool:
@@ -554,9 +581,24 @@ class RecordingManager:
             self._chunk_write_tasks.clear()
             self._chunk_index = 0
             self._total_frame_count = 0
-            self._recording_started_at = started_at
-            self._recording_started_monotonic = monotonic
-            self._recording_name = name
+            if motion_enabled and self._session_motion_override:
+                self._motion_event_base = name
+                self._motion_event_index = 0
+                self._current_motion_event_index = 0
+                self._motion_event_active = False
+                self._motion_event_pending_stop = None
+                self._recording_started_at = None
+                self._recording_started_monotonic = None
+                self._recording_name = None
+            else:
+                self._motion_event_base = None
+                self._motion_event_index = 0
+                self._current_motion_event_index = 0
+                self._motion_event_active = False
+                self._motion_event_pending_stop = None
+                self._recording_started_at = started_at
+                self._recording_started_monotonic = monotonic
+                self._recording_name = name
             self._thumbnail = None
             self._next_stop_reason = None
             self._cancel_auto_stop_task()
@@ -566,73 +608,36 @@ class RecordingManager:
         return {"name": name, "started_at": started_at.isoformat()}
 
     async def stop_recording(self) -> dict[str, object]:
-        pending_flush: tuple[str, int, list[dict[str, object]]] | None = None
-        total_frames = 0
-        thumbnail: str | None
-        stop_reason: str | None
+        base_name: str | None = None
+        motion_events_recorded = 0
+        context: _FinaliseContext | None
+        stop_reason: str | None = None
         async with self._state_lock:
             if not self._recording_active:
                 raise RuntimeError("No recording in progress")
-            name = self._recording_name or _utcnow().strftime("%Y%m%d-%H%M%S")
-            started_at = self._recording_started_at or _utcnow()
-            thumbnail = self._thumbnail
+            base_name = self._recording_name or self._motion_event_base
+            motion_events_recorded = self._motion_event_index
             stop_reason = self._next_stop_reason
-            total_frames = self._total_frame_count
-            pending_flush = self._pop_active_chunk_locked()
-            self._recording_active = False
-            self._recording_started_at = None
-            self._recording_started_monotonic = None
-            self._recording_name = None
-            self._thumbnail = None
-            self._next_stop_reason = None
-            self._session_motion_override = False
-            self._active_motion_enabled = False
-            self._motion_state = None
-            self._cancel_auto_stop_task()
-            self._total_frame_count = 0
-            self._chunk_index = 0
-        if pending_flush is not None:
-            await self._persist_chunk(*pending_flush)
-
-        chunk_tasks = list(self._chunk_write_tasks)
-        self._chunk_write_tasks.clear()
-
-        finished_at = _utcnow()
-        duration = max(0.0, (finished_at - started_at).total_seconds())
-        base_metadata: dict[str, object] = {
-            "name": name,
-            "started_at": started_at.isoformat(),
-            "ended_at": finished_at.isoformat(),
-            "duration_seconds": duration,
-            "fps": self.fps,
-            "frame_count": total_frames,
-            "thumbnail": thumbnail,
-        }
-        if stop_reason:
-            base_metadata["stop_reason"] = stop_reason
-        if self.chunk_duration_seconds:
-            base_metadata["chunk_duration_seconds"] = self.chunk_duration_seconds
-        if self._last_storage_status:
-            base_metadata["storage_status"] = self._last_storage_status
-        base_metadata["motion_detection"] = self._motion_detector.snapshot()
-
-        processing_stub = dict(base_metadata)
-        processing_stub["processing"] = True
-
-        finalise_task = asyncio.create_task(
-            self._run_recording_finalise(
-                name=name,
-                base_metadata=base_metadata,
-                chunk_tasks=chunk_tasks,
+            context = self._capture_finalise_context_locked(
+                stop_reason=stop_reason,
+                deactivate_session=True,
+                notify_stop=True,
             )
-        )
-        async with self._state_lock:
-            self._processing_metadata = processing_stub
-            self._finalise_task = finalise_task
-            self._last_finalised_metadata = None
+        if context is None:
+            await self._maybe_stop_producer()
+            stub: dict[str, object] = {
+                "name": base_name,
+                "processing": False,
+                "frame_count": 0,
+                "motion_events": motion_events_recorded,
+            }
+            if stop_reason:
+                stub["stop_reason"] = stop_reason
+            return stub
 
+        placeholder = await self._process_finalise_context(context, track=True)
         await self._maybe_stop_producer()
-        return processing_stub
+        return placeholder
 
     async def list_recordings(self) -> list[dict[str, object]]:
         records = await asyncio.to_thread(load_recording_metadata, self.directory)
@@ -659,6 +664,7 @@ class RecordingManager:
         name: str,
         base_metadata: dict[str, object],
         chunk_tasks: list[tuple[dict[str, object], asyncio.Task[int]]],
+        invoke_callback: bool = True,
     ) -> dict[str, object]:
         metadata = dict(base_metadata)
         chunk_entries: list[dict[str, object]] = []
@@ -719,19 +725,11 @@ class RecordingManager:
             processing_error = str(exc)
             metadata["processing_error"] = processing_error
 
-        if callable(self.on_stop):
+        if invoke_callback and callable(self.on_stop):
             try:
                 await self.on_stop(metadata)
             except Exception:  # pragma: no cover - defensive callback guard
                 logger.exception("Surveillance on_stop callback failed for %s", name)
-
-        async with self._state_lock:
-            self._last_finalised_metadata = metadata
-            self._finalise_task = None
-            if processing_error:
-                self._processing_metadata = metadata
-            else:
-                self._processing_metadata = None
 
         return metadata
 
@@ -765,8 +763,10 @@ class RecordingManager:
         motion_detection_enabled: bool | None = None,
         motion_sensitivity: int | float | None = None,
         motion_frame_decimation: int | float | None = None,
+        motion_post_event_seconds: float | int | None = None,
     ) -> None:
         flush_request: tuple[str, int, list[dict[str, object]]] | None = None
+        finalise_context: _FinaliseContext | None = None
         async with self._state_lock:
             chunk_limit_needs_update = False
             if fps is not None and fps > 0 and fps != self.fps:
@@ -800,6 +800,15 @@ class RecordingManager:
                 decimation = MotionDetector._normalise_frame_decimation(motion_frame_decimation)
                 self.motion_frame_decimation = decimation
                 detector_updates["frame_decimation"] = decimation
+            if motion_post_event_seconds is not None:
+                linger = self._normalise_post_event_duration(motion_post_event_seconds)
+                self.motion_post_event_seconds = linger
+                if self._motion_event_active and linger <= 0:
+                    finalise_context = self._finalise_motion_event_locked(
+                        stop_reason="motion_inactive"
+                    )
+                elif self._motion_event_active:
+                    self._motion_event_pending_stop = None
             session_override = self._session_motion_override and self._recording_active
             effective_enabled = self.motion_detection_enabled
             if session_override:
@@ -829,11 +838,22 @@ class RecordingManager:
                 ):
                     flush_request = self._pop_active_chunk_locked()
 
+        persisted_chunk: tuple[dict[str, object], asyncio.Task[int]] | None = None
         if flush_request is not None:
-            await self._persist_chunk(*flush_request)
+            persisted_chunk = await self._persist_chunk(*flush_request)
+        if finalise_context is not None:
+            if persisted_chunk is not None:
+                finalise_context.chunk_tasks.append(persisted_chunk)
+            await self._process_finalise_context(finalise_context, track=False)
 
     async def aclose(self) -> None:
         await self.wait_for_processing()
+        async with self._state_lock:
+            pending_tasks = [
+                task for task in self._active_finalise_tasks if not task.done()
+            ]
+        if pending_tasks:
+            await asyncio.gather(*pending_tasks, return_exceptions=True)
         await self._maybe_stop_producer(force=True)
         async with self._lock:
             subscribers = list(self._subscribers)
@@ -934,14 +954,75 @@ class RecordingManager:
         storage_status: dict[str, float | int] | None = None
         should_record = False
         flush_request: tuple[str, int, list[dict[str, object]]] | None = None
+        finalise_context: _FinaliseContext | None = None
         async with self._state_lock:
             if not self._recording_active:
                 return
-            should_record = self._motion_detector.should_record(frame, frame_time)
+            motion_should_record = self._motion_detector.should_record(frame, frame_time)
+            motion_triggered = self._motion_detector.triggered_motion()
+            should_record = motion_should_record
             if self._active_motion_enabled:
-                self._motion_state = "recording" if should_record else "monitoring"
+                now = frame_time
+                motion_state_recording = False
+                if motion_should_record:
+                    motion_state_recording = motion_triggered or motion_state_recording
+                    if self._motion_event_base is not None:
+                        start_event = False
+                        if self._motion_event_active or not self._session_motion_override:
+                            start_event = True
+                        elif motion_triggered:
+                            start_event = True
+                        if start_event:
+                            if not self._motion_event_active:
+                                self._begin_motion_event_locked(now)
+                            self._motion_event_pending_stop = None
+                            motion_state_recording = True
+                        else:
+                            should_record = False
+                    elif motion_triggered:
+                        motion_state_recording = True
+                else:
+                    if self._motion_event_base is not None and self._motion_event_active:
+                        linger = self.motion_post_event_seconds
+                        if linger > 0:
+                            deadline = self._motion_event_pending_stop
+                            if deadline is None:
+                                deadline = now + linger
+                                self._motion_event_pending_stop = deadline
+                            if now <= deadline:
+                                should_record = True
+                                motion_state_recording = True
+                            else:
+                                finalise_context = self._finalise_motion_event_locked(
+                                    stop_reason="motion_inactive"
+                                )
+                                should_record = False
+                        else:
+                            finalise_context = self._finalise_motion_event_locked(
+                                stop_reason="motion_inactive"
+                            )
+                            should_record = False
+                    elif motion_triggered:
+                        motion_state_recording = True
+                if not should_record and not self._motion_event_active:
+                    deadline = self._motion_event_pending_stop
+                    if deadline is not None and now > deadline:
+                        self._motion_event_pending_stop = None
+                if (
+                    not motion_state_recording
+                    and (
+                        self._motion_event_active
+                        or (
+                            self._motion_event_pending_stop is not None
+                            and now <= self._motion_event_pending_stop
+                        )
+                    )
+                ):
+                    motion_state_recording = True
+                self._motion_state = "recording" if motion_state_recording else "monitoring"
             else:
                 self._motion_state = None
+                self._motion_event_pending_stop = None
             storage_status = self._compute_storage_status()
             if self.storage_threshold_percent > 0:
                 free_percent = float(storage_status.get("free_percent", 100.0))
@@ -979,8 +1060,13 @@ class RecordingManager:
             storage_status = self._compute_storage_status()
         if storage_limit_reached:
             self._schedule_auto_stop("storage_low")
+        persisted_chunk: tuple[dict[str, object], asyncio.Task[int]] | None = None
         if flush_request is not None:
-            await self._persist_chunk(*flush_request)
+            persisted_chunk = await self._persist_chunk(*flush_request)
+        if finalise_context is not None:
+            if persisted_chunk is not None:
+                finalise_context.chunk_tasks.append(persisted_chunk)
+            await self._process_finalise_context(finalise_context, track=False)
         if not should_record:
             return
 
@@ -988,11 +1074,215 @@ class RecordingManager:
         for queue in list(self._subscribers):
             self._offer(queue, payload)
 
+    def _begin_motion_event_locked(self, frame_time: float) -> None:
+        base = self._motion_event_base
+        if not base:
+            candidate = self._recording_name
+            if not candidate:
+                candidate = _utcnow().strftime("%Y%m%d-%H%M%S")
+            base = candidate
+            self._motion_event_base = base
+        self._motion_event_index += 1
+        self._current_motion_event_index = self._motion_event_index
+        event_name = f"{base}.motion{self._motion_event_index:03d}"
+        started_at = _utcnow()
+        self._recording_name = event_name
+        self._recording_started_at = started_at
+        self._recording_started_monotonic = frame_time
+        self._active_chunk_frames = []
+        self._chunk_write_tasks.clear()
+        self._chunk_index = 0
+        self._total_frame_count = 0
+        self._thumbnail = None
+        self._motion_event_active = True
+        self._motion_event_pending_stop = None
+
+    def _finalise_motion_event_locked(
+        self, *, stop_reason: str | None
+    ) -> _FinaliseContext | None:
+        if not self._motion_event_active:
+            return None
+        return self._capture_finalise_context_locked(
+            stop_reason=stop_reason,
+            deactivate_session=False,
+            notify_stop=False,
+        )
+
+    def _capture_finalise_context_locked(
+        self,
+        *,
+        stop_reason: str | None,
+        deactivate_session: bool,
+        notify_stop: bool,
+    ) -> _FinaliseContext | None:
+        name = self._recording_name
+        if not name:
+            if deactivate_session:
+                self._recording_active = False
+                self._recording_started_at = None
+                self._recording_started_monotonic = None
+                self._recording_name = None
+                self._thumbnail = None
+                self._next_stop_reason = None
+                self._session_motion_override = False
+                self._active_motion_enabled = False
+                self._motion_state = None
+                self._cancel_auto_stop_task()
+                self._total_frame_count = 0
+                self._chunk_index = 0
+                self._motion_event_base = None
+                self._motion_event_index = 0
+                self._current_motion_event_index = 0
+                self._motion_event_active = False
+                self._motion_event_pending_stop = None
+            return None
+
+        pending_flush = self._pop_active_chunk_locked()
+        chunk_tasks = list(self._chunk_write_tasks)
+        self._chunk_write_tasks.clear()
+        storage_status = (
+            dict(self._last_storage_status)
+            if isinstance(self._last_storage_status, Mapping)
+            else None
+        )
+        context = _FinaliseContext(
+            name=name,
+            started_at=self._recording_started_at or _utcnow(),
+            total_frames=self._total_frame_count,
+            thumbnail=self._thumbnail,
+            stop_reason=stop_reason,
+            chunk_tasks=chunk_tasks,
+            chunk_duration_seconds=self.chunk_duration_seconds,
+            storage_status=storage_status,
+            motion_snapshot=self._motion_detector.snapshot(),
+            motion_event_index=self._current_motion_event_index or None,
+            notify_stop_callback=notify_stop,
+            pending_flush=pending_flush,
+        )
+        self._total_frame_count = 0
+        self._chunk_index = 0
+        self._recording_started_at = None
+        self._recording_started_monotonic = None
+        self._recording_name = None
+        self._thumbnail = None
+        self._motion_event_active = False
+        self._motion_event_pending_stop = None
+        self._current_motion_event_index = 0
+        if deactivate_session:
+            self._recording_active = False
+            self._session_motion_override = False
+            self._active_motion_enabled = False
+            self._motion_state = None
+            self._next_stop_reason = None
+            self._motion_event_base = None
+            self._motion_event_index = 0
+            self._cancel_auto_stop_task()
+        else:
+            self._motion_state = "monitoring" if self._active_motion_enabled else None
+        return context
+
+    async def _process_finalise_context(
+        self, context: _FinaliseContext, *, track: bool
+    ) -> dict[str, object]:
+        pending_flush = context.pending_flush
+        if pending_flush is not None:
+            await self._persist_chunk(
+                *pending_flush, task_list=context.chunk_tasks
+            )
+        finished_at = _utcnow()
+        duration = max(0.0, (finished_at - context.started_at).total_seconds())
+        base_metadata: dict[str, object] = {
+            "name": context.name,
+            "started_at": context.started_at.isoformat(),
+            "ended_at": finished_at.isoformat(),
+            "duration_seconds": duration,
+            "fps": self.fps,
+            "frame_count": context.total_frames,
+            "thumbnail": context.thumbnail,
+        }
+        if context.stop_reason:
+            base_metadata["stop_reason"] = context.stop_reason
+        if context.chunk_duration_seconds:
+            base_metadata["chunk_duration_seconds"] = context.chunk_duration_seconds
+        if context.storage_status:
+            base_metadata["storage_status"] = context.storage_status
+        motion_snapshot = dict(context.motion_snapshot)
+        if context.motion_event_index:
+            base_metadata["motion_event_index"] = context.motion_event_index
+            motion_snapshot.setdefault("event_index", context.motion_event_index)
+        base_metadata["motion_detection"] = motion_snapshot
+        processing_stub = dict(base_metadata)
+        processing_stub["processing"] = True
+
+        async with self._state_lock:
+            self._processing_metadata = processing_stub
+
+        task = asyncio.create_task(
+            self._run_recording_finalise(
+                name=context.name,
+                base_metadata=base_metadata,
+                chunk_tasks=context.chunk_tasks,
+                invoke_callback=context.notify_stop_callback,
+            )
+        )
+        async with self._state_lock:
+            self._active_finalise_tasks.add(task)
+            if track:
+                self._finalise_task = task
+                self._last_finalised_metadata = None
+        task.add_done_callback(
+            lambda done_task, recording_name=context.name: asyncio.create_task(
+                self._finalise_task_cleanup(recording_name, done_task)
+            )
+        )
+        return processing_stub
+
+    async def _finalise_task_cleanup(
+        self, recording_name: str, task: asyncio.Task[dict[str, object]]
+    ) -> None:
+        metadata: dict[str, object] | None
+        processing_error = False
+        try:
+            result = task.result()
+        except Exception as exc:  # pragma: no cover - defensive guard
+            logger.exception("Surveillance finalise task failed for %s", recording_name)
+            message = str(exc).strip() or "finalise_failed"
+            metadata = {"name": recording_name, "processing_error": message}
+            processing_error = True
+        else:
+            if isinstance(result, Mapping):
+                metadata = dict(result)
+                processing_error = bool(metadata.get("processing_error"))
+            else:  # pragma: no cover - defensive guard
+                metadata = {"name": recording_name, "processing_error": "finalise_failed"}
+                processing_error = True
+
+        async with self._state_lock:
+            self._active_finalise_tasks.discard(task)
+            if metadata is not None:
+                self._last_finalised_metadata = dict(metadata)
+            if (
+                self._processing_metadata
+                and str(self._processing_metadata.get("name")) == recording_name
+            ):
+                if metadata is None:
+                    self._processing_metadata = {
+                        "name": recording_name,
+                        "processing_error": "finalise_failed",
+                    }
+                elif processing_error:
+                    self._processing_metadata = metadata
+                else:
+                    self._processing_metadata = None
+            if self._finalise_task is task:
+                self._finalise_task = None
+
     def get_motion_status(self) -> dict[str, object]:
         status = self._motion_detector.snapshot()
         status["session_active"] = self.motion_session_active
         status["session_override"] = self._session_motion_override
         status["session_state"] = self._motion_state
+        status["post_event_record_seconds"] = float(self.motion_post_event_seconds)
         return status
 
     def _offer(self, queue: asyncio.Queue[bytes], payload: bytes) -> None:
@@ -1049,10 +1339,15 @@ class RecordingManager:
         return (name, self._chunk_index, frames)
 
     async def _persist_chunk(
-        self, name: str, index: int, frames: list[dict[str, object]]
-    ) -> None:
+        self,
+        name: str,
+        index: int,
+        frames: list[dict[str, object]],
+        *,
+        task_list: list[tuple[dict[str, object], asyncio.Task[int]]] | None = None,
+    ) -> tuple[dict[str, object], asyncio.Task[int]] | None:
         if not frames:
-            return
+            return None
         filename = self._chunk_filename(name, index)
         entry = {
             "file": filename,
@@ -1060,7 +1355,9 @@ class RecordingManager:
             "compression": "gzip",
         }
         task = asyncio.create_task(self._write_chunk_payload(filename, frames))
-        self._chunk_write_tasks.append((entry, task))
+        target_list = task_list if task_list is not None else self._chunk_write_tasks
+        target_list.append((entry, task))
+        return (entry, task)
 
     async def _write_chunk_payload(
         self, filename: str, frames: list[dict[str, object]]
@@ -1094,6 +1391,17 @@ class RecordingManager:
         if numeric > 90:
             numeric = 90.0
         return numeric
+
+    def _normalise_post_event_duration(self, value: float | int | None) -> float:
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):  # pragma: no cover - defensive branch
+            return 0.0
+        if numeric < 0.0:
+            numeric = 0.0
+        elif numeric > 60.0:
+            numeric = 60.0
+        return float(numeric)
 
     def _compute_storage_status(self) -> dict[str, float | int]:
         usage = shutil.disk_usage(self.directory)
@@ -1146,4 +1454,21 @@ __all__ = [
     "remove_recording_files",
     "purge_recordings",
 ]
+
+@dataclass
+class _FinaliseContext:
+    """Context required to finalise a recording asynchronously."""
+
+    name: str
+    started_at: datetime
+    total_frames: int
+    thumbnail: str | None
+    stop_reason: str | None
+    chunk_tasks: list[tuple[dict[str, object], asyncio.Task[int]]]
+    chunk_duration_seconds: int | None
+    storage_status: dict[str, float | int] | None
+    motion_snapshot: dict[str, object]
+    motion_event_index: int | None
+    notify_stop_callback: bool
+    pending_flush: tuple[str, int, list[dict[str, object]]] | None = None
 

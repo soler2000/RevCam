@@ -146,6 +146,7 @@ class SurveillanceSettings:
     motion_detection_enabled: bool = False
     motion_sensitivity: int = 50
     motion_frame_decimation: int = 1
+    motion_post_event_seconds: float = 2.0
     auto_purge_days: int | None = None
     storage_threshold_percent: float = 10.0
 
@@ -204,6 +205,15 @@ class SurveillanceSettings:
         elif decimation > 30:
             decimation = 30
 
+        try:
+            post_seconds = float(self.motion_post_event_seconds)
+        except (TypeError, ValueError) as exc:  # pragma: no cover - defensive branch
+            raise ValueError("Motion post-event duration must be numeric") from exc
+        if post_seconds < 0.0:
+            post_seconds = 0.0
+        elif post_seconds > 60.0:
+            post_seconds = 60.0
+
         auto_purge: int | None
         if self.auto_purge_days in (None, "", 0):
             auto_purge = None
@@ -231,6 +241,7 @@ class SurveillanceSettings:
         object.__setattr__(self, "chunk_duration_seconds", chunk_duration)
         object.__setattr__(self, "motion_sensitivity", sensitivity)
         object.__setattr__(self, "motion_frame_decimation", decimation)
+        object.__setattr__(self, "motion_post_event_seconds", float(post_seconds))
         object.__setattr__(self, "auto_purge_days", auto_purge)
         object.__setattr__(self, "storage_threshold_percent", threshold_percent)
 
@@ -261,6 +272,7 @@ class SurveillanceSettings:
             "motion_detection_enabled": bool(self.motion_detection_enabled),
             "motion_sensitivity": int(self.motion_sensitivity),
             "motion_frame_decimation": int(self.motion_frame_decimation),
+            "motion_post_event_seconds": float(self.motion_post_event_seconds),
             "auto_purge_days": self.auto_purge_days,
             "storage_threshold_percent": float(self.storage_threshold_percent),
         }
@@ -551,6 +563,9 @@ def _parse_surveillance_settings(
     motion_decimation_raw = value.get(
         "motion_frame_decimation", current.motion_frame_decimation
     )
+    motion_post_event_raw = value.get(
+        "motion_post_event_seconds", current.motion_post_event_seconds
+    )
     chunk_duration_raw = value.get("chunk_duration_seconds", current.chunk_duration_seconds)
     purge_days_raw = value.get("auto_purge_days", current.auto_purge_days)
     threshold_raw = value.get("storage_threshold_percent", current.storage_threshold_percent)
@@ -579,6 +594,7 @@ def _parse_surveillance_settings(
         motion_sensitivity=motion_sensitivity_raw,
         chunk_duration_seconds=chunk_duration_raw,
         motion_frame_decimation=motion_decimation_raw,
+        motion_post_event_seconds=motion_post_event_raw,
         auto_purge_days=purge_days_raw,
         storage_threshold_percent=threshold_raw,
     )

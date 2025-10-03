@@ -72,6 +72,7 @@ def test_get_surveillance_settings(client: TestClient) -> None:
     assert settings["storage_threshold_percent"] == 10
     assert settings["motion_detection_enabled"] is False
     assert settings["motion_frame_decimation"] == 1
+    assert settings["motion_post_event_seconds"] == 2.0
     assert "presets" in payload
     assert any(item["name"] == settings["preset"] for item in payload["presets"])
 
@@ -108,6 +109,7 @@ def test_update_surveillance_settings_advanced(client: TestClient) -> None:
             "motion_detection_enabled": True,
             "motion_sensitivity": 65,
             "motion_frame_decimation": 2,
+            "motion_post_event_seconds": 0.5,
             "auto_purge_days": 10,
             "storage_threshold_percent": 20,
         },
@@ -122,6 +124,7 @@ def test_update_surveillance_settings_advanced(client: TestClient) -> None:
     assert payload["motion_detection_enabled"] is True
     assert payload["motion_sensitivity"] == 65
     assert payload["motion_frame_decimation"] == 2
+    assert payload["motion_post_event_seconds"] == 0.5
     assert payload["auto_purge_days"] == 10
     assert payload["storage_threshold_percent"] == 20
 
@@ -177,6 +180,7 @@ def test_surveillance_status_storage(client: TestClient) -> None:
         assert "session_state" in motion
         assert "session_active" in motion
         assert "session_override" in motion
+        assert "post_event_record_seconds" in motion
     resume_state = payload.get("resume_state")
     assert isinstance(resume_state, dict)
     assert resume_state.get("mode") in {"revcam", "surveillance"}

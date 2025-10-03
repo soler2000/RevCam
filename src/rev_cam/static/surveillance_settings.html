@@ -438,6 +438,13 @@
                 Aim for 8 fps or below to balance performance and detail.
               </span>
             </div>
+            <div class="motion-control">
+              <label for="motion-post-seconds">Continue recording after motion (seconds)</label>
+              <input id="motion-post-seconds" type="number" min="0" max="60" step="0.5" />
+              <span class="muted">
+                Avoids cutting off clips by holding the recording briefly once motion stops.
+              </span>
+            </div>
           </section>
           <section class="tab-panel" data-tab-panel="storage" hidden>
             <h2>Storage &amp; maintenance</h2>
@@ -514,6 +521,7 @@
       const motionSensitivityValue = document.getElementById("motion-sensitivity-value");
       const motionDecimationInput = document.getElementById("motion-decimation");
       const motionEffectiveFpsText = document.getElementById("motion-effective-fps");
+      const motionPostSecondsInput = document.getElementById("motion-post-seconds");
 
       let currentSettings = null;
 
@@ -591,6 +599,7 @@
       if (motionSensitivityInput) {
         motionSensitivityInput.addEventListener("input", () => {
           updateMotionSensitivityLabel(Number(motionSensitivityInput.value));
+          updateSummary();
         });
       }
 
@@ -599,6 +608,10 @@
           updateMotionGuidance();
           updateSummary();
         });
+      }
+
+      if (motionPostSecondsInput) {
+        motionPostSecondsInput.addEventListener("input", updateSummary);
       }
 
       if (motionEnabledInput) {
@@ -699,6 +712,13 @@
             text += ` • Motion capture ${motionLabel} fps`;
           }
           text += " (recommended ≤ 8 fps)";
+          if (motionPostSecondsInput) {
+            const lingerRaw = Number(motionPostSecondsInput.value);
+            if (Number.isFinite(lingerRaw) && lingerRaw > 0) {
+              const display = lingerRaw % 1 === 0 ? lingerRaw.toFixed(0) : lingerRaw.toFixed(1);
+              text += ` • Hold ${display}s post-motion`;
+            }
+          }
         }
         summary.textContent = text;
         updateMotionGuidance();
@@ -749,6 +769,14 @@
               ? Math.min(30, Math.max(1, Math.round(decimation)))
               : 1;
           motionDecimationInput.value = normalised;
+        }
+        if (motionPostSecondsInput) {
+          const linger = Number(settings.motion_post_event_seconds ?? 0);
+          const normalised =
+            Number.isFinite(linger) && linger >= 0
+              ? Math.min(60, Math.max(0, Math.round(linger * 2) / 2))
+              : 0;
+          motionPostSecondsInput.value = normalised;
         }
         updateSummary();
       }
@@ -823,6 +851,22 @@
               ? Math.min(30, Math.max(1, decimationValue))
               : 1;
           payload.motion_frame_decimation = normalised;
+        }
+        if (motionPostSecondsInput) {
+          const lingerValue = parseFloat(motionPostSecondsInput.value);
+          if (
+            Number.isFinite(lingerValue) &&
+            lingerValue >= 0 &&
+            lingerValue <= 60
+          ) {
+            payload.motion_post_event_seconds = lingerValue;
+          } else if (motionPostSecondsInput.value !== "") {
+            statusText.textContent = "Post-motion recording must be between 0 and 60 seconds.";
+            motionPostSecondsInput.focus();
+            return;
+          } else {
+            payload.motion_post_event_seconds = 0;
+          }
         }
         if (chunkDurationInput) {
           const chunkMinutes = parseInt(chunkDurationInput.value, 10);

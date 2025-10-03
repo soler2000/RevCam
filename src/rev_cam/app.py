@@ -613,6 +613,7 @@ def create_app(
                 motion_detection_enabled=surveillance_settings.motion_detection_enabled,
                 motion_sensitivity=surveillance_settings.motion_sensitivity,
                 motion_frame_decimation=surveillance_settings.motion_frame_decimation,
+                motion_post_event_seconds=surveillance_settings.motion_post_event_seconds,
                 on_stop=_handle_recording_stopped,
             )
         else:
@@ -625,6 +626,7 @@ def create_app(
                 motion_detection_enabled=surveillance_settings.motion_detection_enabled,
                 motion_sensitivity=surveillance_settings.motion_sensitivity,
                 motion_frame_decimation=surveillance_settings.motion_frame_decimation,
+                motion_post_event_seconds=surveillance_settings.motion_post_event_seconds,
             )
         return recording_manager
 

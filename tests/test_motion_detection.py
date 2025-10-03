@@ -4,13 +4,20 @@ import types
 
 from pathlib import Path
 
+import asyncio
+
 import numpy as np
 import pytest
 
 from rev_cam.camera import BaseCamera
 from rev_cam.config import Orientation
 from rev_cam.pipeline import FramePipeline
-from rev_cam.recording import MotionDetector, RecordingManager, load_recording_payload
+from rev_cam.recording import (
+    MotionDetector,
+    RecordingManager,
+    load_recording_metadata,
+    load_recording_payload,
+)
 
 
 class _StaticCamera(BaseCamera):
@@ -96,6 +103,7 @@ async def test_recording_manager_records_only_when_motion_detected(tmp_path: Pat
     assert snapshot["recorded_frames"] == 2
     assert snapshot["session_state"] == "monitoring"
     assert snapshot["session_active"] is True
+    assert "post_event_record_seconds" in snapshot
 
     moving = still.copy()
     moving[:4, :4, :] = 255
@@ -104,6 +112,7 @@ async def test_recording_manager_records_only_when_motion_detected(tmp_path: Pat
     assert snapshot["recorded_frames"] == 3
     assert snapshot["session_state"] == "recording"
     assert snapshot["session_active"] is True
+    assert snapshot["post_event_record_seconds"] >= 0
 
     placeholder = await manager.stop_recording()
     assert placeholder["processing"] is True
@@ -149,17 +158,155 @@ async def test_recording_manager_motion_override_session(tmp_path: Path, anyio_b
     status = manager.get_motion_status()
     assert status["session_active"] is True
     assert status["session_state"] in {"monitoring", "recording"}
+    assert "post_event_record_seconds" in status
 
     placeholder = await manager.stop_recording()
-    assert placeholder["processing"] is True
+    assert placeholder["processing"] is False
+    assert placeholder.get("motion_events") == 0
     metadata = await manager.wait_for_processing()
-    assert metadata is not None
+    assert metadata is None
 
     assert manager.recording_mode == "idle"
     status = manager.get_motion_status()
     assert status["session_active"] is False
     assert status["session_state"] is None
+    assert "post_event_record_seconds" in status
     await manager.aclose()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("anyio_backend", ["asyncio"], indirect=True)
+async def test_motion_recording_creates_event_clips(tmp_path: Path, anyio_backend) -> None:
+    camera = _StaticCamera()
+    pipeline = _pipeline()
+    manager = RecordingManager(
+        camera=camera,
+        pipeline=pipeline,
+        directory=tmp_path,
+        motion_detection_enabled=True,
+        motion_sensitivity=70,
+        motion_inactivity_timeout_seconds=0.05,
+        motion_post_event_seconds=0.1,
+        fps=6,
+    )
+
+    async def _noop(self):
+        return None
+
+    manager._ensure_producer_running = types.MethodType(_noop, manager)
+    await manager.start_recording(motion_mode=True)
+
+    still = np.zeros((32, 32, 3), dtype=np.uint8)
+    motion_a = still.copy()
+    motion_a[:8, :8, :] = 255
+    motion_b = still.copy()
+    motion_b[8:, 8:, :] = 255
+
+    await manager._record_frame(b"baseline", 0.0, still)
+    await manager._record_frame(b"event1", 0.01, motion_a)
+    await manager._record_frame(b"event1-hold", 0.08, still)
+    await manager._record_frame(b"event1-end", 0.3, still)
+    await manager._record_frame(b"gap", 0.45, still)
+
+    for _ in range(20):
+        if manager.is_processing:
+            break
+        await asyncio.sleep(0.01)
+    for _ in range(40):
+        if not manager.is_processing:
+            break
+        await asyncio.sleep(0.02)
+
+    await manager._record_frame(b"event2", 0.6, motion_b)
+    await manager._record_frame(b"event2-hold", 0.7, still)
+    await manager._record_frame(b"event2-end", 1.0, still)
+
+    for _ in range(20):
+        if manager.is_processing:
+            break
+        await asyncio.sleep(0.01)
+    for _ in range(40):
+        if not manager.is_processing:
+            break
+        await asyncio.sleep(0.02)
+
+    result = await manager.stop_recording()
+    assert result.get("processing") is True
+    await manager.wait_for_processing()
+    await manager.aclose()
+
+    metadata_entries = load_recording_metadata(tmp_path)
+    assert metadata_entries, "expected motion recordings to be saved"
+    names = {
+        entry.get("name")
+        for entry in metadata_entries
+        if isinstance(entry, dict) and entry.get("name")
+    }
+    indices = {
+        entry.get("motion_event_index")
+        for entry in metadata_entries
+        if isinstance(entry, dict) and entry.get("motion_event_index")
+    }
+    assert 1 in indices and 2 in indices
+    assert any(str(name).endswith(".motion001") for name in names)
+    assert any(str(name).endswith(".motion002") for name in names)
+    for entry in metadata_entries:
+        if not isinstance(entry, dict):
+            continue
+        motion_meta = entry.get("motion_detection")
+        if isinstance(motion_meta, dict) and entry.get("motion_event_index"):
+            assert motion_meta.get("event_index") == entry.get("motion_event_index")
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("anyio_backend", ["asyncio"], indirect=True)
+async def test_motion_status_reports_recording_state(tmp_path: Path, anyio_backend) -> None:
+    camera = _StaticCamera()
+    pipeline = _pipeline()
+    manager = RecordingManager(
+        camera=camera,
+        pipeline=pipeline,
+        directory=tmp_path,
+        motion_detection_enabled=True,
+        motion_inactivity_timeout_seconds=0.05,
+        motion_post_event_seconds=0.2,
+        fps=8,
+    )
+
+    async def _noop(self):
+        return None
+
+    manager._ensure_producer_running = types.MethodType(_noop, manager)
+    await manager.start_recording(motion_mode=True)
+
+    still = np.zeros((32, 32, 3), dtype=np.uint8)
+    motion = still.copy()
+    motion[::2, ::2, :] = 255
+
+    await manager._record_frame(b"baseline", 0.0, still)
+    status = manager.get_motion_status()
+    assert status["session_state"] == "monitoring"
+
+    await manager._record_frame(b"motion", 0.1, motion)
+    status = manager.get_motion_status()
+    assert status["session_state"] == "recording"
+
+    await manager._record_frame(b"hold", 0.25, still)
+    status = manager.get_motion_status()
+    assert status["session_state"] == "recording"
+
+    await manager._record_frame(b"post", 0.6, still)
+    status = manager.get_motion_status()
+    assert status["session_state"] == "recording"
+
+    await manager._record_frame(b"after", 0.9, still)
+    status = manager.get_motion_status()
+    assert status["session_state"] in {"monitoring", None}
+
+    await manager.stop_recording()
+    await manager.wait_for_processing()
+    await manager.aclose()
+
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("anyio_backend", ["asyncio"], indirect=True)
