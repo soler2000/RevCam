@@ -1869,7 +1869,10 @@ def create_app(
         ):
             raise HTTPException(status_code=507, detail="Insufficient storage available")
         try:
-            details = await manager.start_recording(motion_mode=False)
+            details = await asyncio.shield(manager.start_recording(motion_mode=False))
+        except asyncio.CancelledError:
+            _persist_surveillance_state(True)
+            raise
         except RuntimeError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         _persist_surveillance_state(True)
@@ -1895,7 +1898,10 @@ def create_app(
         ):
             raise HTTPException(status_code=507, detail="Insufficient storage available")
         try:
-            details = await manager.start_recording(motion_mode=True)
+            details = await asyncio.shield(manager.start_recording(motion_mode=True))
+        except asyncio.CancelledError:
+            _persist_surveillance_state(True)
+            raise
         except RuntimeError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         _persist_surveillance_state(True)
@@ -1908,7 +1914,10 @@ def create_app(
         if recording_manager is None:
             raise HTTPException(status_code=409, detail="No recording in progress")
         try:
-            details = await recording_manager.stop_recording()
+            details = await asyncio.shield(recording_manager.stop_recording())
+        except asyncio.CancelledError:
+            _persist_surveillance_state(False)
+            raise
         except RuntimeError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         _persist_surveillance_state(False)

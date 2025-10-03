@@ -131,6 +131,41 @@ async def test_recording_manager_records_only_when_motion_detected(tmp_path: Pat
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("anyio_backend", ["asyncio"], indirect=True)
+async def test_start_recording_survives_cancellation(tmp_path: Path, anyio_backend) -> None:
+    camera = _StaticCamera()
+    pipeline = _pipeline()
+    manager = RecordingManager(
+        camera=camera,
+        pipeline=pipeline,
+        directory=tmp_path,
+        fps=2,
+    )
+
+    original_ensure = manager._ensure_producer_running
+
+    async def _delayed_ensure(self):
+        await asyncio.sleep(0.05)
+        await original_ensure()
+
+    manager._ensure_producer_running = types.MethodType(_delayed_ensure, manager)
+
+    task = asyncio.create_task(manager.start_recording())
+    await asyncio.sleep(0.01)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert manager.is_recording is True
+    assert manager.recording_started_at is not None
+
+    placeholder = await manager.stop_recording()
+    assert placeholder["processing"] in {True, False}
+    await manager.wait_for_processing()
+    await manager.aclose()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("anyio_backend", ["asyncio"], indirect=True)
 async def test_manual_recording_disables_motion_when_requested(
     tmp_path: Path, anyio_backend
 ) -> None:

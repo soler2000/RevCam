@@ -636,7 +636,12 @@ class RecordingManager:
             self._chunk_frame_limit = self._calculate_chunk_frame_limit()
             self._motion_state_hold_until = None
 
-        await self._ensure_producer_running()
+        ensure_task = asyncio.create_task(self._ensure_producer_running())
+        try:
+            await asyncio.shield(ensure_task)
+        except asyncio.CancelledError:
+            await ensure_task
+            raise
         return {"name": name, "started_at": started_at.isoformat()}
 
     async def stop_recording(self) -> dict[str, object]:
@@ -667,7 +672,20 @@ class RecordingManager:
                 stub["stop_reason"] = stop_reason
             return stub
 
-        placeholder = await self._process_finalise_context(context, track=True)
+        finalise_task = asyncio.create_task(
+            self._process_finalise_context(context, track=True)
+        )
+        try:
+            placeholder = await asyncio.shield(finalise_task)
+        except asyncio.CancelledError:
+            try:
+                await finalise_task
+            finally:
+                await self._maybe_stop_producer()
+            raise
+        except Exception:
+            await self._maybe_stop_producer()
+            raise
         await self._maybe_stop_producer()
         return placeholder
 
