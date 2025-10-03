@@ -10,7 +10,7 @@ import pytest
 from rev_cam.camera import BaseCamera
 from rev_cam.config import Orientation
 from rev_cam.pipeline import FramePipeline
-from rev_cam.recording import MotionDetector, RecordingManager
+from rev_cam.recording import MotionDetector, RecordingManager, load_recording_payload
 
 
 class _StaticCamera(BaseCamera):
@@ -92,12 +92,14 @@ async def test_recording_manager_records_only_when_motion_detected(tmp_path: Pat
     await manager._record_frame(b"frame2", 0.02, still)
     # Past inactivity threshold with no motion, frame is skipped.
     await manager._record_frame(b"frame3", 0.2, still)
-    assert len(manager._recording_frames) == 2
+    snapshot = manager.get_motion_status()
+    assert snapshot["recorded_frames"] == 2
 
     moving = still.copy()
     moving[:4, :4, :] = 255
     await manager._record_frame(b"frame4", 0.25, moving)
-    assert len(manager._recording_frames) == 3
+    snapshot = manager.get_motion_status()
+    assert snapshot["recorded_frames"] == 3
 
     metadata = await manager.stop_recording()
     motion = metadata["motion_detection"]
@@ -106,3 +108,51 @@ async def test_recording_manager_records_only_when_motion_detected(tmp_path: Pat
     assert motion["skipped_frames"] >= 1
     assert motion["recorded_frames"] == 3
     await manager.aclose()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("anyio_backend", ["asyncio"], indirect=True)
+async def test_recording_manager_writes_compressed_chunks(tmp_path: Path, anyio_backend) -> None:
+    camera = _StaticCamera()
+    pipeline = _pipeline()
+    manager = RecordingManager(
+        camera=camera,
+        pipeline=pipeline,
+        directory=tmp_path,
+        fps=4,
+        chunk_duration_seconds=1,
+    )
+
+    async def _noop(self):
+        return None
+
+    manager._ensure_producer_running = types.MethodType(_noop, manager)
+    await manager.start_recording()
+
+    frame = np.zeros((32, 32, 3), dtype=np.uint8)
+    for index in range(5):
+        await manager._record_frame(f"frame{index}".encode(), index * 0.2, frame)
+
+    metadata = await manager.stop_recording()
+    await manager.aclose()
+
+    assert metadata["chunk_count"] >= 1
+    assert metadata.get("chunk_compression") == "gzip"
+
+    chunk_sizes = []
+    for chunk in metadata["chunks"]:
+        path = tmp_path / chunk["file"]
+        assert path.exists()
+        assert path.suffix == ".gz"
+        assert chunk.get("compression") == "gzip"
+        size_bytes = path.stat().st_size
+        assert chunk.get("size_bytes") == size_bytes
+        chunk_sizes.append(size_bytes)
+
+    assert metadata["size_bytes"] == sum(chunk_sizes)
+
+    payload = load_recording_payload(tmp_path, metadata["name"])
+    frames = payload.get("frames", [])
+    assert isinstance(frames, list)
+    assert len(frames) == metadata["frame_count"]
+    assert frames and "jpeg" in frames[0]

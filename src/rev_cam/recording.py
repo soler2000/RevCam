@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import gzip
 import json
 import shutil
 import time
@@ -33,13 +34,35 @@ def _safe_recording_name(name: str) -> str:
     return safe_name
 
 
+def _load_json_from_path(path: Path, compression: str | None = None) -> object:
+    if compression == "gzip":
+        with gzip.open(path, "rt", encoding="utf-8") as handle:
+            return json.load(handle)
+    if path.suffix == ".gz":
+        with gzip.open(path, "rt", encoding="utf-8") as handle:
+            return json.load(handle)
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _dump_json_to_path(path: Path, payload: object) -> int:
+    data = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode(
+        "utf-8"
+    )
+    if path.suffix == ".gz":
+        with gzip.open(path, "wb") as handle:
+            handle.write(data)
+    else:
+        path.write_bytes(data)
+    return path.stat().st_size
+
+
 def load_recording_metadata(directory: Path) -> list[dict[str, object]]:
     """Load recording metadata files from ``directory`` synchronously."""
 
     items: list[dict[str, object]] = []
     for path in sorted(directory.glob("*.meta.json"), reverse=True):
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
+            data = _load_json_from_path(path)
         except Exception:  # pragma: no cover - best-effort parsing
             continue
         if isinstance(data, dict):
@@ -72,20 +95,26 @@ def load_recording_payload(directory: Path, name: str) -> dict[str, object]:
         else:
             metadata = candidate if isinstance(candidate, dict) else None
     frames: list[dict[str, object]] = []
-    chunk_files: list[Path] = []
+    chunk_files: list[tuple[Path, str | None]] = []
     if metadata and isinstance(metadata.get("chunks"), list):
         for entry in metadata["chunks"]:  # type: ignore[index]
             if isinstance(entry, Mapping):
                 filename = entry.get("file")
                 if isinstance(filename, str):
                     chunk_path = directory / filename
-                    chunk_files.append(chunk_path)
+                    compression = entry.get("compression")
+                    compression_name: str | None
+                    if isinstance(compression, str):
+                        compression_name = compression.lower()
+                    else:
+                        compression_name = None
+                    chunk_files.append((chunk_path, compression_name))
     if chunk_files:
-        for chunk_path in chunk_files:
+        for chunk_path, compression in chunk_files:
             if not chunk_path.exists() or not chunk_path.is_file():
                 continue
             try:
-                chunk_payload = json.loads(chunk_path.read_text(encoding="utf-8"))
+                chunk_payload = _load_json_from_path(chunk_path, compression)
             except Exception:  # pragma: no cover - best-effort parsing
                 continue
             if isinstance(chunk_payload, Mapping):
@@ -99,8 +128,12 @@ def load_recording_payload(directory: Path, name: str) -> dict[str, object]:
     else:
         data_path = directory / f"{safe_name}.json"
         if not data_path.exists() or not data_path.is_file():
-            raise FileNotFoundError("Recording not found")
-        payload = json.loads(data_path.read_text(encoding="utf-8"))
+            gz_path = directory / f"{safe_name}.json.gz"
+            if gz_path.exists() and gz_path.is_file():
+                data_path = gz_path
+            else:
+                raise FileNotFoundError("Recording not found")
+        payload = _load_json_from_path(data_path)
         if isinstance(payload, Mapping):
             raw_frames = payload.get("frames")
             if isinstance(raw_frames, list):
@@ -129,6 +162,7 @@ def remove_recording_files(directory: Path, name: str) -> None:
     safe_name = _safe_recording_name(name)
     paths = [
         directory / f"{safe_name}.json",
+        directory / f"{safe_name}.json.gz",
         directory / f"{safe_name}.meta.json",
     ]
     metadata: dict[str, object] | None = None
@@ -403,7 +437,13 @@ class RecordingManager:
     _state_lock: asyncio.Lock = field(init=False, default_factory=asyncio.Lock)
     _frame_interval: float = field(init=False)
     _recording_active: bool = field(init=False, default=False)
-    _recording_frames: list[dict[str, object]] = field(init=False, default_factory=list)
+    _active_chunk_frames: list[dict[str, object]] = field(init=False, default_factory=list)
+    _chunk_write_tasks: list[tuple[dict[str, object], asyncio.Task[int]]] = field(
+        init=False, default_factory=list
+    )
+    _chunk_index: int = field(init=False, default=0)
+    _chunk_frame_limit: int = field(init=False, default=0)
+    _total_frame_count: int = field(init=False, default=0)
     _recording_started_at: datetime | None = field(init=False, default=None)
     _recording_started_monotonic: float | None = field(init=False, default=None)
     _recording_name: str | None = field(init=False, default=None)
@@ -436,6 +476,7 @@ class RecordingManager:
             inactivity_timeout=self.motion_inactivity_timeout_seconds,
             frame_decimation=self.motion_frame_decimation,
         )
+        self._chunk_frame_limit = self._calculate_chunk_frame_limit()
 
     @property
     def media_type(self) -> str:
@@ -460,7 +501,10 @@ class RecordingManager:
             monotonic = time.perf_counter()
             name = started_at.strftime("%Y%m%d-%H%M%S")
             self._recording_active = True
-            self._recording_frames = []
+            self._active_chunk_frames = []
+            self._chunk_write_tasks.clear()
+            self._chunk_index = 0
+            self._total_frame_count = 0
             self._recording_started_at = started_at
             self._recording_started_monotonic = monotonic
             self._recording_name = name
@@ -468,89 +512,93 @@ class RecordingManager:
             self._next_stop_reason = None
             self._cancel_auto_stop_task()
             self._motion_detector.reset()
+            self._chunk_frame_limit = self._calculate_chunk_frame_limit()
 
         await self._ensure_producer_running()
         return {"name": name, "started_at": started_at.isoformat()}
 
     async def stop_recording(self) -> dict[str, object]:
+        pending_flush: tuple[str, int, list[dict[str, object]]] | None = None
+        total_frames = 0
+        thumbnail: str | None
+        stop_reason: str | None
         async with self._state_lock:
             if not self._recording_active:
                 raise RuntimeError("No recording in progress")
             name = self._recording_name or _utcnow().strftime("%Y%m%d-%H%M%S")
             started_at = self._recording_started_at or _utcnow()
-            frames = list(self._recording_frames)
             thumbnail = self._thumbnail
+            stop_reason = self._next_stop_reason
+            total_frames = self._total_frame_count
+            pending_flush = self._pop_active_chunk_locked()
             self._recording_active = False
-            self._recording_frames = []
             self._recording_started_at = None
             self._recording_started_monotonic = None
             self._recording_name = None
             self._thumbnail = None
-            stop_reason = self._next_stop_reason
             self._next_stop_reason = None
             self._cancel_auto_stop_task()
+            self._total_frame_count = 0
+            self._chunk_index = 0
+
+        if pending_flush is not None:
+            await self._persist_chunk(*pending_flush)
+
+        chunk_tasks = list(self._chunk_write_tasks)
+        self._chunk_write_tasks.clear()
 
         finished_at = _utcnow()
         duration = max(0.0, (finished_at - started_at).total_seconds())
+        chunk_entries: list[dict[str, object]] = []
+        total_size = 0
+        for entry, task in chunk_tasks:
+            try:
+                size = await task
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # pragma: no cover - defensive guard
+                size = 0
+            entry = dict(entry)
+            entry["size_bytes"] = int(size)
+            chunk_entries.append(entry)
+            total_size += int(size)
+
+        if not chunk_entries:
+            filename = f"{name}.chunk001.json.gz"
+            size = await self._write_chunk_payload(filename, [])
+            chunk_entries.append(
+                {
+                    "file": filename,
+                    "frame_count": 0,
+                    "size_bytes": size,
+                    "compression": "gzip",
+                }
+            )
+            total_size = size
+
         metadata = {
             "name": name,
             "started_at": started_at.isoformat(),
             "ended_at": finished_at.isoformat(),
             "duration_seconds": duration,
             "fps": self.fps,
-            "frame_count": len(frames),
+            "frame_count": total_frames,
             "thumbnail": thumbnail,
         }
-        meta_path = self.directory / f"{name}.meta.json"
-
-        chunks = self._chunk_frames(frames, self.fps)
-        chunk_entries: list[dict[str, object]] = []
-        total_size = 0
-
-        async def _write_chunk(filename: str, payload: dict[str, object]) -> int:
-            def _write() -> int:
-                path = self.directory / filename
-                path.write_text(json.dumps(payload), encoding="utf-8")
-                return path.stat().st_size
-
-            return await asyncio.to_thread(_write)
-
-        if not chunks:
-            chunks = [frames]
-
-        if len(chunks) == 1:
-            chunk_filename = f"{name}.json"
-            payload = {"frames": chunks[0]}
-            size = await _write_chunk(chunk_filename, payload)
-            chunk_entries.append(
-                {"file": chunk_filename, "frame_count": len(chunks[0]), "size_bytes": size}
-            )
-            total_size = size
-        else:
-            for index, group in enumerate(chunks, start=1):
-                chunk_filename = f"{name}.chunk{index:03d}.json"
-                payload = {"frames": group}
-                size = await _write_chunk(chunk_filename, payload)
-                chunk_entries.append(
-                    {"file": chunk_filename, "frame_count": len(group), "size_bytes": size}
-                )
-                total_size += size
-
         if stop_reason:
             metadata["stop_reason"] = stop_reason
         if self.chunk_duration_seconds:
             metadata["chunk_duration_seconds"] = self.chunk_duration_seconds
-        metadata["chunk_count"] = len(chunks)
+        metadata["chunk_count"] = len(chunk_entries)
         metadata["chunks"] = chunk_entries
         metadata["size_bytes"] = total_size
+        metadata["chunk_compression"] = "gzip"
         if self._last_storage_status:
             metadata["storage_status"] = self._last_storage_status
         metadata["motion_detection"] = self._motion_detector.snapshot()
 
-        def _write_metadata() -> None:
-            meta_path.write_text(json.dumps(metadata), encoding="utf-8")
-
-        await asyncio.to_thread(_write_metadata)
+        meta_path = self.directory / f"{name}.meta.json"
+        await asyncio.to_thread(_dump_json_to_path, meta_path, metadata)
         await self._maybe_stop_producer()
         if callable(self.on_stop):
             try:
@@ -579,10 +627,13 @@ class RecordingManager:
         motion_sensitivity: int | float | None = None,
         motion_frame_decimation: int | float | None = None,
     ) -> None:
+        flush_request: tuple[str, int, list[dict[str, object]]] | None = None
         async with self._state_lock:
+            chunk_limit_needs_update = False
             if fps is not None and fps > 0 and fps != self.fps:
                 self.fps = int(fps)
                 self._frame_interval = 1.0 / float(self.fps)
+                chunk_limit_needs_update = True
             if jpeg_quality is not None:
                 value = int(jpeg_quality)
                 if value < 1:
@@ -591,7 +642,10 @@ class RecordingManager:
                     value = 100
                 self.jpeg_quality = value
             if chunk_duration_seconds is not None:
-                self.chunk_duration_seconds = self._normalise_chunk_duration(chunk_duration_seconds)
+                new_duration = self._normalise_chunk_duration(chunk_duration_seconds)
+                if new_duration != self.chunk_duration_seconds:
+                    self.chunk_duration_seconds = new_duration
+                    chunk_limit_needs_update = True
             if storage_threshold_percent is not None:
                 self.storage_threshold_percent = self._normalise_storage_threshold(storage_threshold_percent)
             detector_updates: dict[str, object] = {}
@@ -611,6 +665,17 @@ class RecordingManager:
                 if "enabled" not in detector_updates:
                     detector_updates["enabled"] = self.motion_detection_enabled
                 self._motion_detector.configure(**detector_updates)
+            if chunk_limit_needs_update or not self._chunk_frame_limit:
+                self._chunk_frame_limit = self._calculate_chunk_frame_limit()
+                if (
+                    self._recording_active
+                    and self._active_chunk_frames
+                    and len(self._active_chunk_frames) >= self._chunk_frame_limit
+                ):
+                    flush_request = self._pop_active_chunk_locked()
+
+        if flush_request is not None:
+            await self._persist_chunk(*flush_request)
 
     async def aclose(self) -> None:
         await self._maybe_stop_producer(force=True)
@@ -712,6 +777,7 @@ class RecordingManager:
         storage_limit_reached = False
         storage_status: dict[str, float | int] | None = None
         should_record = False
+        flush_request: tuple[str, int, list[dict[str, object]]] | None = None
         async with self._state_lock:
             if not self._recording_active:
                 return
@@ -734,9 +800,18 @@ class RecordingManager:
                     "timestamp": round(timestamp, 4),
                     "jpeg": encoded,
                 }
-                self._recording_frames.append(frame_entry)
+                self._active_chunk_frames.append(frame_entry)
+                self._total_frame_count += 1
                 self._motion_detector.notify_recorded()
-                if self.max_frames is not None and len(self._recording_frames) >= self.max_frames:
+                if (
+                    self._chunk_frame_limit
+                    and len(self._active_chunk_frames) >= self._chunk_frame_limit
+                ):
+                    flush_request = self._pop_active_chunk_locked()
+                if (
+                    self.max_frames is not None
+                    and self._total_frame_count >= int(self.max_frames)
+                ):
                     self._recording_active = False
             elif storage_limit_reached and self._next_stop_reason is None:
                 self._next_stop_reason = "storage_low"
@@ -744,6 +819,8 @@ class RecordingManager:
             storage_status = self._compute_storage_status()
         if storage_limit_reached:
             self._schedule_auto_stop("storage_low")
+        if flush_request is not None:
+            await self._persist_chunk(*flush_request)
         if not should_record:
             return
 
@@ -784,6 +861,50 @@ class RecordingManager:
         ).encode("ascii")
         return header + payload + b"\r\n"
 
+    def _calculate_chunk_frame_limit(self) -> int:
+        duration = self.chunk_duration_seconds
+        if duration is None or duration <= 0:
+            duration = 60
+        frame_limit = max(1, int(round(self.fps * duration)))
+        if self.max_frames is not None:
+            frame_limit = max(1, min(frame_limit, int(self.max_frames)))
+        return frame_limit
+
+    def _chunk_filename(self, name: str, index: int) -> str:
+        return f"{name}.chunk{index:03d}.json.gz"
+
+    def _pop_active_chunk_locked(
+        self,
+    ) -> tuple[str, int, list[dict[str, object]]] | None:
+        name = self._recording_name
+        frames = self._active_chunk_frames
+        if not name or not frames:
+            return None
+        self._chunk_index += 1
+        self._active_chunk_frames = []
+        return (name, self._chunk_index, frames)
+
+    async def _persist_chunk(
+        self, name: str, index: int, frames: list[dict[str, object]]
+    ) -> None:
+        if not frames:
+            return
+        filename = self._chunk_filename(name, index)
+        entry = {
+            "file": filename,
+            "frame_count": len(frames),
+            "compression": "gzip",
+        }
+        task = asyncio.create_task(self._write_chunk_payload(filename, frames))
+        self._chunk_write_tasks.append((entry, task))
+
+    async def _write_chunk_payload(
+        self, filename: str, frames: list[dict[str, object]]
+    ) -> int:
+        payload = {"frames": frames}
+        path = self.directory / filename
+        return await asyncio.to_thread(_dump_json_to_path, path, payload)
+
     def _normalise_chunk_duration(self, value: int | float | None) -> int | None:
         if value in (None, "", 0):
             return None
@@ -809,15 +930,6 @@ class RecordingManager:
         if numeric > 90:
             numeric = 90.0
         return numeric
-
-    def _chunk_frames(self, frames: list[dict[str, object]], fps: int) -> list[list[dict[str, object]]]:
-        duration = self.chunk_duration_seconds
-        if not frames:
-            return []
-        if duration is None or duration <= 0 or fps <= 0:
-            return [frames]
-        chunk_size = max(1, int(round(fps * duration)))
-        return [frames[index : index + chunk_size] for index in range(0, len(frames), chunk_size)]
 
     def _compute_storage_status(self) -> dict[str, float | int]:
         usage = shutil.disk_usage(self.directory)
