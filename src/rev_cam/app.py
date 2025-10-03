@@ -580,12 +580,18 @@ def create_app(
         recording_mode = (
             recording_manager.recording_mode if recording_manager is not None else "idle"
         )
+        started_at_iso: str | None = None
+        if recording_manager is not None:
+            started_at_value = recording_manager.recording_started_at
+            if started_at_value is not None:
+                started_at_iso = started_at_value.isoformat()
         is_recording_flag = recording_manager.is_recording if recording_manager else False
         state = config_manager.get_surveillance_state().to_dict()
         return {
             "mode": current_mode.value,
             "recording": is_recording_flag,
             "recording_mode": recording_mode,
+            "recording_started_at": started_at_iso,
             "recordings": recordings,
             "preview": preview,
             "settings": surveillance_settings,

@@ -180,6 +180,34 @@
         gap: var(--space-sm);
         flex-wrap: wrap;
       }
+      .recording-timer {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.45rem;
+        padding: 0.4rem 1rem;
+        border-radius: var(--radius-pill);
+        background: rgba(10, 132, 255, 0.12);
+        border: 1px solid rgba(10, 132, 255, 0.35);
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+        color: var(--accent);
+        box-shadow: 0 10px 28px rgba(10, 132, 255, 0.18);
+      }
+      .recording-timer .recording-timer-icon {
+        font-size: 0.95rem;
+      }
+      .recording-timer .recording-timer-label {
+        text-transform: uppercase;
+        font-size: 0.7rem;
+        letter-spacing: 0.08em;
+        color: var(--text-muted);
+      }
+      .recording-timer .recording-timer-value {
+        color: var(--text-primary);
+        font-size: 0.95rem;
+        min-width: 3.5ch;
+        text-align: right;
+      }
       button.action {
         background: linear-gradient(135deg, var(--accent), var(--accent-hover));
         color: #fff;
@@ -364,6 +392,13 @@
         main {
           padding: var(--space-lg);
         }
+        .controls {
+          justify-content: center;
+        }
+        .recording-timer {
+          width: 100%;
+          justify-content: center;
+        }
       }
     </style>
   </head>
@@ -394,6 +429,11 @@
           <button class="action" type="button" id="motion-record-button" aria-pressed="false">
             Start motion recording
           </button>
+          <div class="recording-timer" id="recording-timer" aria-live="polite" hidden>
+            <span class="recording-timer-icon" aria-hidden="true">⏱</span>
+            <span class="recording-timer-label">Elapsed</span>
+            <span class="recording-timer-value" data-timer-value>00:00</span>
+          </div>
         </div>
         <p class="muted storage-status" id="storage-status">Storage: —</p>
       </section>
@@ -424,6 +464,10 @@
       const previewMessage = document.getElementById("preview-message");
       const recordButton = document.getElementById("record-button");
       const motionRecordButton = document.getElementById("motion-record-button");
+      const recordingTimer = document.getElementById("recording-timer");
+      const recordingTimerValue = recordingTimer
+        ? recordingTimer.querySelector("[data-timer-value]")
+        : null;
       const recordingsList = document.getElementById("recordings-list");
       const recordingsEmpty = document.getElementById("recordings-empty");
       const refreshButton = document.getElementById("refresh-recordings");
@@ -436,6 +480,9 @@
       let isRecording = false;
       let recordingMode = "idle";
       let previewUrl = null;
+      let recordingTimerStartMs = null;
+      let recordingTimerInterval = null;
+      let recordingTimerSource = null;
 
       function setStatus(message, tone = "info") {
         if (!statusMessage) {
@@ -443,6 +490,88 @@
         }
         statusMessage.textContent = message;
         statusMessage.dataset.tone = tone;
+      }
+
+      function renderRecordingTimer() {
+        if (!recordingTimer || !recordingTimerValue) {
+          return;
+        }
+        if (recordingTimerStartMs === null) {
+          recordingTimerValue.textContent = "00:00";
+          recordingTimer.hidden = true;
+          return;
+        }
+        const elapsedSeconds = Math.max(0, Math.floor((Date.now() - recordingTimerStartMs) / 1000));
+        const hours = Math.floor(elapsedSeconds / 3600);
+        const minutes = Math.floor((elapsedSeconds % 3600) / 60);
+        const seconds = elapsedSeconds % 60;
+        const minutesPart = hours > 0 ? String(minutes).padStart(2, "0") : String(minutes);
+        const secondsPart = String(seconds).padStart(2, "0");
+        const prefix = hours > 0 ? `${hours}:${minutesPart}` : minutesPart.padStart(2, "0");
+        const display = `${prefix}:${secondsPart}`;
+        recordingTimerValue.textContent = display;
+        recordingTimer.hidden = false;
+      }
+
+      function stopRecordingTimer() {
+        if (recordingTimerInterval !== null) {
+          window.clearInterval(recordingTimerInterval);
+          recordingTimerInterval = null;
+        }
+        recordingTimerStartMs = null;
+        recordingTimerSource = null;
+        if (recordingTimerValue) {
+          recordingTimerValue.textContent = "00:00";
+        }
+        if (recordingTimer) {
+          recordingTimer.hidden = true;
+        }
+      }
+
+      function startRecordingTimer(startIso) {
+        if (!recordingTimer || !recordingTimerValue) {
+          return;
+        }
+        if (typeof startIso !== "string" || startIso.length === 0) {
+          return;
+        }
+        const parsed = Date.parse(startIso);
+        if (Number.isNaN(parsed)) {
+          return;
+        }
+        if (recordingTimerInterval !== null) {
+          window.clearInterval(recordingTimerInterval);
+          recordingTimerInterval = null;
+        }
+        recordingTimerStartMs = parsed;
+        recordingTimerSource = startIso;
+        renderRecordingTimer();
+        recordingTimerInterval = window.setInterval(renderRecordingTimer, 1000);
+      }
+
+      function syncRecordingTimer(startIso, motionSnapshot) {
+        if (!recordingTimer) {
+          return;
+        }
+        const hasStart = typeof startIso === "string" && startIso.length > 0;
+        const isContinuousRecording = isRecording && recordingMode === "continuous";
+        let isMotionRecording = false;
+        if (recordingMode === "motion" && motionSnapshot && motionSnapshot.session_active) {
+          const sessionRecording = motionSnapshot.session_recording === true;
+          const sessionState = motionSnapshot.session_state;
+          const eventActive = motionSnapshot.event_active === true;
+          isMotionRecording = sessionRecording || eventActive || sessionState === "recording";
+        }
+        const shouldRun = hasStart && (isContinuousRecording || isMotionRecording);
+        if (!shouldRun) {
+          stopRecordingTimer();
+          return;
+        }
+        if (recordingTimerSource === startIso && recordingTimerStartMs !== null) {
+          renderRecordingTimer();
+          return;
+        }
+        startRecordingTimer(startIso);
       }
 
       function updateModeButtons(mode) {
@@ -770,6 +899,11 @@
           updateStorage(storage);
           const motionSnapshot = payload ? payload.motion : null;
           updateMotionIndicators(motionSnapshot);
+          const startedAtIso =
+            payload && typeof payload.recording_started_at === "string"
+              ? payload.recording_started_at
+              : null;
+          syncRecordingTimer(startedAtIso, motionSnapshot);
           const processingRecord = payload ? payload.processing_recording : null;
           const isProcessing = Boolean(payload && payload.processing);
           const processingError =
@@ -883,6 +1017,10 @@
             console.error("Viewing mode change failure", error),
           );
         });
+      });
+
+      window.addEventListener("pagehide", () => {
+        stopRecordingTimer();
       });
 
       loadStatus();

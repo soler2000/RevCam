@@ -572,6 +572,10 @@ class RecordingManager:
             return "idle"
         return "motion" if self._active_motion_enabled else "continuous"
 
+    @property
+    def recording_started_at(self) -> datetime | None:
+        return self._recording_started_at
+
     async def stream(self) -> AsyncGenerator[bytes, None]:
         queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=1)
         async with self._subscriber(queue):

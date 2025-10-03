@@ -171,6 +171,9 @@ def test_surveillance_status_storage(client: TestClient) -> None:
     payload = response.json()
     assert payload["mode"] in {"revcam", "surveillance"}
     assert payload.get("recording_mode") in {"idle", "continuous", "motion"}
+    assert "recording_started_at" in payload
+    started_at = payload.get("recording_started_at")
+    assert started_at is None or isinstance(started_at, str)
     storage = payload.get("storage")
     assert isinstance(storage, dict)
     assert "free_percent" in storage
