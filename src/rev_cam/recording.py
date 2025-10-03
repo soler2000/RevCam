@@ -14,7 +14,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import AsyncGenerator, Awaitable, Callable, Mapping
+from typing import AsyncGenerator, Awaitable, Callable, Iterable, Mapping
 
 try:  # pragma: no cover - optional dependency on numpy
     import numpy as _np
@@ -58,6 +58,32 @@ def _dump_json_to_path(path: Path, payload: object) -> int:
             handle.write(data)
     else:
         path.write_bytes(data)
+    return path.stat().st_size
+
+
+def _dump_chunk_frames_to_path(
+    path: Path, frames: Iterable[Mapping[str, object]]
+) -> int:
+    """Stream ``frames`` to ``path`` without building a large JSON blob in memory."""
+
+    def _write_frames(handle) -> None:
+        handle.write("{\"frames\":[")
+        first = True
+        for frame in frames:
+            if not isinstance(frame, Mapping):
+                continue
+            if not first:
+                handle.write(",")
+            json.dump(frame, handle, separators=(",", ":"), ensure_ascii=False)
+            first = False
+        handle.write("]}")
+
+    if path.suffix == ".gz":
+        with gzip.open(path, "wt", encoding="utf-8") as handle:
+            _write_frames(handle)
+    else:
+        with path.open("w", encoding="utf-8") as handle:
+            _write_frames(handle)
     return path.stat().st_size
 
 
@@ -1362,9 +1388,8 @@ class RecordingManager:
     async def _write_chunk_payload(
         self, filename: str, frames: list[dict[str, object]]
     ) -> int:
-        payload = {"frames": frames}
         path = self.directory / filename
-        return await asyncio.to_thread(_dump_json_to_path, path, payload)
+        return await asyncio.to_thread(_dump_chunk_frames_to_path, path, frames)
 
     def _normalise_chunk_duration(self, value: int | float | None) -> int | None:
         if value in (None, "", 0):
