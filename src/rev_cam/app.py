@@ -540,12 +540,20 @@ def create_app(
 
     async def _serialise_surveillance_status() -> dict[str, object]:
         recordings: list[dict[str, object]] = []
+        processing_record: dict[str, object] | None = None
+        processing_active = False
         if recording_manager is not None:
             try:
                 recordings = await recording_manager.list_recordings()
             except Exception:  # pragma: no cover - defensive logging
                 logger.exception("Failed to list surveillance recordings")
                 recordings = []
+            try:
+                processing_record = await recording_manager.get_processing_metadata()
+            except Exception:  # pragma: no cover - defensive logging
+                logger.exception("Failed to read in-flight surveillance metadata")
+                processing_record = None
+            processing_active = recording_manager.is_processing
         else:
             try:
                 recordings = await asyncio.to_thread(
@@ -577,6 +585,8 @@ def create_app(
             "storage": storage_status,
             "motion": motion_state,
             "resume_state": state,
+            "processing": processing_active,
+            "processing_recording": processing_record,
         }
 
     async def _ensure_recording_manager() -> RecordingManager:

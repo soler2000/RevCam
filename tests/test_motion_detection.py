@@ -101,7 +101,10 @@ async def test_recording_manager_records_only_when_motion_detected(tmp_path: Pat
     snapshot = manager.get_motion_status()
     assert snapshot["recorded_frames"] == 3
 
-    metadata = await manager.stop_recording()
+    placeholder = await manager.stop_recording()
+    assert placeholder["processing"] is True
+    metadata = await manager.wait_for_processing()
+    assert metadata is not None
     motion = metadata["motion_detection"]
     assert motion["enabled"] is True
     assert motion["pause_count"] >= 1
@@ -133,7 +136,10 @@ async def test_recording_manager_writes_compressed_chunks(tmp_path: Path, anyio_
     for index in range(5):
         await manager._record_frame(f"frame{index}".encode(), index * 0.2, frame)
 
-    metadata = await manager.stop_recording()
+    placeholder = await manager.stop_recording()
+    assert placeholder["processing"] is True
+    metadata = await manager.wait_for_processing()
+    assert metadata is not None
     await manager.aclose()
 
     assert metadata["chunk_count"] >= 1

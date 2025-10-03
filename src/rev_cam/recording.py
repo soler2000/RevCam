@@ -6,8 +6,10 @@ import asyncio
 import base64
 import gzip
 import json
+import logging
 import shutil
 import time
+from copy import deepcopy
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -21,6 +23,9 @@ except ImportError:  # pragma: no cover - optional dependency fallback
 
 from .camera import BaseCamera
 from .pipeline import FramePipeline
+
+
+logger = logging.getLogger(__name__)
 
 
 def _utcnow() -> datetime:
@@ -452,6 +457,15 @@ class RecordingManager:
     _auto_stop_task: asyncio.Task[None] | None = field(init=False, default=None)
     _last_storage_status: dict[str, float | int] | None = field(init=False, default=None)
     _motion_detector: MotionDetector = field(init=False)
+    _finalise_task: asyncio.Task[dict[str, object]] | None = field(
+        init=False, default=None
+    )
+    _processing_metadata: dict[str, object] | None = field(
+        init=False, default=None
+    )
+    _last_finalised_metadata: dict[str, object] | None = field(
+        init=False, default=None
+    )
 
     def __post_init__(self) -> None:
         if self.fps <= 0:
@@ -485,6 +499,11 @@ class RecordingManager:
     @property
     def is_recording(self) -> bool:
         return self._recording_active
+
+    @property
+    def is_processing(self) -> bool:
+        task = self._finalise_task
+        return task is not None and not task.done()
 
     async def stream(self) -> AsyncGenerator[bytes, None]:
         queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=1)
@@ -540,7 +559,6 @@ class RecordingManager:
             self._cancel_auto_stop_task()
             self._total_frame_count = 0
             self._chunk_index = 0
-
         if pending_flush is not None:
             await self._persist_chunk(*pending_flush)
 
@@ -549,34 +567,7 @@ class RecordingManager:
 
         finished_at = _utcnow()
         duration = max(0.0, (finished_at - started_at).total_seconds())
-        chunk_entries: list[dict[str, object]] = []
-        total_size = 0
-        for entry, task in chunk_tasks:
-            try:
-                size = await task
-            except asyncio.CancelledError:
-                raise
-            except Exception:  # pragma: no cover - defensive guard
-                size = 0
-            entry = dict(entry)
-            entry["size_bytes"] = int(size)
-            chunk_entries.append(entry)
-            total_size += int(size)
-
-        if not chunk_entries:
-            filename = f"{name}.chunk001.json.gz"
-            size = await self._write_chunk_payload(filename, [])
-            chunk_entries.append(
-                {
-                    "file": filename,
-                    "frame_count": 0,
-                    "size_bytes": size,
-                    "compression": "gzip",
-                }
-            )
-            total_size = size
-
-        metadata = {
+        base_metadata: dict[str, object] = {
             "name": name,
             "started_at": started_at.isoformat(),
             "ended_at": finished_at.isoformat(),
@@ -586,35 +577,151 @@ class RecordingManager:
             "thumbnail": thumbnail,
         }
         if stop_reason:
-            metadata["stop_reason"] = stop_reason
+            base_metadata["stop_reason"] = stop_reason
         if self.chunk_duration_seconds:
-            metadata["chunk_duration_seconds"] = self.chunk_duration_seconds
-        metadata["chunk_count"] = len(chunk_entries)
-        metadata["chunks"] = chunk_entries
-        metadata["size_bytes"] = total_size
-        metadata["chunk_compression"] = "gzip"
+            base_metadata["chunk_duration_seconds"] = self.chunk_duration_seconds
         if self._last_storage_status:
-            metadata["storage_status"] = self._last_storage_status
-        metadata["motion_detection"] = self._motion_detector.snapshot()
+            base_metadata["storage_status"] = self._last_storage_status
+        base_metadata["motion_detection"] = self._motion_detector.snapshot()
 
-        meta_path = self.directory / f"{name}.meta.json"
-        await asyncio.to_thread(_dump_json_to_path, meta_path, metadata)
+        processing_stub = dict(base_metadata)
+        processing_stub["processing"] = True
+
+        finalise_task = asyncio.create_task(
+            self._run_recording_finalise(
+                name=name,
+                base_metadata=base_metadata,
+                chunk_tasks=chunk_tasks,
+            )
+        )
+        async with self._state_lock:
+            self._processing_metadata = processing_stub
+            self._finalise_task = finalise_task
+            self._last_finalised_metadata = None
+
         await self._maybe_stop_producer()
-        if callable(self.on_stop):
-            try:
-                await self.on_stop(metadata)
-            except Exception:  # pragma: no cover - defensive callback guard
-                pass
-        return metadata
+        return processing_stub
 
     async def list_recordings(self) -> list[dict[str, object]]:
-        return await asyncio.to_thread(load_recording_metadata, self.directory)
+        records = await asyncio.to_thread(load_recording_metadata, self.directory)
+        processing = await self.get_processing_metadata()
+        if processing:
+            names = {
+                str(item.get("name"))
+                for item in records
+                if isinstance(item, Mapping) and item.get("name")
+            }
+            if str(processing.get("name")) not in names:
+                records.insert(0, processing)
+        return records
 
     async def get_recording(self, name: str) -> dict[str, object]:
         return await asyncio.to_thread(load_recording_payload, self.directory, name)
 
     async def remove_recording(self, name: str) -> None:
         await asyncio.to_thread(remove_recording_files, self.directory, name)
+
+    async def _run_recording_finalise(
+        self,
+        *,
+        name: str,
+        base_metadata: dict[str, object],
+        chunk_tasks: list[tuple[dict[str, object], asyncio.Task[int]]],
+    ) -> dict[str, object]:
+        metadata = dict(base_metadata)
+        chunk_entries: list[dict[str, object]] = []
+        total_size = 0
+        processing_error: str | None = None
+
+        for entry, task in chunk_tasks:
+            size = 0
+            try:
+                size = await task
+            except asyncio.CancelledError:  # pragma: no cover - propagate cancellation
+                raise
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.exception(
+                    "Failed to flush surveillance chunk %s for %s", entry.get("file"), name
+                )
+                processing_error = str(exc)
+            frame_entry = dict(entry)
+            frame_entry["size_bytes"] = int(size)
+            chunk_entries.append(frame_entry)
+            total_size += int(size)
+
+        if not chunk_entries:
+            filename = f"{name}.chunk001.json.gz"
+            try:
+                size = await self._write_chunk_payload(filename, [])
+            except asyncio.CancelledError:  # pragma: no cover - propagate cancellation
+                raise
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.exception(
+                    "Failed to create placeholder surveillance chunk for %s", name
+                )
+                processing_error = str(exc)
+                size = 0
+            chunk_entries.append(
+                {
+                    "file": filename,
+                    "frame_count": 0,
+                    "size_bytes": int(size),
+                    "compression": "gzip",
+                }
+            )
+            total_size += int(size)
+
+        metadata["chunk_count"] = len(chunk_entries)
+        metadata["chunks"] = chunk_entries
+        metadata["size_bytes"] = total_size
+        metadata["chunk_compression"] = "gzip"
+        if processing_error:
+            metadata["processing_error"] = processing_error
+        meta_path = self.directory / f"{name}.meta.json"
+        try:
+            await asyncio.to_thread(_dump_json_to_path, meta_path, metadata)
+        except asyncio.CancelledError:  # pragma: no cover - propagate cancellation
+            raise
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.exception("Failed to write surveillance metadata for %s", name)
+            processing_error = str(exc)
+            metadata["processing_error"] = processing_error
+
+        if callable(self.on_stop):
+            try:
+                await self.on_stop(metadata)
+            except Exception:  # pragma: no cover - defensive callback guard
+                logger.exception("Surveillance on_stop callback failed for %s", name)
+
+        async with self._state_lock:
+            self._last_finalised_metadata = metadata
+            self._finalise_task = None
+            if processing_error:
+                self._processing_metadata = metadata
+            else:
+                self._processing_metadata = None
+
+        return metadata
+
+    async def wait_for_processing(self) -> dict[str, object] | None:
+        task = self._finalise_task
+        if task is not None:
+            try:
+                return await task
+            except asyncio.CancelledError:  # pragma: no cover - propagate cancellation
+                raise
+            except Exception:  # pragma: no cover - defensive guard
+                return None
+        async with self._state_lock:
+            if self._last_finalised_metadata is None:
+                return None
+            return deepcopy(self._last_finalised_metadata)
+
+    async def get_processing_metadata(self) -> dict[str, object] | None:
+        async with self._state_lock:
+            if self._processing_metadata is None:
+                return None
+            return deepcopy(self._processing_metadata)
 
     async def apply_settings(
         self,
@@ -678,6 +785,7 @@ class RecordingManager:
             await self._persist_chunk(*flush_request)
 
     async def aclose(self) -> None:
+        await self.wait_for_processing()
         await self._maybe_stop_producer(force=True)
         async with self._lock:
             subscribers = list(self._subscribers)

@@ -165,6 +165,9 @@ def test_surveillance_status_storage(client: TestClient) -> None:
     assert isinstance(storage, dict)
     assert "free_percent" in storage
     assert "threshold_percent" in storage
+    assert "processing" in payload
+    assert payload["processing"] in {True, False}
+    assert "processing_recording" in payload
     assert "motion" in payload
     motion = payload.get("motion")
     if motion is not None:

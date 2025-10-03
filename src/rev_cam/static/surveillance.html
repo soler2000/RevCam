@@ -545,21 +545,34 @@
           const details = document.createElement("span");
           details.className = "recording-details";
           const started = record.started_at ? new Date(record.started_at) : null;
-          const durationSeconds = typeof record.duration_seconds === "number" ? record.duration_seconds : null;
+          const durationSeconds =
+            typeof record.duration_seconds === "number" ? record.duration_seconds : null;
           const sizeBytes = typeof record.size_bytes === "number" ? record.size_bytes : null;
           const chunkCount = typeof record.chunk_count === "number" ? record.chunk_count : null;
-          const formatted = [
-            started ? started.toLocaleString() : null,
-            durationSeconds != null ? `${durationSeconds.toFixed(1)}s` : null,
-            sizeBytes != null ? formatBytes(sizeBytes) : null,
-            chunkCount && chunkCount > 1 ? `${chunkCount} chunks` : null,
-            record.stop_reason === "storage_low"
-              ? "Stopped due to low storage"
-              : typeof record.stop_reason === "string"
-              ? `Stopped: ${record.stop_reason}`
-              : null,
-          ].filter(Boolean);
-          details.textContent = formatted.join(" • ") || "Pending metadata";
+          const isProcessingRecord = Boolean(record.processing);
+          const processingError =
+            typeof record.processing_error === "string" && record.processing_error.length > 0;
+          let summaryText;
+          if (isProcessingRecord) {
+            summaryText = "Processing clip…";
+          } else if (processingError) {
+            summaryText = "Processing failed";
+            details.title = record.processing_error;
+          } else {
+            const formatted = [
+              started ? started.toLocaleString() : null,
+              durationSeconds != null ? `${durationSeconds.toFixed(1)}s` : null,
+              sizeBytes != null ? formatBytes(sizeBytes) : null,
+              chunkCount && chunkCount > 1 ? `${chunkCount} chunks` : null,
+              record.stop_reason === "storage_low"
+                ? "Stopped due to low storage"
+                : typeof record.stop_reason === "string"
+                ? `Stopped: ${record.stop_reason}`
+                : null,
+            ].filter(Boolean);
+            summaryText = formatted.join(" • ") || "Pending metadata";
+          }
+          details.textContent = summaryText;
           meta.appendChild(name);
           meta.appendChild(details);
           if (Array.isArray(record.chunks) && record.chunks.length > 0) {
@@ -589,12 +602,20 @@
           const actions = document.createElement("div");
           actions.className = "recording-actions";
           const open = createActionButton("Open", "open-recording");
+          if (isProcessingRecord) {
+            open.disabled = true;
+            open.title = "Processing clip…";
+          }
           open.addEventListener("click", () => {
             const href = `/surveillance/player?name=${encodeURIComponent(record.name)}`;
             window.location.href = href;
           });
           actions.appendChild(open);
           const removeButton = createActionButton("Delete", "delete-recording");
+          if (isProcessingRecord) {
+            removeButton.disabled = true;
+            removeButton.title = "Processing clip…";
+          }
           removeButton.addEventListener("click", () => {
             deleteRecording(record.name).catch((error) => {
               console.error("Delete recording error", error);
@@ -629,7 +650,21 @@
           renderRecordings(payload && Array.isArray(payload.recordings) ? payload.recordings : []);
           const storage = payload ? payload.storage : null;
           updateStorage(storage);
-          setStatus(isRecording ? "Recording" : "Surveillance ready", isRecording ? "busy" : "info");
+          const processingRecord = payload ? payload.processing_recording : null;
+          const isProcessing = Boolean(payload && payload.processing);
+          const processingError =
+            processingRecord &&
+            typeof processingRecord.processing_error === "string" &&
+            processingRecord.processing_error.length > 0;
+          if (isRecording) {
+            setStatus("Recording", "busy");
+          } else if (isProcessing) {
+            setStatus("Processing video clip…", "busy");
+          } else if (processingError) {
+            setStatus("Recording processing failed", "error");
+          } else {
+            setStatus("Surveillance ready", "info");
+          }
           if (
             storage &&
             typeof storage.free_percent === "number" &&
