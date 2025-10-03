@@ -518,6 +518,7 @@ class RecordingManager:
     _current_motion_event_index: int = field(init=False, default=0)
     _motion_event_active: bool = field(init=False, default=False)
     _motion_event_pending_stop: float | None = field(init=False, default=None)
+    _motion_state_hold_until: float | None = field(init=False, default=None)
 
     def __post_init__(self) -> None:
         if self.fps <= 0:
@@ -629,6 +630,7 @@ class RecordingManager:
             self._next_stop_reason = None
             self._cancel_auto_stop_task()
             self._chunk_frame_limit = self._calculate_chunk_frame_limit()
+            self._motion_state_hold_until = None
 
         await self._ensure_producer_running()
         return {"name": name, "started_at": started_at.isoformat()}
@@ -844,6 +846,7 @@ class RecordingManager:
                 self._motion_state = "monitoring"
             elif not self._active_motion_enabled:
                 self._motion_state = None
+                self._motion_state_hold_until = None
             if detector_updates or session_override:
                 updates = dict(detector_updates)
                 updates["enabled"] = effective_enabled
@@ -1043,12 +1046,28 @@ class RecordingManager:
                             and now <= self._motion_event_pending_stop
                         )
                     )
-                ):
+                    ):
                     motion_state_recording = True
+                recording_now = motion_state_recording
+                if recording_now and self._motion_event_base is None:
+                    linger = max(0.5, float(self.motion_post_event_seconds))
+                    hold_until = now + linger
+                    if (
+                        self._motion_state_hold_until is None
+                        or hold_until > self._motion_state_hold_until
+                    ):
+                        self._motion_state_hold_until = hold_until
+                elif not recording_now and self._motion_event_base is None:
+                    hold_until = self._motion_state_hold_until
+                    if hold_until is not None and now <= hold_until:
+                        motion_state_recording = True
+                    else:
+                        self._motion_state_hold_until = None
                 self._motion_state = "recording" if motion_state_recording else "monitoring"
             else:
                 self._motion_state = None
                 self._motion_event_pending_stop = None
+                self._motion_state_hold_until = None
             storage_status = self._compute_storage_status()
             if self.storage_threshold_percent > 0:
                 free_percent = float(storage_status.get("free_percent", 100.0))
@@ -1122,6 +1141,7 @@ class RecordingManager:
         self._thumbnail = None
         self._motion_event_active = True
         self._motion_event_pending_stop = None
+        self._motion_state_hold_until = None
 
     def _finalise_motion_event_locked(
         self, *, stop_reason: str | None
@@ -1308,6 +1328,8 @@ class RecordingManager:
         status["session_active"] = self.motion_session_active
         status["session_override"] = self._session_motion_override
         status["session_state"] = self._motion_state
+        status["event_active"] = self._motion_event_active
+        status["session_recording"] = self._motion_state == "recording"
         status["post_event_record_seconds"] = float(self.motion_post_event_seconds)
         return status
 

@@ -582,12 +582,14 @@
           return;
         }
         const sessionState = motionSnapshot.session_state;
+        const sessionRecording = motionSnapshot.session_recording === true;
+        const eventActive = motionSnapshot.event_active === true;
         const isMotionSession =
           recordingMode === "motion" || motionSnapshot.session_override === true;
         if (!isMotionSession) {
           return;
         }
-        if (sessionState === "recording") {
+        if (sessionRecording || sessionState === "recording" || eventActive) {
           motionRecordButton.classList.add("motion-alert");
           if (previewCard) {
             previewCard.classList.add("motion-alert");
@@ -775,16 +777,13 @@
             typeof processingRecord.processing_error === "string" &&
             processingRecord.processing_error.length > 0;
           if (isRecording) {
-            if (
-              recordingMode === "motion" &&
-              motionSnapshot &&
-              motionSnapshot.session_active
-            ) {
+            if (recordingMode === "motion" && motionSnapshot && motionSnapshot.session_active) {
               const sessionState = motionSnapshot.session_state;
-              if (sessionState === "monitoring" || motionSnapshot.active === false) {
-                setStatus("Monitoring for motion", "monitor");
-              } else {
+              const sessionRecording = motionSnapshot.session_recording === true;
+              if (sessionRecording || sessionState === "recording") {
                 setStatus("Motion recording", "alert");
+              } else {
+                setStatus("Monitoring for motion", "monitor");
               }
             } else {
               setStatus("Recording", "busy");

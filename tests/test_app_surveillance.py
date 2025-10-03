@@ -186,6 +186,8 @@ def test_surveillance_status_storage(client: TestClient) -> None:
         assert "session_state" in motion
         assert "session_active" in motion
         assert "session_override" in motion
+        assert "session_recording" in motion
+        assert "event_active" in motion
         assert "post_event_record_seconds" in motion
     resume_state = payload.get("resume_state")
     assert isinstance(resume_state, dict)

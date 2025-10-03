@@ -1863,7 +1863,7 @@ def create_app(
         ):
             raise HTTPException(status_code=507, detail="Insufficient storage available")
         try:
-            details = await manager.start_recording()
+            details = await manager.start_recording(motion_mode=False)
         except RuntimeError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         _persist_surveillance_state(True)
