@@ -128,6 +128,12 @@ def test_update_surveillance_settings_advanced(client: TestClient) -> None:
     assert payload["auto_purge_days"] == 10
     assert payload["storage_threshold_percent"] == 20
 
+    status_response = client.get("/api/surveillance/status")
+    assert status_response.status_code == 200
+    status_payload = status_response.json()["settings"]
+    assert status_payload["motion_frame_decimation"] == 2
+    assert status_payload["motion_post_event_seconds"] == 0.5
+
 
 def test_update_surveillance_settings_expert_validation(client: TestClient) -> None:
     response = client.post(

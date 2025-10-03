@@ -177,6 +177,8 @@ class SurveillanceSettingsPayload(BaseModel):
     remember_recording_state: bool | None = None
     motion_detection_enabled: bool | None = None
     motion_sensitivity: int | None = None
+    motion_frame_decimation: int | None = None
+    motion_post_event_seconds: float | None = None
     auto_purge_days: int | None = None
     storage_threshold_percent: float | None = None
 
@@ -1812,6 +1814,8 @@ def create_app(
                     storage_threshold_percent=settings.storage_threshold_percent,
                     motion_detection_enabled=settings.motion_detection_enabled,
                     motion_sensitivity=settings.motion_sensitivity,
+                    motion_frame_decimation=settings.motion_frame_decimation,
+                    motion_post_event_seconds=settings.motion_post_event_seconds,
                 )
             except Exception as exc:  # pragma: no cover - defensive logging
                 logger.exception("Failed to apply surveillance recording settings")
