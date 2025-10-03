@@ -575,10 +575,15 @@ def create_app(
         motion_state = (
             recording_manager.get_motion_status() if recording_manager is not None else None
         )
+        recording_mode = (
+            recording_manager.recording_mode if recording_manager is not None else "idle"
+        )
+        is_recording_flag = recording_manager.is_recording if recording_manager else False
         state = config_manager.get_surveillance_state().to_dict()
         return {
             "mode": current_mode.value,
-            "recording": recording_manager.is_recording if recording_manager else False,
+            "recording": is_recording_flag,
+            "recording_mode": recording_mode,
             "recordings": recordings,
             "preview": preview,
             "settings": surveillance_settings,
@@ -1849,6 +1854,32 @@ def create_app(
             raise HTTPException(status_code=507, detail="Insufficient storage available")
         try:
             details = await manager.start_recording()
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        _persist_surveillance_state(True)
+        return {"recording": details}
+
+    @app.post("/api/surveillance/recordings/start-motion")
+    async def start_motion_surveillance_recording() -> dict[str, object]:
+        if current_mode is not StreamMode.SURVEILLANCE:
+            raise HTTPException(status_code=409, detail="Enable surveillance mode first")
+        try:
+            manager = await _ensure_recording_manager()
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        settings = config_manager.get_surveillance_settings()
+        storage_status = _build_storage_status(settings)
+        free_percent = storage_status.get("free_percent")
+        threshold = storage_status.get("threshold_percent")
+        if (
+            isinstance(free_percent, (int, float))
+            and isinstance(threshold, (int, float))
+            and threshold > 0
+            and free_percent <= threshold
+        ):
+            raise HTTPException(status_code=507, detail="Insufficient storage available")
+        try:
+            details = await manager.start_recording(motion_mode=True)
         except RuntimeError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         _persist_surveillance_state(True)

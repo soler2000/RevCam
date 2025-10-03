@@ -94,12 +94,16 @@ async def test_recording_manager_records_only_when_motion_detected(tmp_path: Pat
     await manager._record_frame(b"frame3", 0.2, still)
     snapshot = manager.get_motion_status()
     assert snapshot["recorded_frames"] == 2
+    assert snapshot["session_state"] == "monitoring"
+    assert snapshot["session_active"] is True
 
     moving = still.copy()
     moving[:4, :4, :] = 255
     await manager._record_frame(b"frame4", 0.25, moving)
     snapshot = manager.get_motion_status()
     assert snapshot["recorded_frames"] == 3
+    assert snapshot["session_state"] == "recording"
+    assert snapshot["session_active"] is True
 
     placeholder = await manager.stop_recording()
     assert placeholder["processing"] is True
@@ -112,6 +116,50 @@ async def test_recording_manager_records_only_when_motion_detected(tmp_path: Pat
     assert motion["recorded_frames"] == 3
     await manager.aclose()
 
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("anyio_backend", ["asyncio"], indirect=True)
+async def test_recording_manager_motion_override_session(tmp_path: Path, anyio_backend) -> None:
+    camera = _StaticCamera()
+    pipeline = _pipeline()
+    manager = RecordingManager(
+        camera=camera,
+        pipeline=pipeline,
+        directory=tmp_path,
+        motion_detection_enabled=False,
+        motion_inactivity_timeout_seconds=0.05,
+    )
+
+    async def _noop(self):
+        return None
+
+    manager._ensure_producer_running = types.MethodType(_noop, manager)
+    await manager.start_recording(motion_mode=True)
+
+    assert manager.recording_mode == "motion"
+
+    status = manager.get_motion_status()
+    assert status["session_override"] is True
+    assert status["session_active"] is True
+    assert status["session_state"] == "monitoring"
+
+    still = np.zeros((32, 32, 3), dtype=np.uint8)
+    await manager._record_frame(b"frame0", 0.0, still)
+
+    status = manager.get_motion_status()
+    assert status["session_active"] is True
+    assert status["session_state"] in {"monitoring", "recording"}
+
+    placeholder = await manager.stop_recording()
+    assert placeholder["processing"] is True
+    metadata = await manager.wait_for_processing()
+    assert metadata is not None
+
+    assert manager.recording_mode == "idle"
+    status = manager.get_motion_status()
+    assert status["session_active"] is False
+    assert status["session_state"] is None
+    await manager.aclose()
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("anyio_backend", ["asyncio"], indirect=True)

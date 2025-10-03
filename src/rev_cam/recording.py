@@ -466,6 +466,9 @@ class RecordingManager:
     _last_finalised_metadata: dict[str, object] | None = field(
         init=False, default=None
     )
+    _session_motion_override: bool = field(init=False, default=False)
+    _active_motion_enabled: bool = field(init=False, default=False)
+    _motion_state: str | None = field(init=False, default=None)
 
     def __post_init__(self) -> None:
         if self.fps <= 0:
@@ -505,6 +508,16 @@ class RecordingManager:
         task = self._finalise_task
         return task is not None and not task.done()
 
+    @property
+    def motion_session_active(self) -> bool:
+        return self._recording_active and self._active_motion_enabled
+
+    @property
+    def recording_mode(self) -> str:
+        if not self._recording_active:
+            return "idle"
+        return "motion" if self._active_motion_enabled else "continuous"
+
     async def stream(self) -> AsyncGenerator[bytes, None]:
         queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=1)
         async with self._subscriber(queue):
@@ -512,13 +525,30 @@ class RecordingManager:
                 chunk = await queue.get()
                 yield self._render_chunk(chunk)
 
-    async def start_recording(self) -> dict[str, object]:
+    async def start_recording(
+        self, *, motion_mode: bool | None = None
+    ) -> dict[str, object]:
         async with self._state_lock:
             if self._recording_active:
                 raise RuntimeError("Recording already in progress")
             started_at = _utcnow()
             monotonic = time.perf_counter()
             name = started_at.strftime("%Y%m%d-%H%M%S")
+            if motion_mode is None:
+                self._session_motion_override = False
+                motion_enabled = bool(self.motion_detection_enabled)
+            else:
+                self._session_motion_override = True
+                motion_enabled = bool(motion_mode)
+            self._active_motion_enabled = motion_enabled
+            self._motion_detector.configure(
+                enabled=motion_enabled,
+                sensitivity=self.motion_sensitivity,
+                inactivity_timeout=self.motion_inactivity_timeout_seconds,
+                frame_decimation=self.motion_frame_decimation,
+            )
+            self._motion_detector.reset()
+            self._motion_state = "monitoring" if motion_enabled else None
             self._recording_active = True
             self._active_chunk_frames = []
             self._chunk_write_tasks.clear()
@@ -530,7 +560,6 @@ class RecordingManager:
             self._thumbnail = None
             self._next_stop_reason = None
             self._cancel_auto_stop_task()
-            self._motion_detector.reset()
             self._chunk_frame_limit = self._calculate_chunk_frame_limit()
 
         await self._ensure_producer_running()
@@ -556,6 +585,9 @@ class RecordingManager:
             self._recording_name = None
             self._thumbnail = None
             self._next_stop_reason = None
+            self._session_motion_override = False
+            self._active_motion_enabled = False
+            self._motion_state = None
             self._cancel_auto_stop_task()
             self._total_frame_count = 0
             self._chunk_index = 0
@@ -768,10 +800,26 @@ class RecordingManager:
                 decimation = MotionDetector._normalise_frame_decimation(motion_frame_decimation)
                 self.motion_frame_decimation = decimation
                 detector_updates["frame_decimation"] = decimation
-            if detector_updates:
-                if "enabled" not in detector_updates:
-                    detector_updates["enabled"] = self.motion_detection_enabled
-                self._motion_detector.configure(**detector_updates)
+            session_override = self._session_motion_override and self._recording_active
+            effective_enabled = self.motion_detection_enabled
+            if session_override:
+                effective_enabled = True
+            self._active_motion_enabled = effective_enabled if self._recording_active else False
+            if self._recording_active and self._active_motion_enabled and self._motion_state is None:
+                self._motion_state = "monitoring"
+            elif not self._active_motion_enabled:
+                self._motion_state = None
+            if detector_updates or session_override:
+                updates = dict(detector_updates)
+                updates["enabled"] = effective_enabled
+                updates.setdefault("sensitivity", self.motion_sensitivity)
+                updates.setdefault("frame_decimation", self.motion_frame_decimation)
+                self._motion_detector.configure(
+                    enabled=updates["enabled"],
+                    sensitivity=updates["sensitivity"],
+                    inactivity_timeout=self.motion_inactivity_timeout_seconds,
+                    frame_decimation=updates["frame_decimation"],
+                )
             if chunk_limit_needs_update or not self._chunk_frame_limit:
                 self._chunk_frame_limit = self._calculate_chunk_frame_limit()
                 if (
@@ -890,6 +938,10 @@ class RecordingManager:
             if not self._recording_active:
                 return
             should_record = self._motion_detector.should_record(frame, frame_time)
+            if self._active_motion_enabled:
+                self._motion_state = "recording" if should_record else "monitoring"
+            else:
+                self._motion_state = None
             storage_status = self._compute_storage_status()
             if self.storage_threshold_percent > 0:
                 free_percent = float(storage_status.get("free_percent", 100.0))
@@ -937,7 +989,11 @@ class RecordingManager:
             self._offer(queue, payload)
 
     def get_motion_status(self) -> dict[str, object]:
-        return self._motion_detector.snapshot()
+        status = self._motion_detector.snapshot()
+        status["session_active"] = self.motion_session_active
+        status["session_override"] = self._session_motion_override
+        status["session_state"] = self._motion_state
+        return status
 
     def _offer(self, queue: asyncio.Queue[bytes], payload: bytes) -> None:
         try:

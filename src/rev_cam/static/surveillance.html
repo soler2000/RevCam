@@ -338,6 +338,9 @@
           <button class="action" type="button" id="record-button" aria-pressed="false">
             Start recording
           </button>
+          <button class="action" type="button" id="motion-record-button" aria-pressed="false">
+            Start motion recording
+          </button>
         </div>
         <p class="muted storage-status" id="storage-status">Storage: —</p>
       </section>
@@ -359,6 +362,7 @@
       const previewImage = document.getElementById("surveillance-preview");
       const previewMessage = document.getElementById("preview-message");
       const recordButton = document.getElementById("record-button");
+      const motionRecordButton = document.getElementById("motion-record-button");
       const recordingsList = document.getElementById("recordings-list");
       const recordingsEmpty = document.getElementById("recordings-empty");
       const refreshButton = document.getElementById("refresh-recordings");
@@ -369,6 +373,7 @@
         : [];
       let currentMode = "surveillance";
       let isRecording = false;
+      let recordingMode = "idle";
       let previewUrl = null;
 
       function setStatus(message, tone = "info") {
@@ -444,12 +449,21 @@
         previewMessage.textContent = "Live surveillance preview.";
       }
 
-      function updateRecordButton() {
-        if (!recordButton) {
-          return;
+      function updateControlButtons() {
+        const isContinuous = recordingMode === "continuous";
+        const isMotion = recordingMode === "motion";
+        if (recordButton) {
+          recordButton.textContent = isContinuous ? "Stop recording" : "Start recording";
+          recordButton.setAttribute("aria-pressed", String(isContinuous));
+          recordButton.disabled = isMotion;
         }
-        recordButton.textContent = isRecording ? "Stop recording" : "Start recording";
-        recordButton.setAttribute("aria-pressed", String(isRecording));
+        if (motionRecordButton) {
+          motionRecordButton.textContent = isMotion
+            ? "Stop motion recording"
+            : "Start motion recording";
+          motionRecordButton.setAttribute("aria-pressed", String(isMotion));
+          motionRecordButton.disabled = isContinuous;
+        }
       }
 
       function formatBytes(bytes) {
@@ -644,12 +658,24 @@
               return;
             }
           }
-          isRecording = Boolean(payload && payload.recording);
-          updateRecordButton();
+          let nextRecordingMode = "idle";
+          if (payload && typeof payload.recording_mode === "string") {
+            const candidate = payload.recording_mode;
+            if (candidate === "motion" || candidate === "continuous") {
+              nextRecordingMode = candidate;
+            }
+          }
+          if (nextRecordingMode === "idle" && payload && payload.recording) {
+            nextRecordingMode = "continuous";
+          }
+          recordingMode = nextRecordingMode;
+          isRecording = recordingMode !== "idle";
+          updateControlButtons();
           updatePreview(payload ? payload.preview : null);
           renderRecordings(payload && Array.isArray(payload.recordings) ? payload.recordings : []);
           const storage = payload ? payload.storage : null;
           updateStorage(storage);
+          const motionSnapshot = payload ? payload.motion : null;
           const processingRecord = payload ? payload.processing_recording : null;
           const isProcessing = Boolean(payload && payload.processing);
           const processingError =
@@ -657,7 +683,20 @@
             typeof processingRecord.processing_error === "string" &&
             processingRecord.processing_error.length > 0;
           if (isRecording) {
-            setStatus("Recording", "busy");
+            if (
+              recordingMode === "motion" &&
+              motionSnapshot &&
+              motionSnapshot.session_active
+            ) {
+              const sessionState = motionSnapshot.session_state;
+              if (sessionState === "monitoring" || motionSnapshot.active === false) {
+                setStatus("Monitoring for motion", "busy");
+              } else {
+                setStatus("Motion recording", "busy");
+              }
+            } else {
+              setStatus("Recording", "busy");
+            }
           } else if (isProcessing) {
             setStatus("Processing video clip…", "busy");
           } else if (processingError) {
@@ -682,9 +721,13 @@
 
       if (recordButton) {
         recordButton.addEventListener("click", async () => {
-          recordButton.disabled = true;
+          const buttons = [recordButton, motionRecordButton].filter(Boolean);
+          buttons.forEach((button) => {
+            button.disabled = true;
+          });
           try {
-            const endpoint = isRecording
+            const stopMode = recordingMode === "continuous";
+            const endpoint = stopMode
               ? "/api/surveillance/recordings/stop"
               : "/api/surveillance/recordings/start";
             const response = await fetch(endpoint, {
@@ -699,7 +742,39 @@
             console.error("Recording control error", error);
             setStatus("Recording request failed", "error");
           } finally {
-            recordButton.disabled = false;
+            buttons.forEach((button) => {
+              button.disabled = false;
+            });
+          }
+        });
+      }
+
+      if (motionRecordButton) {
+        motionRecordButton.addEventListener("click", async () => {
+          const buttons = [recordButton, motionRecordButton].filter(Boolean);
+          buttons.forEach((button) => {
+            button.disabled = true;
+          });
+          try {
+            const stopMode = recordingMode === "motion";
+            const endpoint = stopMode
+              ? "/api/surveillance/recordings/stop"
+              : "/api/surveillance/recordings/start-motion";
+            const response = await fetch(endpoint, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+            });
+            if (!response.ok) {
+              throw new Error(`Recording request failed with ${response.status}`);
+            }
+            await loadStatus();
+          } catch (error) {
+            console.error("Motion recording control error", error);
+            setStatus("Recording request failed", "error");
+          } finally {
+            buttons.forEach((button) => {
+              button.disabled = false;
+            });
           }
         });
       }

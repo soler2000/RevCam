@@ -161,6 +161,7 @@ def test_surveillance_status_storage(client: TestClient) -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["mode"] in {"revcam", "surveillance"}
+    assert payload.get("recording_mode") in {"idle", "continuous", "motion"}
     storage = payload.get("storage")
     assert isinstance(storage, dict)
     assert "free_percent" in storage
@@ -173,6 +174,9 @@ def test_surveillance_status_storage(client: TestClient) -> None:
     if motion is not None:
         assert isinstance(motion, dict)
         assert "enabled" in motion
+        assert "session_state" in motion
+        assert "session_active" in motion
+        assert "session_override" in motion
     resume_state = payload.get("resume_state")
     assert isinstance(resume_state, dict)
     assert resume_state.get("mode") in {"revcam", "surveillance"}
