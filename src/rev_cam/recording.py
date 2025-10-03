@@ -13,6 +13,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import AsyncGenerator, Awaitable, Callable, Mapping
 
+try:  # pragma: no cover - optional dependency on numpy
+    import numpy as _np
+except ImportError:  # pragma: no cover - optional dependency fallback
+    _np = None
+
 from .camera import BaseCamera
 from .pipeline import FramePipeline
 
@@ -177,6 +182,171 @@ def purge_recordings(directory: Path, older_than: datetime) -> list[str]:
 
 
 @dataclass
+class MotionDetector:
+    """Simple frame differencing motion detector with inactivity pauses."""
+
+    enabled: bool = False
+    sensitivity: int = 50
+    inactivity_timeout: float = 2.5
+    _previous_frame: "_np.ndarray" | None = field(init=False, default=None)
+    _last_active_monotonic: float | None = field(init=False, default=None)
+    _paused: bool = field(init=False, default=False)
+    _pause_events: int = field(init=False, default=0)
+    _skipped_frames: int = field(init=False, default=0)
+    _recorded_frames: int = field(init=False, default=0)
+
+    def __post_init__(self) -> None:
+        self.enabled = bool(self.enabled)
+        self.sensitivity = self._normalise_sensitivity(self.sensitivity)
+        self.inactivity_timeout = self._normalise_timeout(self.inactivity_timeout)
+
+    def configure(
+        self,
+        *,
+        enabled: bool | None = None,
+        sensitivity: int | float | None = None,
+        inactivity_timeout: float | int | None = None,
+    ) -> None:
+        """Update detector settings and reset state when switching mode."""
+
+        changed = False
+        if enabled is not None and bool(enabled) != self.enabled:
+            self.enabled = bool(enabled)
+            changed = True
+        if sensitivity is not None:
+            new_sensitivity = self._normalise_sensitivity(sensitivity)
+            if new_sensitivity != self.sensitivity:
+                self.sensitivity = new_sensitivity
+                changed = True
+        if inactivity_timeout is not None:
+            timeout = self._normalise_timeout(inactivity_timeout)
+            if timeout != self.inactivity_timeout:
+                self.inactivity_timeout = timeout
+                changed = True
+        if changed:
+            self.reset()
+
+    def reset(self) -> None:
+        """Clear cached frame history and counters."""
+
+        self._previous_frame = None
+        self._last_active_monotonic = None
+        self._paused = False
+        self._pause_events = 0
+        self._skipped_frames = 0
+        self._recorded_frames = 0
+
+    def should_record(self, frame, timestamp: float) -> bool:
+        """Return ``True`` when the frame should be persisted."""
+
+        if not self.enabled or _np is None:
+            self._last_active_monotonic = timestamp
+            self._paused = False
+            return True
+
+        try:
+            array = _np.asarray(frame)
+        except Exception:  # pragma: no cover - defensive guard
+            return True
+
+        if array.size == 0:
+            return True
+
+        if array.ndim == 3:
+            # Convert to grayscale to reduce noise and processing cost.
+            sample = _np.mean(array.astype(_np.float32), axis=2)
+        elif array.ndim == 2:
+            sample = array.astype(_np.float32)
+        else:  # pragma: no cover - defensive guard
+            return True
+
+        # Downsample to reduce noise and CPU usage.
+        sample = sample[::4, ::4]
+        if sample.size == 0:
+            return True
+
+        previous = self._previous_frame
+        self._previous_frame = sample
+        if previous is None or previous.shape != sample.shape:
+            self._last_active_monotonic = timestamp
+            self._paused = False
+            return True
+
+        difference = _np.abs(sample - previous)
+        activity = float(difference.mean())
+        threshold = self._calculate_threshold()
+        if activity >= threshold:
+            self._last_active_monotonic = timestamp
+            if self._paused:
+                self._paused = False
+            return True
+
+        last_active = self._last_active_monotonic
+        if last_active is None:
+            self._last_active_monotonic = timestamp
+            return True
+
+        if timestamp - last_active >= self.inactivity_timeout:
+            if not self._paused:
+                self._paused = True
+                self._pause_events += 1
+            self._skipped_frames += 1
+            return False
+
+        return True
+
+    def notify_recorded(self) -> None:
+        """Record that a frame was persisted while motion detection was enabled."""
+
+        if self.enabled:
+            self._recorded_frames += 1
+
+    def snapshot(self) -> dict[str, object]:
+        """Return a JSON-serialisable view of the detector state."""
+
+        return {
+            "enabled": bool(self.enabled),
+            "sensitivity": int(self.sensitivity),
+            "inactivity_timeout_seconds": float(self.inactivity_timeout),
+            "active": (not self.enabled) or (not self._paused),
+            "pause_count": int(self._pause_events),
+            "skipped_frames": int(self._skipped_frames),
+            "recorded_frames": int(self._recorded_frames),
+        }
+
+    def _calculate_threshold(self) -> float:
+        # Larger sensitivity lowers the activity threshold.
+        minimum = 1.0
+        maximum = 12.0
+        scale = (100 - self.sensitivity) / 100.0
+        return minimum + (maximum - minimum) * scale
+
+    @staticmethod
+    def _normalise_sensitivity(value: int | float | None) -> int:
+        try:
+            numeric = int(float(value))
+        except (TypeError, ValueError):  # pragma: no cover - defensive guard
+            return 50
+        if numeric < 0:
+            numeric = 0
+        elif numeric > 100:
+            numeric = 100
+        return numeric
+
+    @staticmethod
+    def _normalise_timeout(value: float | int | None) -> float:
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):  # pragma: no cover - defensive guard
+            numeric = 2.5
+        if numeric < 0.1:
+            numeric = 0.1
+        elif numeric > 30.0:
+            numeric = 30.0
+        return float(numeric)
+
+
+@dataclass
 class RecordingManager:
     """Capture frames for surveillance recordings with MJPEG preview support."""
 
@@ -189,6 +359,9 @@ class RecordingManager:
     max_frames: int | None = None
     chunk_duration_seconds: int | None = None
     storage_threshold_percent: float = 10.0
+    motion_detection_enabled: bool = False
+    motion_sensitivity: int = 50
+    motion_inactivity_timeout_seconds: float = 2.5
     on_stop: Callable[[dict[str, object]], Awaitable[None]] | None = None
     _subscribers: set[asyncio.Queue[bytes]] = field(init=False, default_factory=set)
     _producer_task: asyncio.Task[None] | None = field(init=False, default=None)
@@ -204,6 +377,7 @@ class RecordingManager:
     _next_stop_reason: str | None = field(init=False, default=None)
     _auto_stop_task: asyncio.Task[None] | None = field(init=False, default=None)
     _last_storage_status: dict[str, float | int] | None = field(init=False, default=None)
+    _motion_detector: MotionDetector = field(init=False)
 
     def __post_init__(self) -> None:
         if self.fps <= 0:
@@ -214,6 +388,16 @@ class RecordingManager:
         self._frame_interval = 1.0 / float(self.fps)
         self.chunk_duration_seconds = self._normalise_chunk_duration(self.chunk_duration_seconds)
         self.storage_threshold_percent = self._normalise_storage_threshold(self.storage_threshold_percent)
+        self.motion_detection_enabled = bool(self.motion_detection_enabled)
+        self.motion_sensitivity = MotionDetector._normalise_sensitivity(self.motion_sensitivity)
+        self.motion_inactivity_timeout_seconds = MotionDetector._normalise_timeout(
+            self.motion_inactivity_timeout_seconds
+        )
+        self._motion_detector = MotionDetector(
+            enabled=self.motion_detection_enabled,
+            sensitivity=self.motion_sensitivity,
+            inactivity_timeout=self.motion_inactivity_timeout_seconds,
+        )
 
     @property
     def media_type(self) -> str:
@@ -245,6 +429,7 @@ class RecordingManager:
             self._thumbnail = None
             self._next_stop_reason = None
             self._cancel_auto_stop_task()
+            self._motion_detector.reset()
 
         await self._ensure_producer_running()
         return {"name": name, "started_at": started_at.isoformat()}
@@ -322,6 +507,7 @@ class RecordingManager:
         metadata["size_bytes"] = total_size
         if self._last_storage_status:
             metadata["storage_status"] = self._last_storage_status
+        metadata["motion_detection"] = self._motion_detector.snapshot()
 
         def _write_metadata() -> None:
             meta_path.write_text(json.dumps(metadata), encoding="utf-8")
@@ -351,6 +537,8 @@ class RecordingManager:
         jpeg_quality: int | None = None,
         chunk_duration_seconds: int | None = None,
         storage_threshold_percent: float | int | None = None,
+        motion_detection_enabled: bool | None = None,
+        motion_sensitivity: int | float | None = None,
     ) -> None:
         async with self._state_lock:
             if fps is not None and fps > 0 and fps != self.fps:
@@ -367,6 +555,19 @@ class RecordingManager:
                 self.chunk_duration_seconds = self._normalise_chunk_duration(chunk_duration_seconds)
             if storage_threshold_percent is not None:
                 self.storage_threshold_percent = self._normalise_storage_threshold(storage_threshold_percent)
+            detector_updates: dict[str, object] = {}
+            if motion_detection_enabled is not None:
+                flag = bool(motion_detection_enabled)
+                self.motion_detection_enabled = flag
+                detector_updates["enabled"] = flag
+            if motion_sensitivity is not None:
+                sensitivity = MotionDetector._normalise_sensitivity(motion_sensitivity)
+                self.motion_sensitivity = sensitivity
+                detector_updates["sensitivity"] = sensitivity
+            if detector_updates:
+                if "enabled" not in detector_updates:
+                    detector_updates["enabled"] = self.motion_detection_enabled
+                self._motion_detector.configure(**detector_updates)
 
     async def aclose(self) -> None:
         await self._maybe_stop_producer(force=True)
@@ -451,7 +652,7 @@ class RecordingManager:
                     await asyncio.sleep(self._frame_interval)
                     continue
 
-                await self._record_frame(jpeg, iteration_start)
+                await self._record_frame(jpeg, iteration_start, processed)
                 self._broadcast(jpeg)
 
                 elapsed = time.perf_counter() - iteration_start
@@ -464,40 +665,51 @@ class RecordingManager:
         except asyncio.CancelledError:  # pragma: no cover
             pass
 
-    async def _record_frame(self, payload: bytes, frame_time: float) -> None:
+    async def _record_frame(self, payload: bytes, frame_time: float, frame) -> None:
         storage_limit_reached = False
         storage_status: dict[str, float | int] | None = None
+        should_record = False
         async with self._state_lock:
             if not self._recording_active:
                 return
-            start = self._recording_started_monotonic
-            if start is None:
-                timestamp = 0.0
-            else:
-                timestamp = max(0.0, frame_time - start)
-            encoded = base64.b64encode(payload).decode("ascii")
-            if self._thumbnail is None:
-                self._thumbnail = encoded
-            frame_entry: dict[str, object] = {
-                "timestamp": round(timestamp, 4),
-                "jpeg": encoded,
-            }
-            self._recording_frames.append(frame_entry)
-            if self.max_frames is not None and len(self._recording_frames) >= self.max_frames:
-                self._recording_active = False
+            should_record = self._motion_detector.should_record(frame, frame_time)
             storage_status = self._compute_storage_status()
             if self.storage_threshold_percent > 0:
                 free_percent = float(storage_status.get("free_percent", 100.0))
                 if free_percent <= self.storage_threshold_percent:
                     storage_limit_reached = True
+            if should_record:
+                start = self._recording_started_monotonic
+                if start is None:
+                    timestamp = 0.0
+                else:
+                    timestamp = max(0.0, frame_time - start)
+                encoded = base64.b64encode(payload).decode("ascii")
+                if self._thumbnail is None:
+                    self._thumbnail = encoded
+                frame_entry: dict[str, object] = {
+                    "timestamp": round(timestamp, 4),
+                    "jpeg": encoded,
+                }
+                self._recording_frames.append(frame_entry)
+                self._motion_detector.notify_recorded()
+                if self.max_frames is not None and len(self._recording_frames) >= self.max_frames:
+                    self._recording_active = False
+            elif storage_limit_reached and self._next_stop_reason is None:
+                self._next_stop_reason = "storage_low"
         if storage_status is None:
             storage_status = self._compute_storage_status()
         if storage_limit_reached:
             self._schedule_auto_stop("storage_low")
+        if not should_record:
+            return
 
     def _broadcast(self, payload: bytes) -> None:
         for queue in list(self._subscribers):
             self._offer(queue, payload)
+
+    def get_motion_status(self) -> dict[str, object]:
+        return self._motion_detector.snapshot()
 
     def _offer(self, queue: asyncio.Queue[bytes], payload: bytes) -> None:
         try:
@@ -608,6 +820,7 @@ class RecordingManager:
 
 
 __all__ = [
+    "MotionDetector",
     "RecordingManager",
     "load_recording_metadata",
     "load_recording_payload",

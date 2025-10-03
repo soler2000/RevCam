@@ -162,6 +162,11 @@ def test_surveillance_status_storage(client: TestClient) -> None:
     assert isinstance(storage, dict)
     assert "free_percent" in storage
     assert "threshold_percent" in storage
+    assert "motion" in payload
+    motion = payload.get("motion")
+    if motion is not None:
+        assert isinstance(motion, dict)
+        assert "enabled" in motion
     resume_state = payload.get("resume_state")
     assert isinstance(resume_state, dict)
     assert resume_state.get("mode") in {"revcam", "surveillance"}

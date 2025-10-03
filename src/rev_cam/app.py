@@ -564,6 +564,9 @@ def create_app(
         await _apply_auto_purge(settings_obj)
         surveillance_settings = settings_obj.serialise()
         storage_status = _build_storage_status(settings_obj)
+        motion_state = (
+            recording_manager.get_motion_status() if recording_manager is not None else None
+        )
         state = config_manager.get_surveillance_state().to_dict()
         return {
             "mode": current_mode.value,
@@ -572,6 +575,7 @@ def create_app(
             "preview": preview,
             "settings": surveillance_settings,
             "storage": storage_status,
+            "motion": motion_state,
             "resume_state": state,
         }
 
@@ -591,6 +595,8 @@ def create_app(
                 directory=RECORDINGS_DIR,
                 chunk_duration_seconds=surveillance_settings.chunk_duration_seconds,
                 storage_threshold_percent=surveillance_settings.storage_threshold_percent,
+                motion_detection_enabled=surveillance_settings.motion_detection_enabled,
+                motion_sensitivity=surveillance_settings.motion_sensitivity,
                 on_stop=_handle_recording_stopped,
             )
         else:
@@ -600,6 +606,8 @@ def create_app(
                 jpeg_quality=jpeg_quality,
                 chunk_duration_seconds=surveillance_settings.chunk_duration_seconds,
                 storage_threshold_percent=surveillance_settings.storage_threshold_percent,
+                motion_detection_enabled=surveillance_settings.motion_detection_enabled,
+                motion_sensitivity=surveillance_settings.motion_sensitivity,
             )
         return recording_manager
 
@@ -1783,6 +1791,8 @@ def create_app(
                     jpeg_quality=settings.resolved_jpeg_quality,
                     chunk_duration_seconds=settings.chunk_duration_seconds,
                     storage_threshold_percent=settings.storage_threshold_percent,
+                    motion_detection_enabled=settings.motion_detection_enabled,
+                    motion_sensitivity=settings.motion_sensitivity,
                 )
             except Exception as exc:  # pragma: no cover - defensive logging
                 logger.exception("Failed to apply surveillance recording settings")
