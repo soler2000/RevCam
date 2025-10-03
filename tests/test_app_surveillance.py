@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -46,10 +47,15 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     monkeypatch.setattr(app_module, "create_distance_overlay", lambda *args, **kwargs: _noop_overlay())
     monkeypatch.setattr(app_module, "create_reversing_aids_overlay", lambda *args, **kwargs: _noop_overlay())
 
+    recordings_dir = tmp_path / "recordings"
+    recordings_dir.mkdir()
+    monkeypatch.setattr(app_module, "RECORDINGS_DIR", recordings_dir)
+
     config_path = tmp_path / "config.json"
     app = app_module.create_app(config_path)
     with TestClient(app) as test_client:
         test_client.config_path = config_path
+        test_client.recordings_dir = recordings_dir
         yield test_client
 
 
@@ -58,10 +64,15 @@ def test_get_surveillance_settings(client: TestClient) -> None:
     assert response.status_code == 200
     payload = response.json()
     assert "settings" in payload
-    assert payload["settings"]["profile"] == "standard"
-    assert payload["settings"]["preset"] in SURVEILLANCE_STANDARD_PRESETS
+    settings = payload["settings"]
+    assert settings["profile"] == "standard"
+    assert settings["preset"] in SURVEILLANCE_STANDARD_PRESETS
+    assert settings["overlays_enabled"] is True
+    assert settings["remember_recording_state"] is False
+    assert settings["storage_threshold_percent"] == 10
+    assert settings["motion_detection_enabled"] is False
     assert "presets" in payload
-    assert any(item["name"] == payload["settings"]["preset"] for item in payload["presets"])
+    assert any(item["name"] == settings["preset"] for item in payload["presets"])
 
 
 def test_update_surveillance_settings_standard(client: TestClient) -> None:
@@ -83,6 +94,35 @@ def test_update_surveillance_settings_standard(client: TestClient) -> None:
     assert stored.resolved_fps == expected[0]
 
 
+def test_update_surveillance_settings_advanced(client: TestClient) -> None:
+    response = client.post(
+        "/api/surveillance/settings",
+        json={
+            "profile": "expert",
+            "expert_fps": 8,
+            "expert_jpeg_quality": 88,
+            "chunk_duration_seconds": 300,
+            "overlays_enabled": False,
+            "remember_recording_state": True,
+            "motion_detection_enabled": True,
+            "motion_sensitivity": 65,
+            "auto_purge_days": 10,
+            "storage_threshold_percent": 20,
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()["settings"]
+    assert payload["profile"] == "expert"
+    assert payload["fps"] == 8
+    assert payload["chunk_duration_seconds"] == 300
+    assert payload["overlays_enabled"] is False
+    assert payload["remember_recording_state"] is True
+    assert payload["motion_detection_enabled"] is True
+    assert payload["motion_sensitivity"] == 65
+    assert payload["auto_purge_days"] == 10
+    assert payload["storage_threshold_percent"] == 20
+
+
 def test_update_surveillance_settings_expert_validation(client: TestClient) -> None:
     response = client.post(
         "/api/surveillance/settings",
@@ -91,3 +131,37 @@ def test_update_surveillance_settings_expert_validation(client: TestClient) -> N
     assert response.status_code == 400
     detail = response.json()
     assert detail["detail"]
+
+
+def test_delete_surveillance_recording(client: TestClient) -> None:
+    recordings_dir: Path = client.recordings_dir
+    name = "20230101-010101"
+    chunk_file = recordings_dir / f"{name}.chunk001.json"
+    chunk_file.write_text(json.dumps({"frames": []}), encoding="utf-8")
+    meta = recordings_dir / f"{name}.meta.json"
+    meta.write_text(
+        json.dumps({
+            "name": name,
+            "chunks": [{"file": chunk_file.name, "frame_count": 0, "size_bytes": 2}],
+            "ended_at": "2023-01-01T00:00:00+00:00",
+        }),
+        encoding="utf-8",
+    )
+    response = client.delete(f"/api/surveillance/recordings/{name}")
+    assert response.status_code == 200
+    assert not meta.exists()
+    assert not chunk_file.exists()
+
+
+def test_surveillance_status_storage(client: TestClient) -> None:
+    response = client.get("/api/surveillance/status")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["mode"] in {"revcam", "surveillance"}
+    storage = payload.get("storage")
+    assert isinstance(storage, dict)
+    assert "free_percent" in storage
+    assert "threshold_percent" in storage
+    resume_state = payload.get("resume_state")
+    assert isinstance(resume_state, dict)
+    assert resume_state.get("mode") in {"revcam", "surveillance"}

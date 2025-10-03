@@ -230,6 +230,11 @@
         color: var(--text-muted);
         font-size: 0.85rem;
       }
+      .recording-actions {
+        display: flex;
+        align-items: center;
+        gap: var(--space-sm);
+      }
       .open-recording {
         background: transparent;
         border: 1px solid var(--border-muted);
@@ -244,6 +249,29 @@
         border-color: var(--accent);
         color: var(--accent);
         outline: none;
+      }
+      .delete-recording {
+        background: transparent;
+        border: 1px solid rgba(255, 69, 58, 0.5);
+        color: var(--danger);
+        border-radius: var(--radius-pill);
+        padding: 0.35rem 0.9rem;
+        cursor: pointer;
+        transition: border-color var(--transition), color var(--transition);
+      }
+      .delete-recording:hover,
+      .delete-recording:focus-visible {
+        border-color: var(--danger);
+        color: #ff6b61;
+        outline: none;
+      }
+      .storage-status {
+        margin: 0;
+        font-size: 0.9rem;
+      }
+      .storage-status.is-low {
+        color: var(--danger);
+        font-weight: 600;
       }
       .muted {
         color: var(--text-muted);
@@ -306,6 +334,7 @@
             Start recording
           </button>
         </div>
+        <p class="muted storage-status" id="storage-status">Storage: —</p>
       </section>
       <section class="recordings-card">
         <div class="recordings-header">
@@ -328,6 +357,7 @@
       const recordingsList = document.getElementById("recordings-list");
       const recordingsEmpty = document.getElementById("recordings-empty");
       const refreshButton = document.getElementById("refresh-recordings");
+      const storageStatus = document.getElementById("storage-status");
       const modeToggle = document.querySelector("[data-mode-toggle]");
       const modeButtons = modeToggle
         ? Array.from(modeToggle.querySelectorAll(".mode-toggle-button"))
@@ -417,6 +447,81 @@
         recordButton.setAttribute("aria-pressed", String(isRecording));
       }
 
+      function formatBytes(bytes) {
+        if (typeof bytes !== "number" || !Number.isFinite(bytes) || bytes < 0) {
+          return null;
+        }
+        if (bytes === 0) {
+          return "0 B";
+        }
+        const units = ["B", "KB", "MB", "GB", "TB"];
+        const exponent = Math.min(
+          units.length - 1,
+          Math.floor(Math.log(bytes) / Math.log(1024)),
+        );
+        const value = bytes / 1024 ** exponent;
+        return `${value.toFixed(value >= 10 ? 1 : 2)} ${units[exponent]}`;
+      }
+
+      function updateStorage(storage) {
+        if (!storageStatus) {
+          return;
+        }
+        storageStatus.classList.remove("is-low");
+        if (!storage || typeof storage.free_percent !== "number") {
+          storageStatus.textContent = "Storage: —";
+          return;
+        }
+        const freePercent = Number(storage.free_percent) || 0;
+        const freeText = formatBytes(storage.free_bytes);
+        const totalText = formatBytes(storage.total_bytes);
+        const parts = [];
+        if (freeText) {
+          parts.push(`${freeText} free`);
+        }
+        parts.push(`(${freePercent.toFixed(1)}%)`);
+        if (totalText) {
+          parts.push(`of ${totalText}`);
+        }
+        storageStatus.textContent = `Storage: ${parts.join(" ")}`;
+        const threshold = Number(storage.threshold_percent ?? 0);
+        if (Number.isFinite(threshold) && threshold > 0 && freePercent <= threshold) {
+          storageStatus.classList.add("is-low");
+        }
+      }
+
+      function createActionButton(label, className) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = className;
+        button.textContent = label;
+        return button;
+      }
+
+      async function deleteRecording(name) {
+        if (!name) {
+          return;
+        }
+        const confirmed = window.confirm(`Delete recording ${name}?`);
+        if (!confirmed) {
+          return;
+        }
+        try {
+          const response = await fetch(`/api/surveillance/recordings/${encodeURIComponent(name)}`, {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+          });
+          if (!response.ok) {
+            throw new Error(`Delete failed with ${response.status}`);
+          }
+          await loadStatus();
+          setStatus(`Deleted recording ${name}.`, "info");
+        } catch (error) {
+          console.error("Failed to delete recording", error);
+          setStatus("Unable to delete recording", "error");
+        }
+      }
+
       function renderRecordings(records) {
         recordingsList.innerHTML = "";
         if (!Array.isArray(records) || records.length === 0) {
@@ -436,23 +541,39 @@
           details.className = "recording-details";
           const started = record.started_at ? new Date(record.started_at) : null;
           const durationSeconds = typeof record.duration_seconds === "number" ? record.duration_seconds : null;
+          const sizeBytes = typeof record.size_bytes === "number" ? record.size_bytes : null;
+          const chunkCount = typeof record.chunk_count === "number" ? record.chunk_count : null;
           const formatted = [
             started ? started.toLocaleString() : null,
             durationSeconds != null ? `${durationSeconds.toFixed(1)}s` : null,
+            sizeBytes != null ? formatBytes(sizeBytes) : null,
+            chunkCount && chunkCount > 1 ? `${chunkCount} chunks` : null,
+            record.stop_reason === "storage_low"
+              ? "Stopped due to low storage"
+              : typeof record.stop_reason === "string"
+              ? `Stopped: ${record.stop_reason}`
+              : null,
           ].filter(Boolean);
           details.textContent = formatted.join(" • ") || "Pending metadata";
           meta.appendChild(name);
           meta.appendChild(details);
-          const open = document.createElement("button");
-          open.type = "button";
-          open.className = "open-recording";
-          open.textContent = "Open";
+          const actions = document.createElement("div");
+          actions.className = "recording-actions";
+          const open = createActionButton("Open", "open-recording");
           open.addEventListener("click", () => {
             const href = `/surveillance/player?name=${encodeURIComponent(record.name)}`;
-            window.open(href, "_blank", "noopener");
+            window.location.href = href;
           });
+          actions.appendChild(open);
+          const removeButton = createActionButton("Delete", "delete-recording");
+          removeButton.addEventListener("click", () => {
+            deleteRecording(record.name).catch((error) => {
+              console.error("Delete recording error", error);
+            });
+          });
+          actions.appendChild(removeButton);
           item.appendChild(meta);
-          item.appendChild(open);
+          item.appendChild(actions);
           recordingsList.appendChild(item);
         });
       }
@@ -477,7 +598,18 @@
           updateRecordButton();
           updatePreview(payload ? payload.preview : null);
           renderRecordings(payload && Array.isArray(payload.recordings) ? payload.recordings : []);
+          const storage = payload ? payload.storage : null;
+          updateStorage(storage);
           setStatus(isRecording ? "Recording" : "Surveillance ready", isRecording ? "busy" : "info");
+          if (
+            storage &&
+            typeof storage.free_percent === "number" &&
+            typeof storage.threshold_percent === "number" &&
+            storage.threshold_percent > 0 &&
+            storage.free_percent <= storage.threshold_percent
+          ) {
+            setStatus("Low storage — recordings will pause automatically", "error");
+          }
         } catch (error) {
           console.error("Failed to load surveillance status", error);
           setStatus("Unable to load surveillance status", "error");

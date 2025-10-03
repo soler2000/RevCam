@@ -93,6 +93,37 @@
         flex-direction: column;
         gap: var(--space-lg);
       }
+      .tablist {
+        display: flex;
+        gap: var(--space-sm);
+        margin-bottom: var(--space-lg);
+        flex-wrap: wrap;
+      }
+      .tab-button {
+        border: 1px solid var(--border-subtle);
+        background: var(--surface-soft);
+        color: var(--text-primary);
+        padding: 0.45rem 1.1rem;
+        border-radius: var(--radius-pill);
+        cursor: pointer;
+        font-weight: 600;
+        transition: border-color var(--transition), color var(--transition), background var(--transition);
+      }
+      .tab-button[aria-selected="true"] {
+        background: linear-gradient(135deg, #0a84ff, #54d1ff);
+        color: #041026;
+        border-color: transparent;
+        box-shadow: 0 12px 24px rgba(10, 132, 255, 0.25);
+      }
+      .tab-button:not([aria-selected="true"]):hover,
+      .tab-button:not([aria-selected="true"]):focus-visible {
+        border-color: var(--accent);
+        color: var(--accent);
+        outline: none;
+      }
+      [data-tab-panel][hidden] {
+        display: none !important;
+      }
       .settings-card h1 {
         margin: 0;
       }
@@ -137,6 +168,14 @@
       label.option span.helper {
         font-size: 0.85rem;
         color: var(--text-muted);
+      }
+      .option.inline-option {
+        grid-template-columns: auto 1fr;
+        align-items: center;
+        padding: var(--space-sm);
+      }
+      .option.inline-option > div {
+        margin-left: 0;
       }
       .preset-grid {
         display: grid;
@@ -197,6 +236,21 @@
         background: rgba(10, 132, 255, 0.16);
         border: 1px solid rgba(10, 132, 255, 0.4);
         font-weight: 600;
+      }
+      .motion-control {
+        margin-top: var(--space-md);
+        display: flex;
+        flex-direction: column;
+        gap: 0.35rem;
+      }
+      .storage-grid {
+        display: grid;
+        gap: var(--space-md);
+        margin-top: var(--space-md);
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      }
+      .storage-grid input {
+        width: 100%;
       }
       button[type="submit"] {
         align-self: flex-start;
@@ -266,69 +320,137 @@
           </p>
         </header>
         <form id="surveillance-settings-form">
-          <fieldset>
-            <legend>Configuration mode</legend>
-            <label class="option">
-              <input type="radio" name="profile" value="standard" />
+          <div class="tablist" role="tablist" aria-label="Surveillance settings sections">
+            <button class="tab-button" type="button" data-tab="recording" aria-selected="true">
+              Recording
+            </button>
+            <button class="tab-button" type="button" data-tab="motion" aria-selected="false">
+              Motion detection
+            </button>
+            <button class="tab-button" type="button" data-tab="storage" aria-selected="false">
+              Storage &amp; maintenance
+            </button>
+          </div>
+          <section class="tab-panel" data-tab-panel="recording">
+            <fieldset>
+              <legend>Configuration mode</legend>
+              <label class="option">
+                <input type="radio" name="profile" value="standard" />
+                <div>
+                  <strong>Standard presets</strong>
+                  <span class="helper">Pick from tuned combinations for common setups.</span>
+                </div>
+              </label>
+              <label class="option">
+                <input type="radio" name="profile" value="expert" />
+                <div>
+                  <strong>Expert controls</strong>
+                  <span class="helper">Manually set capture frame rate and JPEG quality.</span>
+                </div>
+              </label>
+            </fieldset>
+            <section id="standard-section" aria-live="polite">
+              <h2>Standard presets</h2>
+              <p class="muted">
+                Choose the preset that best reflects your surveillance needs. Presets adjust
+                both the capture frame rate and recording compression.
+              </p>
+              <div class="preset-grid">
+                <label class="preset-label">
+                  <input type="radio" name="preset" value="balanced" />
+                  <div>
+                    <strong>Balanced coverage</strong>
+                    <span class="meta">6 fps • JPEG quality 70 — ideal all-round coverage.</span>
+                  </div>
+                </label>
+                <label class="preset-label">
+                  <input type="radio" name="preset" value="detail" />
+                  <div>
+                    <strong>High detail</strong>
+                    <span class="meta">9 fps • JPEG quality 85 — more motion clarity indoors.</span>
+                  </div>
+                </label>
+                <label class="preset-label">
+                  <input type="radio" name="preset" value="endurance" />
+                  <div>
+                    <strong>Extended endurance</strong>
+                    <span class="meta">4 fps • JPEG quality 60 — longer recordings, smaller files.</span>
+                  </div>
+                </label>
+              </div>
+            </section>
+            <section id="expert-section" hidden>
+              <h2>Expert controls</h2>
+              <p class="muted">
+                Tune capture parameters precisely. Higher frame rates and JPEG quality increase
+                detail at the cost of storage and bandwidth.
+              </p>
+              <div class="expert-grid">
+                <div class="expert-control">
+                  <label for="expert-fps">Frame rate</label>
+                  <input id="expert-fps" type="number" min="1" max="30" step="1" />
+                  <span class="muted">Frames captured per second.</span>
+                </div>
+                <div class="expert-control">
+                  <label for="expert-quality">JPEG quality</label>
+                  <input id="expert-quality" type="number" min="30" max="100" step="1" />
+                  <span class="muted">Higher values increase detail while using more space.</span>
+                </div>
+              </div>
+            </section>
+            <label class="option inline-option">
+              <input type="checkbox" id="recording-overlays" />
               <div>
-                <strong>Standard presets</strong>
-                <span class="helper">Pick from tuned combinations for common setups.</span>
+                <strong>Include overlays in recordings</strong>
+                <span class="helper">Uncheck to capture a clean video feed without UI overlays.</span>
               </div>
             </label>
-            <label class="option">
-              <input type="radio" name="profile" value="expert" />
+            <label class="option inline-option">
+              <input type="checkbox" id="remember-recording" />
               <div>
-                <strong>Expert controls</strong>
-                <span class="helper">Manually set capture frame rate and JPEG quality.</span>
+                <strong>Resume recording after restart</strong>
+                <span class="helper">Return to surveillance mode and continue recording automatically.</span>
               </div>
             </label>
-          </fieldset>
-          <section id="standard-section" aria-live="polite">
-            <h2>Standard presets</h2>
+          </section>
+          <section class="tab-panel" data-tab-panel="motion" hidden>
+            <h2>Motion detection</h2>
             <p class="muted">
-              Choose the preset that best reflects your surveillance needs. Presets adjust
-              both the capture frame rate and recording compression.
+              Enable motion detection to reduce storage usage and focus recordings on activity.
             </p>
-            <div class="preset-grid">
-              <label class="preset-label">
-                <input type="radio" name="preset" value="balanced" />
-                <div>
-                  <strong>Balanced coverage</strong>
-                  <span class="meta">6 fps • JPEG quality 70 — ideal all-round coverage.</span>
-                </div>
-              </label>
-              <label class="preset-label">
-                <input type="radio" name="preset" value="detail" />
-                <div>
-                  <strong>High detail</strong>
-                  <span class="meta">9 fps • JPEG quality 85 — more motion clarity indoors.</span>
-                </div>
-              </label>
-              <label class="preset-label">
-                <input type="radio" name="preset" value="endurance" />
-                <div>
-                  <strong>Extended endurance</strong>
-                  <span class="meta">4 fps • JPEG quality 60 — longer recordings, smaller files.</span>
-                </div>
-              </label>
+            <label class="option inline-option">
+              <input type="checkbox" id="motion-enabled" />
+              <div>
+                <strong>Enable motion detection</strong>
+                <span class="helper">Pause recording when no movement is detected and resume on motion.</span>
+              </div>
+            </label>
+            <div class="motion-control">
+              <label for="motion-sensitivity">Sensitivity</label>
+              <input id="motion-sensitivity" type="range" min="0" max="100" step="1" />
+              <span class="muted">Current sensitivity: <span id="motion-sensitivity-value">50</span>%</span>
             </div>
           </section>
-          <section id="expert-section" hidden>
-            <h2>Expert controls</h2>
+          <section class="tab-panel" data-tab-panel="storage" hidden>
+            <h2>Storage &amp; maintenance</h2>
             <p class="muted">
-              Tune capture parameters precisely. Higher frame rates and JPEG quality increase
-              detail at the cost of storage and bandwidth.
+              Automatically split recordings, protect storage capacity and remove old clips on a schedule.
             </p>
-            <div class="expert-grid">
-              <div class="expert-control">
-                <label for="expert-fps">Frame rate</label>
-                <input id="expert-fps" type="number" min="1" max="30" step="1" />
-                <span class="muted">Frames captured per second.</span>
+            <div class="storage-grid">
+              <div>
+                <label for="chunk-duration">Split recordings every (minutes)</label>
+                <input id="chunk-duration" type="number" min="0" max="1440" step="1" />
+                <span class="muted">Set to 0 to keep each recording as a single file.</span>
               </div>
-              <div class="expert-control">
-                <label for="expert-quality">JPEG quality</label>
-                <input id="expert-quality" type="number" min="30" max="100" step="1" />
-                <span class="muted">Higher values increase detail while using more space.</span>
+              <div>
+                <label for="storage-threshold">Stop recording below free space (%)</label>
+                <input id="storage-threshold" type="number" min="1" max="90" step="1" />
+                <span class="muted">Recording stops automatically when free space drops below this value.</span>
+              </div>
+              <div>
+                <label for="auto-purge-days">Auto purge recordings after (days)</label>
+                <input id="auto-purge-days" type="number" min="0" max="3650" step="1" />
+                <span class="muted">Set to 0 to keep recordings indefinitely.</span>
               </div>
             </div>
           </section>
@@ -372,8 +494,61 @@
       const expertQualityInput = document.getElementById("expert-quality");
       const statusText = document.getElementById("settings-status");
       const summary = document.getElementById("settings-summary");
+      const tabButtons = Array.from(document.querySelectorAll(".tab-button"));
+      const tabPanels = Array.from(document.querySelectorAll("[data-tab-panel]"));
+      const overlayCheckbox = document.getElementById("recording-overlays");
+      const rememberCheckbox = document.getElementById("remember-recording");
+      const chunkDurationInput = document.getElementById("chunk-duration");
+      const storageThresholdInput = document.getElementById("storage-threshold");
+      const autoPurgeInput = document.getElementById("auto-purge-days");
+      const motionEnabledInput = document.getElementById("motion-enabled");
+      const motionSensitivityInput = document.getElementById("motion-sensitivity");
+      const motionSensitivityValue = document.getElementById("motion-sensitivity-value");
 
       let currentSettings = null;
+
+      function setActiveTab(tab) {
+        const target = typeof tab === "string" && tab ? tab : "recording";
+        tabButtons.forEach((button) => {
+          const isActive = button.dataset.tab === target;
+          button.setAttribute("aria-selected", String(isActive));
+        });
+        tabPanels.forEach((panel) => {
+          const isActive = panel.dataset.tabPanel === target;
+          if (isActive) {
+            panel.removeAttribute("hidden");
+          } else {
+            panel.setAttribute("hidden", "hidden");
+          }
+        });
+      }
+
+      function updateMotionSensitivityLabel(value) {
+        if (!motionSensitivityValue) {
+          return;
+        }
+        const numeric = Number.isFinite(value)
+          ? value
+          : Number.parseInt(motionSensitivityInput?.value ?? "50", 10) || 50;
+        motionSensitivityValue.textContent = String(Math.round(numeric));
+      }
+
+      tabButtons.forEach((button) => {
+        button.addEventListener("click", () => {
+          setActiveTab(button.dataset.tab || "recording");
+        });
+      });
+      setActiveTab("recording");
+
+      if (motionSensitivityInput) {
+        motionSensitivityInput.addEventListener("input", () => {
+          updateMotionSensitivityLabel(Number(motionSensitivityInput.value));
+        });
+      }
+
+      if (chunkDurationInput) {
+        chunkDurationInput.addEventListener("input", updateSummary);
+      }
 
       function getSelectedProfile() {
         const selected = profileInputs.find((input) => input.checked);
@@ -449,6 +624,12 @@
         } else {
           text += "—";
         }
+        if (chunkDurationInput) {
+          const minutes = parseInt(chunkDurationInput.value, 10);
+          if (Number.isFinite(minutes) && minutes > 0) {
+            text += ` • Split every ${minutes} min`;
+          }
+        }
         summary.textContent = text;
       }
 
@@ -463,6 +644,34 @@
         expertFpsInput.value = settings.expert_fps ?? settings.fps ?? 6;
         expertQualityInput.value = settings.expert_jpeg_quality ?? settings.jpeg_quality ?? 75;
         updateModeVisibility();
+        if (overlayCheckbox) {
+          overlayCheckbox.checked = settings.overlays_enabled !== false;
+        }
+        if (rememberCheckbox) {
+          rememberCheckbox.checked = Boolean(settings.remember_recording_state);
+        }
+        if (chunkDurationInput) {
+          const seconds = Number(settings.chunk_duration_seconds ?? 0);
+          const minutes = Number.isFinite(seconds) && seconds > 0 ? Math.round(seconds / 60) : 0;
+          chunkDurationInput.value = minutes;
+        }
+        if (storageThresholdInput) {
+          const threshold = Number(settings.storage_threshold_percent ?? 10);
+          storageThresholdInput.value = Number.isFinite(threshold) ? threshold : 10;
+        }
+        if (autoPurgeInput) {
+          const days = Number(settings.auto_purge_days ?? 0);
+          autoPurgeInput.value = Number.isFinite(days) && days > 0 ? Math.round(days) : 0;
+        }
+        if (motionEnabledInput) {
+          motionEnabledInput.checked = Boolean(settings.motion_detection_enabled);
+        }
+        if (motionSensitivityInput) {
+          const value = Number(settings.motion_sensitivity ?? 50);
+          motionSensitivityInput.value = Number.isFinite(value) ? value : 50;
+          updateMotionSensitivityLabel(Number(motionSensitivityInput.value));
+        }
+        updateSummary();
       }
 
       async function loadSettings() {
@@ -518,6 +727,41 @@
           }
           payload.expert_fps = fpsValue;
           payload.expert_jpeg_quality = qualityValue;
+        }
+        payload.overlays_enabled = overlayCheckbox ? overlayCheckbox.checked : true;
+        payload.remember_recording_state = rememberCheckbox ? rememberCheckbox.checked : false;
+        if (motionEnabledInput) {
+          payload.motion_detection_enabled = motionEnabledInput.checked;
+        }
+        if (motionSensitivityInput) {
+          const motionValue = parseInt(motionSensitivityInput.value, 10);
+          payload.motion_sensitivity = Number.isFinite(motionValue) ? motionValue : 50;
+        }
+        if (chunkDurationInput) {
+          const chunkMinutes = parseInt(chunkDurationInput.value, 10);
+          if (Number.isFinite(chunkMinutes) && chunkMinutes > 0) {
+            if (chunkMinutes > 24 * 60) {
+              statusText.textContent = "Chunk duration must be 1440 minutes or less.";
+              chunkDurationInput.focus();
+              return;
+            }
+            payload.chunk_duration_seconds = chunkMinutes * 60;
+          } else {
+            payload.chunk_duration_seconds = 0;
+          }
+        }
+        if (storageThresholdInput) {
+          const thresholdValue = parseFloat(storageThresholdInput.value);
+          if (!Number.isFinite(thresholdValue) || thresholdValue < 1 || thresholdValue > 90) {
+            statusText.textContent = "Storage threshold must be between 1 and 90%.";
+            storageThresholdInput.focus();
+            return;
+          }
+          payload.storage_threshold_percent = thresholdValue;
+        }
+        if (autoPurgeInput) {
+          const purgeValue = parseInt(autoPurgeInput.value, 10);
+          payload.auto_purge_days = Number.isFinite(purgeValue) && purgeValue > 0 ? purgeValue : 0;
         }
         statusText.textContent = "Saving settings…";
         form.querySelector("button[type='submit']").disabled = true;
