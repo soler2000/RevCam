@@ -220,6 +220,7 @@ def test_default_surveillance_settings(tmp_path: Path) -> None:
     assert settings.remember_recording_state is False
     assert settings.motion_detection_enabled is False
     assert settings.motion_sensitivity == 50
+    assert settings.motion_frame_decimation == 1
     assert settings.auto_purge_days is None
     assert settings.storage_threshold_percent == 10.0
 
@@ -237,6 +238,7 @@ def test_surveillance_settings_persistence(tmp_path: Path) -> None:
             "remember_recording_state": True,
             "motion_detection_enabled": True,
             "motion_sensitivity": 72,
+            "motion_frame_decimation": 3,
             "auto_purge_days": 5,
             "storage_threshold_percent": 15,
         }
@@ -250,6 +252,7 @@ def test_surveillance_settings_persistence(tmp_path: Path) -> None:
     assert updated.remember_recording_state is True
     assert updated.motion_detection_enabled is True
     assert updated.motion_sensitivity == 72
+    assert updated.motion_frame_decimation == 3
     assert updated.auto_purge_days == 5
     assert updated.storage_threshold_percent == 15
     reloaded = ConfigManager(config_file)
@@ -262,6 +265,7 @@ def test_surveillance_settings_persistence(tmp_path: Path) -> None:
     assert reloaded_settings.remember_recording_state is True
     assert reloaded_settings.motion_detection_enabled is True
     assert reloaded_settings.motion_sensitivity == 72
+    assert reloaded_settings.motion_frame_decimation == 3
     assert reloaded_settings.auto_purge_days == 5
     assert reloaded_settings.storage_threshold_percent == 15
 

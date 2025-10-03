@@ -188,17 +188,21 @@ class MotionDetector:
     enabled: bool = False
     sensitivity: int = 50
     inactivity_timeout: float = 2.5
+    frame_decimation: int = 1
     _previous_frame: "_np.ndarray" | None = field(init=False, default=None)
     _last_active_monotonic: float | None = field(init=False, default=None)
     _paused: bool = field(init=False, default=False)
     _pause_events: int = field(init=False, default=0)
     _skipped_frames: int = field(init=False, default=0)
     _recorded_frames: int = field(init=False, default=0)
+    _decimation_drops: int = field(init=False, default=0)
+    _decimation_remaining: int = field(init=False, default=0)
 
     def __post_init__(self) -> None:
         self.enabled = bool(self.enabled)
         self.sensitivity = self._normalise_sensitivity(self.sensitivity)
         self.inactivity_timeout = self._normalise_timeout(self.inactivity_timeout)
+        self.frame_decimation = self._normalise_frame_decimation(self.frame_decimation)
 
     def configure(
         self,
@@ -206,6 +210,7 @@ class MotionDetector:
         enabled: bool | None = None,
         sensitivity: int | float | None = None,
         inactivity_timeout: float | int | None = None,
+        frame_decimation: int | float | None = None,
     ) -> None:
         """Update detector settings and reset state when switching mode."""
 
@@ -223,6 +228,11 @@ class MotionDetector:
             if timeout != self.inactivity_timeout:
                 self.inactivity_timeout = timeout
                 changed = True
+        if frame_decimation is not None:
+            decimation = self._normalise_frame_decimation(frame_decimation)
+            if decimation != self.frame_decimation:
+                self.frame_decimation = decimation
+                changed = True
         if changed:
             self.reset()
 
@@ -235,6 +245,8 @@ class MotionDetector:
         self._pause_events = 0
         self._skipped_frames = 0
         self._recorded_frames = 0
+        self._decimation_drops = 0
+        self._decimation_remaining = 0
 
     def should_record(self, frame, timestamp: float) -> bool:
         """Return ``True`` when the frame should be persisted."""
@@ -270,6 +282,7 @@ class MotionDetector:
         if previous is None or previous.shape != sample.shape:
             self._last_active_monotonic = timestamp
             self._paused = False
+            self._decimation_remaining = max(0, self.frame_decimation - 1)
             return True
 
         difference = _np.abs(sample - previous)
@@ -279,19 +292,25 @@ class MotionDetector:
             self._last_active_monotonic = timestamp
             if self._paused:
                 self._paused = False
-            return True
+                self._decimation_remaining = 0
+        else:
+            last_active = self._last_active_monotonic
+            if last_active is None:
+                self._last_active_monotonic = timestamp
+            elif timestamp - last_active >= self.inactivity_timeout:
+                if not self._paused:
+                    self._paused = True
+                    self._pause_events += 1
+                self._decimation_remaining = 0
+                self._skipped_frames += 1
+                return False
 
-        last_active = self._last_active_monotonic
-        if last_active is None:
-            self._last_active_monotonic = timestamp
-            return True
-
-        if timestamp - last_active >= self.inactivity_timeout:
-            if not self._paused:
-                self._paused = True
-                self._pause_events += 1
-            self._skipped_frames += 1
-            return False
+        if self.frame_decimation > 1:
+            if self._decimation_remaining > 0:
+                self._decimation_remaining -= 1
+                self._decimation_drops += 1
+                return False
+            self._decimation_remaining = self.frame_decimation - 1
 
         return True
 
@@ -308,10 +327,12 @@ class MotionDetector:
             "enabled": bool(self.enabled),
             "sensitivity": int(self.sensitivity),
             "inactivity_timeout_seconds": float(self.inactivity_timeout),
+            "frame_decimation": int(self.frame_decimation),
             "active": (not self.enabled) or (not self._paused),
             "pause_count": int(self._pause_events),
             "skipped_frames": int(self._skipped_frames),
             "recorded_frames": int(self._recorded_frames),
+            "decimation_drops": int(self._decimation_drops),
         }
 
     def _calculate_threshold(self) -> float:
@@ -345,6 +366,18 @@ class MotionDetector:
             numeric = 30.0
         return float(numeric)
 
+    @staticmethod
+    def _normalise_frame_decimation(value: int | float | None) -> int:
+        try:
+            numeric = int(float(value))
+        except (TypeError, ValueError):  # pragma: no cover - defensive guard
+            return 1
+        if numeric < 1:
+            numeric = 1
+        elif numeric > 30:
+            numeric = 30
+        return numeric
+
 
 @dataclass
 class RecordingManager:
@@ -362,6 +395,7 @@ class RecordingManager:
     motion_detection_enabled: bool = False
     motion_sensitivity: int = 50
     motion_inactivity_timeout_seconds: float = 2.5
+    motion_frame_decimation: int = 1
     on_stop: Callable[[dict[str, object]], Awaitable[None]] | None = None
     _subscribers: set[asyncio.Queue[bytes]] = field(init=False, default_factory=set)
     _producer_task: asyncio.Task[None] | None = field(init=False, default=None)
@@ -393,10 +427,14 @@ class RecordingManager:
         self.motion_inactivity_timeout_seconds = MotionDetector._normalise_timeout(
             self.motion_inactivity_timeout_seconds
         )
+        self.motion_frame_decimation = MotionDetector._normalise_frame_decimation(
+            self.motion_frame_decimation
+        )
         self._motion_detector = MotionDetector(
             enabled=self.motion_detection_enabled,
             sensitivity=self.motion_sensitivity,
             inactivity_timeout=self.motion_inactivity_timeout_seconds,
+            frame_decimation=self.motion_frame_decimation,
         )
 
     @property
@@ -539,6 +577,7 @@ class RecordingManager:
         storage_threshold_percent: float | int | None = None,
         motion_detection_enabled: bool | None = None,
         motion_sensitivity: int | float | None = None,
+        motion_frame_decimation: int | float | None = None,
     ) -> None:
         async with self._state_lock:
             if fps is not None and fps > 0 and fps != self.fps:
@@ -564,6 +603,10 @@ class RecordingManager:
                 sensitivity = MotionDetector._normalise_sensitivity(motion_sensitivity)
                 self.motion_sensitivity = sensitivity
                 detector_updates["sensitivity"] = sensitivity
+            if motion_frame_decimation is not None:
+                decimation = MotionDetector._normalise_frame_decimation(motion_frame_decimation)
+                self.motion_frame_decimation = decimation
+                detector_updates["frame_decimation"] = decimation
             if detector_updates:
                 if "enabled" not in detector_updates:
                     detector_updates["enabled"] = self.motion_detection_enabled

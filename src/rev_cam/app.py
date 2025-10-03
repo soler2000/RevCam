@@ -597,6 +597,7 @@ def create_app(
                 storage_threshold_percent=surveillance_settings.storage_threshold_percent,
                 motion_detection_enabled=surveillance_settings.motion_detection_enabled,
                 motion_sensitivity=surveillance_settings.motion_sensitivity,
+                motion_frame_decimation=surveillance_settings.motion_frame_decimation,
                 on_stop=_handle_recording_stopped,
             )
         else:
@@ -608,6 +609,7 @@ def create_app(
                 storage_threshold_percent=surveillance_settings.storage_threshold_percent,
                 motion_detection_enabled=surveillance_settings.motion_detection_enabled,
                 motion_sensitivity=surveillance_settings.motion_sensitivity,
+                motion_frame_decimation=surveillance_settings.motion_frame_decimation,
             )
         return recording_manager
 

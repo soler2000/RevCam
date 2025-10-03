@@ -430,6 +430,14 @@
               <input id="motion-sensitivity" type="range" min="0" max="100" step="1" />
               <span class="muted">Current sensitivity: <span id="motion-sensitivity-value">50</span>%</span>
             </div>
+            <div class="motion-control">
+              <label for="motion-decimation">Record every Nth frame</label>
+              <input id="motion-decimation" type="number" min="1" max="30" step="1" />
+              <span class="muted">
+                Effective motion capture: <span id="motion-effective-fps">—</span> fps.
+                Aim for 8 fps or below to balance performance and detail.
+              </span>
+            </div>
           </section>
           <section class="tab-panel" data-tab-panel="storage" hidden>
             <h2>Storage &amp; maintenance</h2>
@@ -504,6 +512,8 @@
       const motionEnabledInput = document.getElementById("motion-enabled");
       const motionSensitivityInput = document.getElementById("motion-sensitivity");
       const motionSensitivityValue = document.getElementById("motion-sensitivity-value");
+      const motionDecimationInput = document.getElementById("motion-decimation");
+      const motionEffectiveFpsText = document.getElementById("motion-effective-fps");
 
       let currentSettings = null;
 
@@ -533,6 +543,44 @@
         motionSensitivityValue.textContent = String(Math.round(numeric));
       }
 
+      function getMotionDecimation() {
+        if (!motionDecimationInput) {
+          return 1;
+        }
+        const numeric = Number.parseInt(motionDecimationInput.value, 10);
+        if (!Number.isFinite(numeric) || numeric < 1) {
+          return 1;
+        }
+        if (numeric > 30) {
+          return 30;
+        }
+        return numeric;
+      }
+
+      function formatFpsLabel(value) {
+        if (!Number.isFinite(value) || value <= 0) {
+          return "—";
+        }
+        if (value >= 10) {
+          return value.toFixed(0);
+        }
+        if (value >= 1) {
+          return value.toFixed(1).replace(/\.0$/, "");
+        }
+        return value.toFixed(2);
+      }
+
+      function updateMotionGuidance() {
+        if (!motionEffectiveFpsText) {
+          return;
+        }
+        const decimation = getMotionDecimation();
+        const effective = resolveEffectiveSettings();
+        const baseFps = Number.isFinite(effective.fps) ? effective.fps : null;
+        const motionFps = baseFps ? baseFps / Math.max(1, decimation) : null;
+        motionEffectiveFpsText.textContent = formatFpsLabel(motionFps ?? 0);
+      }
+
       tabButtons.forEach((button) => {
         button.addEventListener("click", () => {
           setActiveTab(button.dataset.tab || "recording");
@@ -544,6 +592,17 @@
         motionSensitivityInput.addEventListener("input", () => {
           updateMotionSensitivityLabel(Number(motionSensitivityInput.value));
         });
+      }
+
+      if (motionDecimationInput) {
+        motionDecimationInput.addEventListener("input", () => {
+          updateMotionGuidance();
+          updateSummary();
+        });
+      }
+
+      if (motionEnabledInput) {
+        motionEnabledInput.addEventListener("change", updateSummary);
       }
 
       if (chunkDurationInput) {
@@ -630,7 +689,19 @@
             text += ` • Split every ${minutes} min`;
           }
         }
+        if (motionEnabledInput && motionEnabledInput.checked && effective.fps) {
+          const decimation = getMotionDecimation();
+          const motionFps = effective.fps / Math.max(1, decimation);
+          const motionLabel = formatFpsLabel(motionFps);
+          if (decimation > 1) {
+            text += ` • Motion capture ~${motionLabel} fps`;
+          } else {
+            text += ` • Motion capture ${motionLabel} fps`;
+          }
+          text += " (recommended ≤ 8 fps)";
+        }
         summary.textContent = text;
+        updateMotionGuidance();
       }
 
       function applySettings(settings) {
@@ -670,6 +741,14 @@
           const value = Number(settings.motion_sensitivity ?? 50);
           motionSensitivityInput.value = Number.isFinite(value) ? value : 50;
           updateMotionSensitivityLabel(Number(motionSensitivityInput.value));
+        }
+        if (motionDecimationInput) {
+          const decimation = Number(settings.motion_frame_decimation ?? 1);
+          const normalised =
+            Number.isFinite(decimation) && decimation > 0
+              ? Math.min(30, Math.max(1, Math.round(decimation)))
+              : 1;
+          motionDecimationInput.value = normalised;
         }
         updateSummary();
       }
@@ -736,6 +815,14 @@
         if (motionSensitivityInput) {
           const motionValue = parseInt(motionSensitivityInput.value, 10);
           payload.motion_sensitivity = Number.isFinite(motionValue) ? motionValue : 50;
+        }
+        if (motionDecimationInput) {
+          const decimationValue = parseInt(motionDecimationInput.value, 10);
+          const normalised =
+            Number.isFinite(decimationValue) && decimationValue > 0
+              ? Math.min(30, Math.max(1, decimationValue))
+              : 1;
+          payload.motion_frame_decimation = normalised;
         }
         if (chunkDurationInput) {
           const chunkMinutes = parseInt(chunkDurationInput.value, 10);

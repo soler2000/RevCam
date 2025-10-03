@@ -230,6 +230,11 @@
         color: var(--text-muted);
         font-size: 0.85rem;
       }
+      .recording-chunks {
+        font-size: 0.78rem;
+        color: var(--text-muted);
+        margin-top: 0.2rem;
+      }
       .recording-actions {
         display: flex;
         align-items: center;
@@ -557,6 +562,30 @@
           details.textContent = formatted.join(" • ") || "Pending metadata";
           meta.appendChild(name);
           meta.appendChild(details);
+          if (Array.isArray(record.chunks) && record.chunks.length > 0) {
+            const chunkSummaries = record.chunks
+              .map((chunk, idx) => {
+                if (!chunk || typeof chunk !== "object") {
+                  return null;
+                }
+                const label = idx + 1;
+                const chunkSize =
+                  typeof chunk.size_bytes === "number" && Number.isFinite(chunk.size_bytes)
+                    ? formatBytes(chunk.size_bytes)
+                    : null;
+                if (!chunkSize) {
+                  return null;
+                }
+                return `Chunk ${label} (${chunkSize})`;
+              })
+              .filter(Boolean);
+            if (chunkSummaries.length) {
+              const chunkLine = document.createElement("div");
+              chunkLine.className = "recording-chunks";
+              chunkLine.textContent = chunkSummaries.join(", ");
+              meta.appendChild(chunkLine);
+            }
+          }
           const actions = document.createElement("div");
           actions.className = "recording-actions";
           const open = createActionButton("Open", "open-recording");

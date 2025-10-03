@@ -41,6 +41,32 @@ def test_motion_detector_pauses_and_resumes() -> None:
     assert meta["active"] is True
 
 
+def test_motion_detector_decimates_frames() -> None:
+    detector = MotionDetector(
+        enabled=True,
+        sensitivity=75,
+        inactivity_timeout=1.0,
+        frame_decimation=3,
+    )
+    baseline = np.zeros((16, 16, 3), dtype=np.uint8)
+    motion_a = baseline.copy()
+    motion_a[:4, :4, :] = 255
+    motion_b = baseline.copy()
+    motion_b[4:, 4:, :] = 255
+    motion_c = baseline.copy()
+    motion_c[:, :4, :] = 128
+
+    assert detector.should_record(baseline, 0.0) is True
+    # Next two frames should be dropped by decimation while motion is active.
+    assert detector.should_record(motion_a, 0.1) is False
+    assert detector.should_record(motion_b, 0.2) is False
+    # Third frame after initial capture is recorded again.
+    assert detector.should_record(motion_c, 0.3) is True
+    snapshot = detector.snapshot()
+    assert snapshot["frame_decimation"] == 3
+    assert snapshot["decimation_drops"] >= 2
+
+
 @pytest.mark.anyio
 @pytest.mark.parametrize("anyio_backend", ["asyncio"], indirect=True)
 async def test_recording_manager_records_only_when_motion_detected(tmp_path: Path, anyio_backend) -> None:
