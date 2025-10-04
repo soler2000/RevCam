@@ -254,6 +254,42 @@ async def test_recording_manager_motion_override_session(tmp_path: Path, anyio_b
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("anyio_backend", ["asyncio"], indirect=True)
+async def test_manual_recording_missing_name_finalises(tmp_path: Path, anyio_backend) -> None:
+    camera = _StaticCamera()
+    pipeline = _pipeline()
+    manager = RecordingManager(
+        camera=camera,
+        pipeline=pipeline,
+        directory=tmp_path,
+        motion_detection_enabled=True,
+    )
+
+    async def _noop(self):
+        return None
+
+    manager._ensure_producer_running = types.MethodType(_noop, manager)
+    await manager.start_recording(motion_mode=False)
+
+    frame = np.zeros((32, 32, 3), dtype=np.uint8)
+    await manager._record_frame(b"frame", 0.0, frame)
+
+    async with manager._state_lock:
+        manager._recording_name = None
+
+    placeholder = await manager.stop_recording()
+    assert placeholder["processing"] is True
+    assert placeholder["name"]
+
+    metadata = await manager.wait_for_processing()
+    assert metadata is not None
+    assert metadata.get("name")
+    assert (tmp_path / f"{metadata['name']}.meta.json").exists()
+
+    await manager.aclose()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("anyio_backend", ["asyncio"], indirect=True)
 async def test_motion_recording_creates_event_clips(tmp_path: Path, anyio_backend) -> None:
     camera = _StaticCamera()
     pipeline = _pipeline()
