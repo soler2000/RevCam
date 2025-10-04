@@ -9,12 +9,17 @@ import json
 import logging
 import shutil
 import time
+from fractions import Fraction
 from copy import deepcopy
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from tempfile import SpooledTemporaryFile
 from typing import AsyncGenerator, Awaitable, Callable, Iterable, Mapping
+
+import av
+import simplejpeg
 
 try:  # pragma: no cover - optional dependency on numpy
     import numpy as _np
@@ -185,6 +190,99 @@ def load_recording_payload(directory: Path, name: str) -> dict[str, object]:
     payload.setdefault("name", safe_name)
     payload["frames"] = frames
     return payload
+
+
+def build_recording_video(
+    directory: Path, name: str
+) -> tuple[str, SpooledTemporaryFile]:
+    """Render recording ``name`` to an MP4 file and return a file-like object."""
+
+    safe_name = _safe_recording_name(name)
+    payload = load_recording_payload(directory, safe_name)
+    raw_frames = payload.get("frames")
+    if not isinstance(raw_frames, list):
+        raise ValueError("Recording does not contain any frames")
+
+    frames: list[Mapping[str, object]] = [
+        frame for frame in raw_frames if isinstance(frame, Mapping)
+    ]
+    if not frames:
+        raise ValueError("Recording does not contain any frames")
+
+    frame_rate_value = payload.get("fps")
+    if isinstance(frame_rate_value, (int, float)) and frame_rate_value > 0:
+        frame_rate = float(frame_rate_value)
+    else:
+        frame_rate = 10.0
+
+    # Identify the first usable frame so we can determine the output dimensions.
+    first_index = None
+    first_array = None
+    for idx, frame in enumerate(frames):
+        jpeg_data = frame.get("jpeg")
+        if not isinstance(jpeg_data, str) or not jpeg_data:
+            continue
+        try:
+            decoded = base64.b64decode(jpeg_data)
+            array = simplejpeg.decode_jpeg(decoded, colorspace="BGR")
+        except Exception as exc:
+            raise ValueError("Recording frames are invalid") from exc
+        if array.ndim != 3 or array.shape[2] != 3:
+            raise ValueError("Recording frames are invalid")
+        first_index = idx
+        first_array = array
+        break
+
+    if first_index is None or first_array is None:
+        raise ValueError("Recording does not contain any usable frames")
+
+    height, width = first_array.shape[:2]
+    archive = SpooledTemporaryFile(max_size=64 * 1024 * 1024)
+    frame_rate_fraction = Fraction(str(frame_rate)).limit_denominator(1000)
+    time_base = Fraction(
+        frame_rate_fraction.denominator, frame_rate_fraction.numerator
+    )
+
+    with av.open(archive, mode="w", format="mp4") as container:
+        stream = container.add_stream("h264", rate=frame_rate_fraction)
+        stream.width = int(width)
+        stream.height = int(height)
+        stream.pix_fmt = "yuv420p"
+        stream.time_base = time_base
+        stream.options = {"movflags": "+faststart"}
+
+        def _encode(array_data: "_np.ndarray", position: int) -> None:
+            frame = av.VideoFrame.from_ndarray(array_data, format="bgr24")
+            frame.pts = position
+            frame.time_base = time_base
+            for packet in stream.encode(frame):
+                container.mux(packet)
+
+        position = 0
+        _encode(first_array, position)
+        position += 1
+
+        for frame in frames[first_index + 1 :]:
+            jpeg_data = frame.get("jpeg")
+            if not isinstance(jpeg_data, str) or not jpeg_data:
+                continue
+            try:
+                decoded = base64.b64decode(jpeg_data)
+                array = simplejpeg.decode_jpeg(decoded, colorspace="BGR")
+            except Exception:  # pragma: no cover - skip invalid frames
+                continue
+            if array.ndim != 3 or array.shape[2] != 3:
+                continue
+            if array.shape[0] != height or array.shape[1] != width:
+                continue
+            _encode(array, position)
+            position += 1
+
+        for packet in stream.encode():
+            container.mux(packet)
+
+    archive.seek(0)
+    return safe_name, archive
 
 
 def remove_recording_files(directory: Path, name: str) -> None:
@@ -1526,6 +1624,7 @@ class RecordingManager:
 __all__ = [
     "MotionDetector",
     "RecordingManager",
+    "build_recording_video",
     "load_recording_metadata",
     "load_recording_payload",
     "remove_recording_files",

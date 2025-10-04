@@ -135,7 +135,7 @@
         display: flex;
         flex-wrap: wrap;
         gap: var(--space-md);
-        align-items: center;
+        align-items: flex-start;
         justify-content: space-between;
       }
 
@@ -194,6 +194,76 @@
         outline: none;
       }
 
+      .control-groups {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-sm);
+        align-items: flex-end;
+      }
+
+      .selection-actions {
+        display: inline-flex;
+        flex-wrap: wrap;
+        gap: var(--space-sm);
+        align-items: center;
+        justify-content: flex-end;
+      }
+
+      .secondary-button {
+        appearance: none;
+        border: 1px solid var(--border-subtle);
+        background: transparent;
+        color: var(--text-muted);
+        font-weight: 600;
+        padding: 0.45rem 1.1rem;
+        border-radius: var(--radius-pill);
+        cursor: pointer;
+        transition: border-color 200ms ease, color 200ms ease, background 200ms ease;
+      }
+
+      .secondary-button:hover,
+      .secondary-button:focus-visible {
+        border-color: rgba(10, 132, 255, 0.5);
+        color: var(--text-primary);
+        background: rgba(10, 132, 255, 0.08);
+        outline: none;
+      }
+
+      .secondary-button:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+        color: var(--text-muted);
+        background: transparent;
+      }
+
+      .danger-button {
+        appearance: none;
+        border: 1px solid rgba(255, 69, 58, 0.4);
+        background: rgba(255, 69, 58, 0.12);
+        color: var(--danger);
+        font-weight: 600;
+        padding: 0.45rem 1.2rem;
+        border-radius: var(--radius-pill);
+        cursor: pointer;
+        transition: background 200ms ease, border-color 200ms ease, color 200ms ease,
+          transform 150ms ease;
+      }
+
+      .danger-button:hover,
+      .danger-button:focus-visible {
+        background: rgba(255, 69, 58, 0.2);
+        border-color: rgba(255, 69, 58, 0.6);
+        color: #ff6b61;
+        outline: none;
+        transform: translateY(-1px);
+      }
+
+      .danger-button:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+        transform: none;
+      }
+
       .refresh-button {
         appearance: none;
         border: 1px solid var(--border-subtle);
@@ -247,6 +317,11 @@
         box-shadow: 0 20px 40px rgba(0, 0, 0, 0.35);
       }
 
+      .timeline-item.is-selected {
+        border-color: rgba(10, 132, 255, 0.65);
+        box-shadow: 0 24px 48px rgba(10, 132, 255, 0.25);
+      }
+
       .timeline-item::before {
         content: "";
         position: absolute;
@@ -260,9 +335,32 @@
         box-shadow: 0 0 0 4px var(--surface-0);
       }
 
+      .timeline-item.is-selected::before {
+        box-shadow: 0 0 0 4px rgba(10, 132, 255, 0.35);
+      }
+
       .timeline-item[data-type="motion"]::before {
         background: var(--timeline-marker-motion);
         box-shadow: 0 0 0 4px rgba(255, 160, 49, 0.1);
+      }
+
+      .timeline-select {
+        position: absolute;
+        top: var(--space-md);
+        right: var(--space-md);
+        z-index: 1;
+      }
+
+      .timeline-select-checkbox {
+        width: 1.1rem;
+        height: 1.1rem;
+        cursor: pointer;
+        accent-color: var(--accent);
+      }
+
+      .timeline-select-checkbox:disabled {
+        cursor: not-allowed;
+        opacity: 0.6;
       }
 
       .thumbnail-wrapper {
@@ -388,6 +486,39 @@
         box-shadow: none;
       }
 
+      .timeline-actions .ghost-button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0.5rem 1.2rem;
+        border-radius: var(--radius-pill);
+        border: 1px solid var(--border-subtle);
+        color: var(--text-primary);
+        font-weight: 600;
+        text-decoration: none;
+        background: transparent;
+        transition: color 200ms ease, border-color 200ms ease, background 200ms ease;
+      }
+
+      .timeline-actions .ghost-button:hover,
+      .timeline-actions .ghost-button:focus-visible {
+        color: var(--accent);
+        border-color: rgba(10, 132, 255, 0.6);
+        background: rgba(10, 132, 255, 0.1);
+        outline: none;
+      }
+
+      .timeline-actions .ghost-button:focus-visible {
+        box-shadow: 0 0 0 2px rgba(10, 132, 255, 0.35);
+      }
+
+      .timeline-actions .ghost-button.is-disabled {
+        opacity: 0.6;
+        pointer-events: none;
+        cursor: not-allowed;
+        background: transparent;
+      }
+
       .timeline-empty {
         background: var(--surface-soft);
         border-radius: var(--radius-lg);
@@ -407,6 +538,16 @@
         .timeline-controls {
           flex-direction: column;
           align-items: flex-start;
+        }
+
+        .control-groups {
+          width: 100%;
+          align-items: flex-start;
+        }
+
+        .selection-actions {
+          width: 100%;
+          justify-content: flex-start;
         }
 
         .timeline-item {
@@ -441,35 +582,62 @@
             Loading timeline…
           </p>
         </div>
-        <div class="filter-group" role="group" aria-label="Filter recordings">
-          <button
-            class="filter-button"
-            type="button"
-            data-filter="all"
-            aria-pressed="true"
+        <div class="control-groups">
+          <div class="filter-group" role="group" aria-label="Filter recordings">
+            <button
+              class="filter-button"
+              type="button"
+              data-filter="all"
+              aria-pressed="true"
+            >
+              All recordings
+            </button>
+            <button
+              class="filter-button"
+              type="button"
+              data-filter="manual"
+              aria-pressed="false"
+            >
+              Manual recordings
+            </button>
+            <button
+              class="filter-button"
+              type="button"
+              data-filter="motion"
+              aria-pressed="false"
+            >
+              Motion events
+            </button>
+          </div>
+          <div
+            class="selection-actions"
+            role="group"
+            aria-label="Recording selection actions"
           >
-            All recordings
-          </button>
-          <button
-            class="filter-button"
-            type="button"
-            data-filter="manual"
-            aria-pressed="false"
-          >
-            Manual recordings
-          </button>
-          <button
-            class="filter-button"
-            type="button"
-            data-filter="motion"
-            aria-pressed="false"
-          >
-            Motion events
-          </button>
+            <button class="secondary-button" type="button" id="select-all-button">
+              Select all
+            </button>
+            <button
+              class="secondary-button"
+              type="button"
+              id="clear-selection-button"
+              disabled
+            >
+              Clear selection
+            </button>
+            <button
+              class="danger-button"
+              type="button"
+              id="delete-selected-button"
+              disabled
+            >
+              Delete selected
+            </button>
+            <button class="refresh-button" type="button" id="refresh-button">
+              Refresh
+            </button>
+          </div>
         </div>
-        <button class="refresh-button" type="button" id="refresh-button">
-          Refresh
-        </button>
       </section>
       <section class="timeline" id="timeline" aria-live="polite"></section>
     </main>
@@ -480,10 +648,19 @@
       const filterButtons = Array.from(
         document.querySelectorAll(".filter-button[data-filter]")
       );
+      const deleteSelectedButton = document.getElementById(
+        "delete-selected-button"
+      );
+      const selectAllButton = document.getElementById("select-all-button");
+      const clearSelectionButton = document.getElementById(
+        "clear-selection-button"
+      );
 
       let recordings = [];
       let activeFilter = "all";
       let loading = false;
+      let deleting = false;
+      let selectedRecordings = new Set();
 
       function setStatus(message, tone = "info") {
         if (!statusElement) {
@@ -491,6 +668,38 @@
         }
         statusElement.textContent = message;
         statusElement.dataset.tone = tone;
+      }
+
+      function updateSelectionUI() {
+        const selectedCount = selectedRecordings.size;
+        if (deleteSelectedButton) {
+          deleteSelectedButton.disabled =
+            selectedCount === 0 || deleting || loading;
+          deleteSelectedButton.textContent =
+            selectedCount > 0
+              ? `Delete selected (${selectedCount})`
+              : "Delete selected";
+        }
+        if (clearSelectionButton) {
+          clearSelectionButton.disabled =
+            selectedCount === 0 || deleting || loading;
+        }
+        if (selectAllButton) {
+          const visible = applyFilter(recordings, activeFilter);
+          selectAllButton.disabled =
+            deleting || loading || visible.length === 0;
+        }
+        if (refreshButton) {
+          refreshButton.disabled = loading || deleting;
+        }
+        if (timelineElement) {
+          const checkboxes = timelineElement.querySelectorAll(
+            ".timeline-select-checkbox"
+          );
+          checkboxes.forEach((input) => {
+            input.disabled = deleting;
+          });
+        }
       }
 
       function parseDate(value) {
@@ -512,6 +721,14 @@
         const [, year, month, day, hour, minute, second] = match.map(Number);
         const date = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
         return Number.isNaN(date.getTime()) ? null : date;
+      }
+
+      function getRecordName(record) {
+        if (!record || typeof record !== "object") {
+          return null;
+        }
+        const { name } = record;
+        return typeof name === "string" && name ? name : null;
       }
 
       function getSortTime(record) {
@@ -605,7 +822,7 @@
           if (!entry || typeof entry !== "object") {
             return;
           }
-          const name = typeof entry.name === "string" ? entry.name : null;
+          const name = getRecordName(entry);
           if (!name) {
             return;
           }
@@ -643,6 +860,32 @@
         const item = document.createElement("article");
         item.className = "timeline-item";
         item.dataset.type = type;
+        const name = getRecordName(record);
+        if (name && selectedRecordings.has(name)) {
+          item.classList.add("is-selected");
+        }
+
+        if (name) {
+          const selection = document.createElement("div");
+          selection.className = "timeline-select";
+          const checkbox = document.createElement("input");
+          checkbox.type = "checkbox";
+          checkbox.className = "timeline-select-checkbox";
+          checkbox.checked = selectedRecordings.has(name);
+          checkbox.disabled = deleting;
+          checkbox.addEventListener("change", (event) => {
+            const checked = Boolean(event.target && event.target.checked);
+            if (checked) {
+              selectedRecordings.add(name);
+            } else {
+              selectedRecordings.delete(name);
+            }
+            item.classList.toggle("is-selected", checked);
+            updateSelectionUI();
+          });
+          selection.appendChild(checkbox);
+          item.appendChild(selection);
+        }
 
         const thumbnailWrapper = document.createElement("div");
         thumbnailWrapper.className = "thumbnail-wrapper";
@@ -666,7 +909,7 @@
         const title = document.createElement("div");
         title.className = "timeline-title";
         const nameElement = document.createElement("strong");
-        nameElement.textContent = typeof record.name === "string" ? record.name : "Recording";
+        nameElement.textContent = name || "Recording";
         const chip = document.createElement("span");
         chip.className = "timeline-chip";
         chip.textContent = describeType(type);
@@ -745,12 +988,28 @@
         viewButton.textContent = record.processing ? "Processing…" : "View recording";
         viewButton.disabled = Boolean(record.processing);
         viewButton.addEventListener("click", () => {
-          if (typeof record.name === "string" && record.name) {
-            const href = `/surveillance/player?name=${encodeURIComponent(record.name)}`;
+          if (name) {
+            const href = `/surveillance/player?name=${encodeURIComponent(name)}`;
             window.location.href = href;
           }
         });
         actions.appendChild(viewButton);
+        if (name) {
+          const downloadLink = document.createElement("a");
+          downloadLink.className = "ghost-button download-button";
+          downloadLink.textContent = "Download";
+          const downloadHref = `/api/surveillance/recordings/${encodeURIComponent(
+            name
+          )}/download`;
+          downloadLink.href = downloadHref;
+          downloadLink.download = `${name}.mp4`;
+          if (record.processing) {
+            downloadLink.classList.add("is-disabled");
+            downloadLink.setAttribute("aria-disabled", "true");
+            downloadLink.tabIndex = -1;
+          }
+          actions.appendChild(downloadLink);
+        }
         content.appendChild(actions);
 
         item.appendChild(content);
@@ -784,6 +1043,7 @@
               : "No recordings match the selected filter.";
           timelineElement.appendChild(empty);
           setStatus(empty.textContent, "info");
+          updateSelectionUI();
           return;
         }
         filtered.forEach((record) => {
@@ -795,6 +1055,7 @@
             ? "Displaying 1 recording."
             : `Displaying ${count} recordings.`;
         setStatus(label, "info");
+        updateSelectionUI();
       }
 
       async function loadRecordings() {
@@ -802,9 +1063,7 @@
           return;
         }
         loading = true;
-        if (refreshButton) {
-          refreshButton.disabled = true;
-        }
+        updateSelectionUI();
         setStatus("Loading timeline…", "busy");
         try {
           const response = await fetch("/api/surveillance/recordings", {
@@ -814,7 +1073,17 @@
             throw new Error(`Request failed with ${response.status}`);
           }
           const payload = await response.json();
-          recordings = normaliseRecords(payload && payload.recordings);
+          const previousSelection = new Set(selectedRecordings);
+          const nextRecords = normaliseRecords(payload && payload.recordings);
+          const availableNames = new Set(
+            nextRecords
+              .map((record) => getRecordName(record))
+              .filter((name) => typeof name === "string")
+          );
+          selectedRecordings = new Set(
+            Array.from(previousSelection).filter((name) => availableNames.has(name))
+          );
+          recordings = nextRecords;
           renderTimeline();
         } catch (error) {
           console.error("Failed to load surveillance recordings", error);
@@ -828,8 +1097,9 @@
         } finally {
           loading = false;
           if (refreshButton) {
-            refreshButton.disabled = false;
+            refreshButton.disabled = deleting;
           }
+          updateSelectionUI();
         }
       }
 
@@ -840,6 +1110,121 @@
           button.setAttribute("aria-pressed", String(isActive));
         });
         renderTimeline();
+        updateSelectionUI();
+      }
+
+      function selectAllVisibleRecordings() {
+        const visible = applyFilter(recordings, activeFilter);
+        let changed = false;
+        visible.forEach((record) => {
+          const name = getRecordName(record);
+          if (name && !selectedRecordings.has(name)) {
+            selectedRecordings.add(name);
+            changed = true;
+          }
+        });
+        if (changed) {
+          renderTimeline();
+        } else {
+          updateSelectionUI();
+        }
+      }
+
+      function clearSelection() {
+        if (selectedRecordings.size === 0) {
+          return;
+        }
+        selectedRecordings = new Set();
+        renderTimeline();
+        updateSelectionUI();
+      }
+
+      async function deleteRecordingRequest(name) {
+        const response = await fetch(
+          `/api/surveillance/recordings/${encodeURIComponent(name)}`,
+          { method: "DELETE" }
+        );
+        if (response.status === 404) {
+          return;
+        }
+        if (!response.ok) {
+          let detail = "";
+          try {
+            const payload = await response.json();
+            if (payload && typeof payload.detail === "string") {
+              detail = payload.detail;
+            }
+          } catch (error) {
+            // Ignore JSON parsing failures.
+          }
+          if (!detail) {
+            detail = `Request failed with ${response.status}`;
+          }
+          throw new Error(detail);
+        }
+      }
+
+      async function deleteSelectedRecordings() {
+        if (deleting || loading) {
+          return;
+        }
+        const names = Array.from(selectedRecordings);
+        if (!names.length) {
+          return;
+        }
+        const confirmationMessage =
+          names.length === 1
+            ? `Delete recording "${names[0]}"?`
+            : `Delete ${names.length} recordings?`;
+        if (!window.confirm(confirmationMessage)) {
+          return;
+        }
+        deleting = true;
+        updateSelectionUI();
+        const failedNames = new Set();
+        for (const name of names) {
+          try {
+            await deleteRecordingRequest(name);
+          } catch (error) {
+            console.error("Failed to delete surveillance recording", name, error);
+            failedNames.add(name);
+          }
+        }
+        names.forEach((name) => {
+          if (!failedNames.has(name)) {
+            selectedRecordings.delete(name);
+          }
+        });
+        deleting = false;
+        updateSelectionUI();
+        await loadRecordings();
+        const successNames = names.filter((name) => !failedNames.has(name));
+        const successCount = successNames.length;
+        let message = "";
+        let tone = failedNames.size ? "error" : "info";
+        if (failedNames.size && successCount) {
+          message =
+            failedNames.size === 1
+              ? `Deleted ${successCount} recordings, but failed to delete ${Array.from(
+                  failedNames
+                )[0]}.`
+              : `Deleted ${successCount} recordings, but failed to delete ${failedNames.size}.`;
+        } else if (failedNames.size) {
+          if (failedNames.size === 1) {
+            const [failedName] = failedNames;
+            message = `Unable to delete ${failedName}.`;
+          } else {
+            message = `Unable to delete ${failedNames.size} recordings.`;
+          }
+        } else if (successCount) {
+          message =
+            successCount === 1
+              ? `Deleted recording ${successNames[0]}.`
+              : `Deleted ${successCount} recordings.`;
+        }
+        if (message) {
+          setStatus(message, tone);
+        }
       }
 
       filterButtons.forEach((button) => {
@@ -849,12 +1234,31 @@
         });
       });
 
+      if (selectAllButton) {
+        selectAllButton.addEventListener("click", () => {
+          selectAllVisibleRecordings();
+        });
+      }
+
+      if (clearSelectionButton) {
+        clearSelectionButton.addEventListener("click", () => {
+          clearSelection();
+        });
+      }
+
+      if (deleteSelectedButton) {
+        deleteSelectedButton.addEventListener("click", () => {
+          deleteSelectedRecordings();
+        });
+      }
+
       if (refreshButton) {
         refreshButton.addEventListener("click", () => {
           loadRecordings();
         });
       }
 
+      updateSelectionUI();
       loadRecordings();
     </script>
   </body>
