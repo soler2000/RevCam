@@ -1979,6 +1979,7 @@ def create_app(
 
     @app.get("/api/surveillance/recordings/{name}/download")
     async def download_surveillance_recording(name: str) -> StreamingResponse:
+        archive = None
         try:
             safe_name, archive = await asyncio.to_thread(
                 build_recording_video, RECORDINGS_DIR, name
@@ -1992,6 +1993,10 @@ def create_app(
             raise HTTPException(
                 status_code=409, detail="Recording is not ready for download"
             ) from exc
+        except asyncio.CancelledError:
+            if archive is not None:
+                archive.close()
+            raise
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.exception("Failed to prepare surveillance recording %s", name)
             raise HTTPException(status_code=500, detail="Unable to download recording") from exc
