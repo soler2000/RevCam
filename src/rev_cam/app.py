@@ -10,6 +10,7 @@ import string
 from enum import Enum
 from pathlib import Path
 from typing import Literal
+from urllib.parse import quote as urlquote
 
 from datetime import datetime, timedelta, timezone
 
@@ -41,6 +42,7 @@ from .sensor_fusion import Gy85KalmanFilter, SensorSample, Vector3
 from .pipeline import FramePipeline
 from .recording import (
     RecordingManager,
+    build_recording_archive,
     load_recording_metadata,
     load_recording_payload,
     purge_recordings,
@@ -1946,6 +1948,37 @@ def create_app(
             return await recording_manager.get_recording(name)
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Recording not found") from exc
+
+    @app.get("/api/surveillance/recordings/{name}/download")
+    async def download_surveillance_recording(name: str) -> StreamingResponse:
+        try:
+            safe_name, archive = await asyncio.to_thread(
+                build_recording_archive, RECORDINGS_DIR, name
+            )
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Recording not found") from exc
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.exception("Failed to prepare surveillance recording %s", name)
+            raise HTTPException(status_code=500, detail="Unable to download recording") from exc
+
+        filename = f"{safe_name}.zip".replace("\"", "")
+        disposition = (
+            f'attachment; filename="{filename}"; filename*=UTF-8\'\'{urlquote(filename)}'
+        )
+
+        def _iterator():
+            try:
+                while True:
+                    chunk = archive.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    yield chunk
+            finally:
+                archive.close()
+
+        return StreamingResponse(
+            _iterator(), media_type="application/zip", headers={"Content-Disposition": disposition}
+        )
 
     @app.delete("/api/surveillance/recordings/{name}")
     async def delete_surveillance_recording(name: str) -> dict[str, object]:

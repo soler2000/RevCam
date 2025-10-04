@@ -9,11 +9,13 @@ import json
 import logging
 import shutil
 import time
+import zipfile
 from copy import deepcopy
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from tempfile import SpooledTemporaryFile
 from typing import AsyncGenerator, Awaitable, Callable, Iterable, Mapping
 
 try:  # pragma: no cover - optional dependency on numpy
@@ -185,6 +187,55 @@ def load_recording_payload(directory: Path, name: str) -> dict[str, object]:
     payload.setdefault("name", safe_name)
     payload["frames"] = frames
     return payload
+
+
+def build_recording_archive(
+    directory: Path, name: str
+) -> tuple[str, SpooledTemporaryFile]:
+    """Package recording files for ``name`` into a ZIP archive."""
+
+    safe_name = _safe_recording_name(name)
+    meta_path = directory / f"{safe_name}.meta.json"
+    data_path = directory / f"{safe_name}.json"
+    gz_path = directory / f"{safe_name}.json.gz"
+    metadata: dict[str, object] | None = None
+    if meta_path.exists() and meta_path.is_file():
+        try:
+            metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+        except Exception:  # pragma: no cover - best-effort parsing
+            metadata = None
+    paths: list[Path] = []
+    seen: set[Path] = set()
+
+    def _add_path(candidate: Path) -> None:
+        if candidate.exists() and candidate.is_file() and candidate not in seen:
+            paths.append(candidate)
+            seen.add(candidate)
+
+    if meta_path.exists() and meta_path.is_file():
+        _add_path(meta_path)
+    if data_path.exists() and data_path.is_file():
+        _add_path(data_path)
+    elif gz_path.exists() and gz_path.is_file():
+        _add_path(gz_path)
+    if isinstance(metadata, Mapping):
+        chunks = metadata.get("chunks")
+        if isinstance(chunks, list):
+            for entry in chunks:
+                if isinstance(entry, Mapping):
+                    filename = entry.get("file")
+                    if isinstance(filename, str):
+                        chunk_path = directory / filename
+                        _add_path(chunk_path)
+    if not paths:
+        raise FileNotFoundError("Recording not found")
+
+    archive = SpooledTemporaryFile(max_size=8 * 1024 * 1024)
+    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as handle:
+        for path in paths:
+            handle.write(path, arcname=path.name)
+    archive.seek(0)
+    return safe_name, archive
 
 
 def remove_recording_files(directory: Path, name: str) -> None:
@@ -1526,6 +1577,7 @@ class RecordingManager:
 __all__ = [
     "MotionDetector",
     "RecordingManager",
+    "build_recording_archive",
     "load_recording_metadata",
     "load_recording_payload",
     "remove_recording_files",
