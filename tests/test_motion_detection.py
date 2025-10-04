@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import types
 
+from collections import deque
 from pathlib import Path
 
 import asyncio
@@ -211,6 +212,85 @@ async def test_chunk_mp4_generation(tmp_path: Path, anyio_backend) -> None:
             assert video_streams
             first_frame = next(container.decode(video=0), None)
             assert first_frame is not None
+    await manager.aclose()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("anyio_backend", ["asyncio"], indirect=True)
+async def test_chunk_backlog_limit(tmp_path: Path, anyio_backend) -> None:
+    camera = _StaticCamera()
+    pipeline = _pipeline()
+    manager = RecordingManager(
+        camera=camera,
+        pipeline=pipeline,
+        directory=tmp_path,
+        fps=1,
+        chunk_duration_seconds=1,
+    )
+
+    async def _noop(self):
+        return None
+
+    manager._ensure_producer_running = types.MethodType(_noop, manager)
+
+    events: deque[asyncio.Event] = deque()
+
+    async def _slow_payload(self, filename: str, frames: list[dict[str, object]]) -> int:
+        event = asyncio.Event()
+        events.append(event)
+        await event.wait()
+        return len(frames)
+
+    manager._write_chunk_payload = types.MethodType(_slow_payload, manager)
+
+    await manager.start_recording(motion_mode=False)
+
+    frame = np.zeros((16, 16, 3), dtype=np.uint8)
+    jpeg_payload = manager._encode_frame(frame)
+
+    await manager._record_frame(jpeg_payload, 0.0, frame)
+    await manager._record_frame(jpeg_payload, 0.5, frame)
+
+    backlog_limit = manager._chunk_backlog_limit
+    assert len(manager._chunk_write_tasks) == backlog_limit
+
+    async def release_next() -> None:
+        while not events:
+            await asyncio.sleep(0)
+        events.popleft().set()
+
+    third_task = asyncio.create_task(manager._record_frame(jpeg_payload, 1.0, frame))
+    await asyncio.sleep(0.05)
+    assert len(manager._chunk_write_tasks) == backlog_limit
+    assert not third_task.done()
+
+    await release_next()
+    await asyncio.sleep(0.05)
+    assert len(manager._chunk_write_tasks) <= backlog_limit
+
+    await release_next()
+    await asyncio.sleep(0.05)
+    assert len(manager._chunk_write_tasks) <= backlog_limit
+
+    await release_next()
+    await third_task
+
+    while events:
+        events.popleft().set()
+
+    for _ in range(50):
+        if not manager._chunk_write_tasks:
+            break
+        await asyncio.sleep(0.02)
+
+    assert len(manager._chunk_write_tasks) == 0
+    assert manager._completed_chunk_tasks
+    for entry, _, _ in manager._completed_chunk_tasks:
+        assert entry.get("size_bytes") is not None
+
+    placeholder = await manager.stop_recording()
+    assert placeholder["processing"] is True
+    await manager.wait_for_processing()
     await manager.aclose()
 
 

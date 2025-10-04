@@ -781,6 +781,17 @@ class MotionDetector:
 
 
 @dataclass
+class _ChunkTaskState:
+    entry: dict[str, object]
+    payload_task: asyncio.Task[int]
+    video_task: asyncio.Task[int] | None
+    completion: asyncio.Future[None]
+
+    def as_tuple(self) -> tuple[dict[str, object], asyncio.Task[int], asyncio.Task[int] | None]:
+        return (self.entry, self.payload_task, self.video_task)
+
+
+@dataclass
 class RecordingManager:
     """Capture frames for surveillance recordings with MJPEG preview support."""
 
@@ -808,11 +819,16 @@ class RecordingManager:
     _frame_interval: float = field(init=False)
     _recording_active: bool = field(init=False, default=False)
     _active_chunk_frames: list[dict[str, object]] = field(init=False, default_factory=list)
-    _chunk_write_tasks: list[
-        tuple[dict[str, object], asyncio.Task[int], asyncio.Task[int] | None]
-    ] = field(
+    _chunk_write_tasks: list["_ChunkTaskState"] = field(
         init=False, default_factory=list
     )
+    _completed_chunk_tasks: list[
+        tuple[dict[str, object], asyncio.Task[int], asyncio.Task[int] | None]
+    ] = field(init=False, default_factory=list)
+    _chunk_task_monitors: set[asyncio.Task[None]] = field(
+        init=False, default_factory=set
+    )
+    _chunk_backlog_limit: int = field(init=False, default=2)
     _chunk_index: int = field(init=False, default=0)
     _chunk_frame_limit: int = field(init=False, default=0)
     _chunk_byte_limit: int = field(init=False, default=0)
@@ -950,6 +966,8 @@ class RecordingManager:
             self._active_chunk_frames = []
             self._active_chunk_bytes = 0
             self._chunk_write_tasks.clear()
+            self._completed_chunk_tasks.clear()
+            self._chunk_task_monitors.clear()
             self._chunk_index = 0
             self._total_frame_count = 0
             if motion_enabled and self._session_motion_override:
@@ -1554,6 +1572,8 @@ class RecordingManager:
         self._active_chunk_frames = []
         self._active_chunk_bytes = 0
         self._chunk_write_tasks.clear()
+        self._completed_chunk_tasks.clear()
+        self._chunk_task_monitors.clear()
         self._chunk_index = 0
         self._total_frame_count = 0
         self._thumbnail = None
@@ -1613,8 +1633,10 @@ class RecordingManager:
                 return None
 
         pending_flush = self._pop_active_chunk_locked()
-        chunk_tasks = list(self._chunk_write_tasks)
+        chunk_tasks = list(self._completed_chunk_tasks)
+        chunk_tasks.extend(state.as_tuple() for state in self._chunk_write_tasks)
         self._chunk_write_tasks.clear()
+        self._completed_chunk_tasks.clear()
         storage_status = (
             dict(self._last_storage_status)
             if isinstance(self._last_storage_status, Mapping)
@@ -1827,6 +1849,66 @@ class RecordingManager:
         self._active_chunk_bytes = 0
         return (name, self._chunk_index, frames)
 
+    async def _enforce_chunk_backlog_limit(self) -> None:
+        limit = int(self._chunk_backlog_limit)
+        if limit <= 0:
+            return
+        while len(self._chunk_write_tasks) >= limit:
+            state = self._chunk_write_tasks[0]
+            try:
+                await asyncio.shield(state.completion)
+            except asyncio.CancelledError:  # pragma: no cover - propagate cancellation
+                raise
+
+    def _track_chunk_task_state(self, state: _ChunkTaskState) -> None:
+        async def _monitor() -> None:
+            try:
+                await self._finalise_chunk_task_state(state)
+            except asyncio.CancelledError:  # pragma: no cover - propagate cancellation
+                raise
+            except Exception:  # pragma: no cover - defensive logging
+                logger.exception(
+                    "Failed to finalise surveillance chunk %s", state.entry.get("file")
+                )
+
+        task = asyncio.create_task(_monitor())
+        self._chunk_task_monitors.add(task)
+        task.add_done_callback(lambda fut, task=task: self._chunk_task_monitors.discard(task))
+
+    async def _finalise_chunk_task_state(self, state: _ChunkTaskState) -> None:
+        entry = state.entry
+        try:
+            size = await state.payload_task
+        except asyncio.CancelledError as exc:  # pragma: no cover - propagate cancellation
+            if not state.completion.done():
+                state.completion.set_exception(exc)
+            raise
+        except Exception as exc:  # pragma: no cover - defensive guard
+            entry.setdefault("size_error", str(exc))
+        else:
+            entry["size_bytes"] = int(size)
+
+        video_task = state.video_task
+        if video_task is not None:
+            try:
+                video_size = await video_task
+            except asyncio.CancelledError as exc:  # pragma: no cover - propagate cancellation
+                if not state.completion.done():
+                    state.completion.set_exception(exc)
+                raise
+            except Exception as exc:  # pragma: no cover - defensive guard
+                entry.setdefault("video_error", str(exc))
+            else:
+                entry["video_size_bytes"] = int(video_size)
+
+        try:
+            self._chunk_write_tasks.remove(state)
+        except ValueError:
+            pass
+        self._completed_chunk_tasks.append(state.as_tuple())
+        if not state.completion.done():
+            state.completion.set_result(None)
+
     async def _persist_chunk(
         self,
         name: str,
@@ -1840,6 +1922,9 @@ class RecordingManager:
     ) -> tuple[dict[str, object], asyncio.Task[int], asyncio.Task[int] | None] | None:
         if not frames:
             return None
+        using_manager_queue = task_list is None
+        if using_manager_queue:
+            await self._enforce_chunk_backlog_limit()
         filename = self._chunk_filename(name, index)
         entry = {
             "file": filename,
@@ -1854,9 +1939,22 @@ class RecordingManager:
             video_task = asyncio.create_task(
                 self._write_chunk_video(video_filename, frames)
             )
-        target_list = task_list if task_list is not None else self._chunk_write_tasks
-        target_list.append((entry, task, video_task))
-        return (entry, task, video_task)
+        result = (entry, task, video_task)
+        if using_manager_queue:
+            loop = asyncio.get_running_loop()
+            completion: asyncio.Future[None] = loop.create_future()
+            state = _ChunkTaskState(
+                entry=entry,
+                payload_task=task,
+                video_task=video_task,
+                completion=completion,
+            )
+            self._chunk_write_tasks.append(state)
+            self._track_chunk_task_state(state)
+            return state.as_tuple()
+        assert task_list is not None
+        task_list.append(result)
+        return result
 
     async def _write_chunk_payload(
         self, filename: str, frames: list[dict[str, object]]
