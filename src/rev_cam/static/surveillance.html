@@ -485,8 +485,11 @@
       let recordingTimerStartMs = null;
       let recordingTimerInterval = null;
       let recordingTimerSource = null;
+      let manualSessionPending = false;
+      let manualSessionGraceDeadline = 0;
       const STATUS_REFRESH_ACTIVE_MS = 2000;
       const STATUS_REFRESH_IDLE_MS = 5000;
+      const MANUAL_CONFIRMATION_GRACE_MS = 5000;
       let statusRefreshHandle = null;
       let statusRequestSequence = 0;
       let latestAppliedStatusSequence = 0;
@@ -590,6 +593,12 @@
         const shouldRun =
           hasStart && (currentSession === "manual" || currentSession === "motion-recording");
         if (!shouldRun) {
+          const localManualActive =
+            currentSession === "manual" && recordingTimerStartMs !== null;
+          if (localManualActive) {
+            renderRecordingTimer();
+            return;
+          }
           stopRecordingTimer();
           return;
         }
@@ -989,7 +998,20 @@
             motionSnapshot,
           );
           const previousSession = sessionState;
-          applySessionVisuals(derivedSession, {
+          let effectiveSession = derivedSession;
+          if (manualSessionPending) {
+            const now = Date.now();
+            if (derivedSession === "manual") {
+              manualSessionPending = false;
+              manualSessionGraceDeadline = 0;
+            } else if (now < manualSessionGraceDeadline) {
+              effectiveSession = "manual";
+            } else {
+              manualSessionPending = false;
+              manualSessionGraceDeadline = 0;
+            }
+          }
+          applySessionVisuals(effectiveSession, {
             processingActive: isProcessing,
             processingRecord,
           });
@@ -1018,10 +1040,13 @@
           ) {
             setStatus("Low storage — recordings will pause automatically", "error");
           }
-          if (previousSession === "manual" && sessionState !== "manual") {
+          const manualSessionConcluded =
+            previousSession === "manual" && sessionState !== "manual" && !manualSessionPending;
+          if (manualSessionConcluded) {
             const resumeTarget = pendingManualResume;
             pendingManualResume = null;
-            if (resumeTarget === "motion") {
+            const canResumeMotion = resumeTarget === "motion" && !serverRecording;
+            if (canResumeMotion) {
               window.setTimeout(() => {
                 resumeMotionAfterManual().catch((error) => {
                   console.error("Failed to resume motion detection", error);
@@ -1032,7 +1057,7 @@
                 });
               }, 0);
             }
-          } else if (sessionState !== "manual") {
+          } else if (sessionState !== "manual" && !manualSessionPending) {
             pendingManualResume = null;
           }
           scheduleStatusRefresh();
@@ -1095,6 +1120,8 @@
               await postRecordingCommand("/api/surveillance/recordings/stop", {
                 allowConflict: true,
               });
+              manualSessionPending = false;
+              manualSessionGraceDeadline = 0;
             } else {
               const wasMotionSession =
                 currentSession === "motion-monitoring" || currentSession === "motion-recording";
@@ -1105,9 +1132,29 @@
                 });
               }
               try {
-                await postRecordingCommand("/api/surveillance/recordings/start");
+                const response = await postRecordingCommand("/api/surveillance/recordings/start");
+                let startIso = null;
+                if (response) {
+                  try {
+                    const payload = await response.json();
+                    if (
+                      payload &&
+                      typeof payload === "object" &&
+                      payload.recording &&
+                      typeof payload.recording === "object" &&
+                      typeof payload.recording.started_at === "string"
+                    ) {
+                      startIso = payload.recording.started_at;
+                    }
+                  } catch (parseError) {
+                    console.warn("Failed to parse manual start response", parseError);
+                  }
+                }
+                const fallbackIso = new Date().toISOString();
+                manualSessionPending = true;
+                manualSessionGraceDeadline = Date.now() + MANUAL_CONFIRMATION_GRACE_MS;
                 applySessionVisuals("manual");
-                startRecordingTimer(new Date().toISOString());
+                startRecordingTimer(startIso || fallbackIso);
               } catch (startError) {
                 if (pendingManualResume === "motion") {
                   pendingManualResume = null;
@@ -1127,6 +1174,8 @@
             console.error("Manual recording control error", error);
             if (!stoppingManual) {
               pendingManualResume = null;
+              manualSessionPending = false;
+              manualSessionGraceDeadline = 0;
             }
             const message =
               error && typeof error.message === "string"
