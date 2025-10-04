@@ -941,10 +941,12 @@
               nextRecordingMode = candidate;
             }
           }
-          if (nextRecordingMode === "idle" && payload && payload.recording) {
+          const serverRecording = Boolean(payload && payload.recording);
+          if (!serverRecording) {
+            nextRecordingMode = "idle";
+          } else if (nextRecordingMode === "idle") {
             nextRecordingMode = "continuous";
           }
-          const serverRecording = Boolean(payload && payload.recording);
           if (manualRecordingPinned) {
             if (!serverRecording || nextRecordingMode === "idle") {
               manualRecordingPinned = false;
