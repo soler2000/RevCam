@@ -132,8 +132,9 @@
         padding: clamp(var(--space-lg), 4vw, var(--space-2xl));
       }
       .stream-wrapper {
-        width: min(100%, max(320px, calc(100vh - 6rem)));
-        max-width: min(1100px, max(360px, calc(100vh - 3rem)));
+        --frame-padding: clamp(var(--space-lg), 4vw, var(--space-2xl));
+        width: min(100%, calc(100vw - 2 * var(--frame-padding)));
+        max-width: 100%;
         margin: 0;
       }
       .stream-display {
