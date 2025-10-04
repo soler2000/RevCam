@@ -282,6 +282,7 @@ class DistanceMonitor:
 
     def _configure_sensor(self, sensor: object) -> None:
         try:
+            desired_budget = 140
             if hasattr(sensor, "distance_mode"):
                 def _try_distance_modes(modes: tuple[object, ...]) -> bool:
                     for mode in modes:
@@ -299,7 +300,27 @@ class DistanceMonitor:
                     _try_distance_modes(fallback_modes)
             if hasattr(sensor, "timing_budget"):
                 try:
-                    setattr(sensor, "timing_budget", 50)
+                    current_budget = getattr(sensor, "timing_budget")
+                except Exception:
+                    current_budget = None
+                try:
+                    if not isinstance(current_budget, (int, float)) or current_budget < desired_budget:
+                        setattr(sensor, "timing_budget", desired_budget)
+                except Exception:
+                    pass
+            if hasattr(sensor, "inter_measurement"):
+                try:
+                    budget = getattr(sensor, "timing_budget", None)
+                except Exception:
+                    budget = None
+                try:
+                    interval = getattr(sensor, "inter_measurement")
+                except Exception:
+                    interval = None
+                target_interval = budget if isinstance(budget, (int, float)) and budget > 0 else desired_budget
+                try:
+                    if not isinstance(interval, (int, float)) or interval < target_interval:
+                        setattr(sensor, "inter_measurement", target_interval)
                 except Exception:
                     pass
             if hasattr(sensor, "start_ranging"):
