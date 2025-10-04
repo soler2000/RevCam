@@ -1285,25 +1285,34 @@ class RecordingManager:
     ) -> _FinaliseContext | None:
         name = self._recording_name
         if not name:
-            if deactivate_session:
-                self._recording_active = False
-                self._recording_started_at = None
-                self._recording_started_monotonic = None
-                self._recording_name = None
-                self._thumbnail = None
-                self._next_stop_reason = None
-                self._session_motion_override = False
-                self._active_motion_enabled = False
-                self._motion_state = None
-                self._cancel_auto_stop_task()
-                self._total_frame_count = 0
-                self._chunk_index = 0
-                self._motion_event_base = None
-                self._motion_event_index = 0
-                self._current_motion_event_index = 0
-                self._motion_event_active = False
-                self._motion_event_pending_stop = None
-            return None
+            if not self._active_motion_enabled:
+                started_at = self._recording_started_at or _utcnow()
+                monotonic = self._recording_started_monotonic or time.perf_counter()
+                fallback_name = started_at.strftime("%Y%m%d-%H%M%S")
+                self._recording_started_at = started_at
+                self._recording_started_monotonic = monotonic
+                self._recording_name = fallback_name
+                name = fallback_name
+            else:
+                if deactivate_session:
+                    self._recording_active = False
+                    self._recording_started_at = None
+                    self._recording_started_monotonic = None
+                    self._recording_name = None
+                    self._thumbnail = None
+                    self._next_stop_reason = None
+                    self._session_motion_override = False
+                    self._active_motion_enabled = False
+                    self._motion_state = None
+                    self._cancel_auto_stop_task()
+                    self._total_frame_count = 0
+                    self._chunk_index = 0
+                    self._motion_event_base = None
+                    self._motion_event_index = 0
+                    self._current_motion_event_index = 0
+                    self._motion_event_active = False
+                    self._motion_event_pending_stop = None
+                return None
 
         pending_flush = self._pop_active_chunk_locked()
         chunk_tasks = list(self._chunk_write_tasks)
