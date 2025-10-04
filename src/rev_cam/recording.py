@@ -609,6 +609,7 @@ class RecordingManager:
         init=False, default_factory=set
     )
     _session_motion_override: bool = field(init=False, default=False)
+    _session_motion_override_enabled: bool | None = field(init=False, default=None)
     _active_motion_enabled: bool = field(init=False, default=False)
     _motion_state: str | None = field(init=False, default=None)
     _motion_event_base: str | None = field(init=False, default=None)
@@ -692,10 +693,13 @@ class RecordingManager:
             name = started_at.strftime("%Y%m%d-%H%M%S")
             if motion_mode is None:
                 self._session_motion_override = False
+                self._session_motion_override_enabled = None
                 motion_enabled = bool(self.motion_detection_enabled)
             else:
+                desired_motion = bool(motion_mode)
                 self._session_motion_override = True
-                motion_enabled = bool(motion_mode)
+                self._session_motion_override_enabled = desired_motion
+                motion_enabled = desired_motion
             self._active_motion_enabled = motion_enabled
             self._motion_detector.configure(
                 enabled=motion_enabled,
@@ -959,10 +963,16 @@ class RecordingManager:
                     )
                 elif self._motion_event_active:
                     self._motion_event_pending_stop = None
-            session_override = self._session_motion_override and self._recording_active
-            effective_enabled = self.motion_detection_enabled
-            if session_override:
-                effective_enabled = True
+            session_override = (
+                self._session_motion_override
+                and self._session_motion_override_enabled is not None
+                and self._recording_active
+            )
+            effective_enabled = (
+                self._session_motion_override_enabled
+                if session_override
+                else self.motion_detection_enabled
+            )
             self._active_motion_enabled = effective_enabled if self._recording_active else False
             if self._recording_active and self._active_motion_enabled and self._motion_state is None:
                 self._motion_state = "monitoring"
@@ -1302,6 +1312,7 @@ class RecordingManager:
                     self._thumbnail = None
                     self._next_stop_reason = None
                     self._session_motion_override = False
+                    self._session_motion_override_enabled = None
                     self._active_motion_enabled = False
                     self._motion_state = None
                     self._cancel_auto_stop_task()
@@ -1348,6 +1359,7 @@ class RecordingManager:
         if deactivate_session:
             self._recording_active = False
             self._session_motion_override = False
+            self._session_motion_override_enabled = None
             self._active_motion_enabled = False
             self._motion_state = None
             self._next_stop_reason = None

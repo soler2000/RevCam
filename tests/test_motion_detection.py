@@ -203,6 +203,42 @@ async def test_manual_recording_disables_motion_when_requested(
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("anyio_backend", ["asyncio"], indirect=True)
+async def test_manual_override_persists_when_settings_change(
+    tmp_path: Path, anyio_backend
+) -> None:
+    camera = _StaticCamera()
+    pipeline = _pipeline()
+    manager = RecordingManager(
+        camera=camera,
+        pipeline=pipeline,
+        directory=tmp_path,
+        motion_detection_enabled=True,
+        motion_inactivity_timeout_seconds=0.05,
+    )
+
+    async def _noop(self):
+        return None
+
+    manager._ensure_producer_running = types.MethodType(_noop, manager)
+
+    await manager.start_recording(motion_mode=False)
+    assert manager.recording_mode == "continuous"
+
+    await manager.apply_settings(motion_sensitivity=65)
+
+    status = manager.get_motion_status()
+    assert status["enabled"] is False
+    assert status["session_override"] is True
+    assert status["session_state"] is None
+
+    placeholder = await manager.stop_recording()
+    assert placeholder["processing"] is True
+    await manager.wait_for_processing()
+    await manager.aclose()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("anyio_backend", ["asyncio"], indirect=True)
 async def test_recording_manager_motion_override_session(tmp_path: Path, anyio_backend) -> None:
     camera = _StaticCamera()
     pipeline = _pipeline()

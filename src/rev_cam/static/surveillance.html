@@ -426,10 +426,10 @@
         <p class="muted" id="preview-message">Preparing surveillance stream…</p>
         <div class="controls">
           <button class="action" type="button" id="record-button" aria-pressed="false">
-            Start recording
+            Start manual recording
           </button>
           <button class="action" type="button" id="motion-record-button" aria-pressed="false">
-            Start motion recording
+            Start motion detection
           </button>
           <div class="recording-timer" id="recording-timer" aria-live="polite" hidden>
             <span class="recording-timer-icon" aria-hidden="true">⏱</span>
@@ -479,16 +479,18 @@
         ? Array.from(modeToggle.querySelectorAll(".mode-toggle-button"))
         : [];
       let currentMode = "surveillance";
-      let isRecording = false;
-      let recordingMode = "idle";
-      let manualRecordingPinned = false;
+      let sessionState = "idle";
+      let pendingManualResume = null;
       let previewUrl = null;
       let recordingTimerStartMs = null;
       let recordingTimerInterval = null;
       let recordingTimerSource = null;
-      let lastMotionSnapshot = null;
+      let manualSessionPending = false;
+      let manualSessionGraceDeadline = 0;
+      let lastStatusSnapshot = null;
       const STATUS_REFRESH_ACTIVE_MS = 2000;
       const STATUS_REFRESH_IDLE_MS = 5000;
+      const MANUAL_CONFIRMATION_GRACE_MS = 5000;
       let statusRefreshHandle = null;
       let statusRequestSequence = 0;
       let latestAppliedStatusSequence = 0;
@@ -513,10 +515,11 @@
         if (!pageVisible) {
           return;
         }
-        const interval =
-          isRecording && recordingMode === "motion"
-            ? STATUS_REFRESH_ACTIVE_MS
-            : STATUS_REFRESH_IDLE_MS;
+        const activeSession =
+          sessionState === "manual" ||
+          sessionState === "motion-monitoring" ||
+          sessionState === "motion-recording";
+        const interval = activeSession ? STATUS_REFRESH_ACTIVE_MS : STATUS_REFRESH_IDLE_MS;
         clearScheduledStatusRefresh();
         statusRefreshHandle = window.setTimeout(() => {
           statusRefreshHandle = null;
@@ -583,21 +586,20 @@
         recordingTimerInterval = window.setInterval(renderRecordingTimer, 1000);
       }
 
-      function syncRecordingTimer(startIso, motionSnapshot) {
+      function syncRecordingTimer(startIso, currentSession) {
         if (!recordingTimer) {
           return;
         }
         const hasStart = typeof startIso === "string" && startIso.length > 0;
-        const isContinuousRecording = isRecording && recordingMode === "continuous";
-        let isMotionRecording = false;
-        if (recordingMode === "motion" && motionSnapshot && motionSnapshot.session_active) {
-          const sessionRecording = motionSnapshot.session_recording === true;
-          const sessionState = motionSnapshot.session_state;
-          const eventActive = motionSnapshot.event_active === true;
-          isMotionRecording = sessionRecording || eventActive || sessionState === "recording";
-        }
-        const shouldRun = hasStart && (isContinuousRecording || isMotionRecording);
+        const shouldRun =
+          hasStart && (currentSession === "manual" || currentSession === "motion-recording");
         if (!shouldRun) {
+          const localManualActive =
+            currentSession === "manual" && recordingTimerStartMs !== null;
+          if (localManualActive) {
+            renderRecordingTimer();
+            return;
+          }
           stopRecordingTimer();
           return;
         }
@@ -673,21 +675,147 @@
         previewMessage.textContent = "Live surveillance preview.";
       }
 
-      function updateControlButtons() {
-        const isContinuous = recordingMode === "continuous";
-        const isMotion = recordingMode === "motion";
+      function isMotionRecordingActive(snapshot) {
+        if (!snapshot || typeof snapshot !== "object") {
+          return false;
+        }
+        const sessionState = snapshot.session_state;
+        if (sessionState === "recording") {
+          return true;
+        }
+        const sessionRecording = snapshot.session_recording === true;
+        const eventActive = snapshot.event_active === true;
+        return sessionRecording || eventActive;
+      }
+
+      function isManualOverrideActive(serverRecording, serverMode, motionSnapshot) {
+        if (!serverRecording) {
+          return false;
+        }
+        if (serverMode === "continuous") {
+          return true;
+        }
+        if (!motionSnapshot || typeof motionSnapshot !== "object") {
+          return serverMode !== "motion";
+        }
+        if (motionSnapshot.session_override === true && motionSnapshot.enabled !== true) {
+          return true;
+        }
+        if (motionSnapshot.enabled === false) {
+          return true;
+        }
+        const sessionActive = motionSnapshot.session_active === true;
+        const sessionState = motionSnapshot.session_state;
+        if (!sessionActive && (sessionState === null || sessionState === undefined)) {
+          return true;
+        }
+        return false;
+      }
+
+      function determineSessionState(serverRecording, serverMode, motionSnapshot) {
+        if (isManualOverrideActive(serverRecording, serverMode, motionSnapshot)) {
+          return "manual";
+        }
+        if (serverRecording && serverMode === "motion") {
+          return isMotionRecordingActive(motionSnapshot)
+            ? "motion-recording"
+            : "motion-monitoring";
+        }
+        return "idle";
+      }
+
+      function updateStatusForSession(currentSession, options = {}) {
+        const { processingActive = false, processingRecord = null } = options;
+        const manualProcessing = processingActive && isManualProcessingRecord(processingRecord);
+        if (currentSession === "manual") {
+          setStatus("Manual recording in progress…", "alert");
+          return;
+        }
+        if (currentSession === "motion-recording") {
+          setStatus("Motion detected — recording…", "alert");
+          return;
+        }
+        if (currentSession === "motion-monitoring") {
+          setStatus("Motion detection active.", "monitor");
+          return;
+        }
+        if (manualProcessing) {
+          setStatus("Finalising manual recording…", "busy");
+          return;
+        }
+        if (processingActive) {
+          setStatus("Finalising motion recording…", "busy");
+          return;
+        }
+        setStatus("Idle. Ready to record.", "info");
+      }
+
+      function applySessionVisuals(currentSession, options = {}) {
+        const { processingActive = false, processingRecord = null } = options;
+        sessionState = currentSession;
         if (recordButton) {
-          recordButton.textContent = isContinuous ? "Stop recording" : "Start recording";
-          recordButton.setAttribute("aria-pressed", String(isContinuous));
-          recordButton.disabled = isMotion;
+          const manualActive = currentSession === "manual";
+          recordButton.textContent = manualActive ? "Stop recording" : "Start manual recording";
+          recordButton.setAttribute("aria-pressed", String(manualActive));
+          recordButton.disabled =
+            currentSession === "motion-monitoring" || currentSession === "motion-recording";
+          recordButton.classList.toggle("recording-active", manualActive);
         }
         if (motionRecordButton) {
-          motionRecordButton.textContent = isMotion
-            ? "Stop motion recording"
-            : "Start motion recording";
-          motionRecordButton.setAttribute("aria-pressed", String(isMotion));
-          motionRecordButton.disabled = isContinuous;
+          const motionSession =
+            currentSession === "motion-monitoring" || currentSession === "motion-recording";
+          const motionRecording = currentSession === "motion-recording";
+          motionRecordButton.textContent = motionSession
+            ? "Stop motion detection"
+            : "Start motion detection";
+          motionRecordButton.setAttribute("aria-pressed", String(motionSession));
+          motionRecordButton.disabled = currentSession === "manual";
+          motionRecordButton.classList.remove("motion-monitoring", "motion-alert", "recording-active");
+          if (motionRecording) {
+            motionRecordButton.classList.add("motion-alert", "recording-active");
+          } else if (motionSession) {
+            motionRecordButton.classList.add("motion-monitoring");
+          }
         }
+        if (previewCard) {
+          previewCard.classList.remove("motion-monitoring", "motion-alert", "recording-active");
+          if (currentSession === "manual") {
+            previewCard.classList.add("recording-active");
+          } else if (currentSession === "motion-recording") {
+            previewCard.classList.add("motion-alert", "recording-active");
+          } else if (currentSession === "motion-monitoring") {
+            previewCard.classList.add("motion-monitoring");
+          }
+        }
+        updateStatusForSession(currentSession, { processingActive, processingRecord });
+      }
+
+      function isManualSessionActive() {
+        if (sessionState === "manual" || manualSessionPending) {
+          return true;
+        }
+        const payload = lastStatusSnapshot;
+        if (!payload || typeof payload !== "object") {
+          return false;
+        }
+        if (payload.recording !== true) {
+          return false;
+        }
+        const mode = typeof payload.recording_mode === "string" ? payload.recording_mode : null;
+        if (mode === "continuous") {
+          return true;
+        }
+        const motionInfo = payload.motion;
+        if (!motionInfo || typeof motionInfo !== "object") {
+          return false;
+        }
+        if (motionInfo.session_override === true && motionInfo.enabled !== true) {
+          return true;
+        }
+        if (motionInfo.enabled === false) {
+          return true;
+        }
+        return false;
       }
 
       function formatBytes(bytes) {
@@ -733,46 +861,18 @@
         }
       }
 
-      function updateMotionIndicators(motionSnapshot) {
-        const manualRecordingActive = isRecording && recordingMode === "continuous";
-        if (recordButton) {
-          recordButton.classList.toggle("recording-active", manualRecordingActive);
+      function isManualProcessingRecord(record) {
+        if (!record || typeof record !== "object") {
+          return false;
         }
-        if (previewCard) {
-          previewCard.classList.remove("motion-monitoring", "motion-alert");
-          previewCard.classList.toggle("recording-active", manualRecordingActive);
+        const motionInfo = record.motion_detection;
+        if (!motionInfo || typeof motionInfo !== "object") {
+          return false;
         }
-        if (!motionRecordButton) {
-          return;
+        if (motionInfo.enabled === false) {
+          return true;
         }
-        motionRecordButton.classList.remove(
-          "motion-monitoring",
-          "motion-alert",
-          "recording-active",
-        );
-        if (manualRecordingActive) {
-          return;
-        }
-        const isMotionSession = recordingMode === "motion";
-        if (!isMotionSession) {
-          return;
-        }
-        const sessionState = motionSnapshot ? motionSnapshot.session_state : null;
-        const sessionRecording = motionSnapshot && motionSnapshot.session_recording === true;
-        const eventActive = motionSnapshot && motionSnapshot.event_active === true;
-        const motionRecording = sessionRecording || sessionState === "recording" || eventActive;
-        if (motionRecording) {
-          motionRecordButton.classList.add("motion-alert", "recording-active");
-          if (previewCard) {
-            previewCard.classList.add("motion-alert", "recording-active");
-          }
-        } else {
-          motionRecordButton.classList.add("motion-monitoring");
-          if (previewCard && !manualRecordingActive) {
-            previewCard.classList.add("motion-monitoring");
-            previewCard.classList.remove("recording-active");
-          }
-        }
+        return motionInfo.session_override === true && motionInfo.enabled !== true;
       }
 
       function createActionButton(label, className) {
@@ -934,65 +1034,56 @@
               return;
             }
           }
-          let nextRecordingMode = "idle";
+          const processingRecord = payload ? payload.processing_recording : null;
+          const isProcessing = Boolean(payload && payload.processing);
+          const motionSnapshot = payload ? payload.motion : null;
+          const serverRecording = Boolean(payload && payload.recording);
+          lastStatusSnapshot = payload && typeof payload === "object" ? payload : null;
+          let serverModeHint = "idle";
           if (payload && typeof payload.recording_mode === "string") {
             const candidate = payload.recording_mode;
             if (candidate === "motion" || candidate === "continuous") {
-              nextRecordingMode = candidate;
+              serverModeHint = candidate;
             }
           }
-          if (nextRecordingMode === "idle" && payload && payload.recording) {
-            nextRecordingMode = "continuous";
-          }
-          const serverRecording = Boolean(payload && payload.recording);
-          if (manualRecordingPinned) {
-            if (!serverRecording || nextRecordingMode === "idle") {
-              manualRecordingPinned = false;
+          const derivedSession = determineSessionState(
+            serverRecording,
+            serverModeHint,
+            motionSnapshot,
+          );
+          const previousSession = sessionState;
+          let effectiveSession = derivedSession;
+          if (manualSessionPending) {
+            const now = Date.now();
+            if (derivedSession === "manual") {
+              manualSessionPending = false;
+              manualSessionGraceDeadline = 0;
+            } else if (serverRecording || now < manualSessionGraceDeadline) {
+              effectiveSession = "manual";
             } else {
-              nextRecordingMode = "continuous";
+              manualSessionPending = false;
+              manualSessionGraceDeadline = 0;
             }
-          } else if (nextRecordingMode === "continuous" && serverRecording) {
-            manualRecordingPinned = true;
           }
-          recordingMode = nextRecordingMode;
-          isRecording = recordingMode !== "idle";
-          updateControlButtons();
+          applySessionVisuals(effectiveSession, {
+            processingActive: isProcessing,
+            processingRecord,
+          });
           updatePreview(payload ? payload.preview : null);
           renderRecordings(payload && Array.isArray(payload.recordings) ? payload.recordings : []);
           const storage = payload ? payload.storage : null;
           updateStorage(storage);
-          const motionSnapshot = payload ? payload.motion : null;
-          lastMotionSnapshot = motionSnapshot;
-          updateMotionIndicators(motionSnapshot);
           const startedAtIso =
             payload && typeof payload.recording_started_at === "string"
               ? payload.recording_started_at
               : null;
-          syncRecordingTimer(startedAtIso, motionSnapshot);
-          const processingRecord = payload ? payload.processing_recording : null;
-          const isProcessing = Boolean(payload && payload.processing);
+          syncRecordingTimer(startedAtIso, sessionState);
           const processingError =
             processingRecord &&
             typeof processingRecord.processing_error === "string" &&
             processingRecord.processing_error.length > 0;
-          if (isRecording) {
-            if (recordingMode === "motion" && motionSnapshot && motionSnapshot.session_active) {
-              const sessionState = motionSnapshot.session_state;
-              const sessionRecording = motionSnapshot.session_recording === true;
-              if (sessionRecording || sessionState === "recording") {
-                setStatus("Motion recording", "alert");
-              } else {
-                setStatus("Monitoring for motion", "monitor");
-              }
-            } else {
-              setStatus("Recording", "busy");
-            }
-          } else if (isProcessing) {
-            setStatus("Processing video clip…", "busy");
-          } else if (processingError) {
+          if (processingError) {
             setStatus("Recording processing failed", "error");
-          } else {
-            setStatus("Surveillance ready", "info");
           }
           if (
             storage &&
@@ -1002,6 +1093,29 @@
             storage.free_percent <= storage.threshold_percent
           ) {
             setStatus("Low storage — recordings will pause automatically", "error");
+          }
+          const manualSessionConcluded =
+            previousSession === "manual" &&
+            sessionState !== "manual" &&
+            !manualSessionPending &&
+            !serverRecording;
+          if (manualSessionConcluded) {
+            const resumeTarget = pendingManualResume;
+            pendingManualResume = null;
+            const canResumeMotion = resumeTarget === "motion" && !serverRecording;
+            if (canResumeMotion) {
+              window.setTimeout(() => {
+                resumeMotionAfterManual().catch((error) => {
+                  console.error("Failed to resume motion detection", error);
+                  setStatus("Unable to restart motion detection", "error");
+                  loadStatus({ showLoading: false, suppressError: true }).catch((loadError) => {
+                    console.error("Follow-up status refresh after resume failure failed", loadError);
+                  });
+                });
+              }, 0);
+            }
+          } else if (sessionState !== "manual" && !manualSessionPending) {
+            pendingManualResume = null;
           }
           scheduleStatusRefresh();
         } catch (error) {
@@ -1019,6 +1133,115 @@
         }
       }
 
+      async function postRecordingCommand(endpoint, options = {}) {
+        const { allowConflict = false } = options;
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+        });
+        if (!response.ok) {
+          if (allowConflict && response.status === 409) {
+            return null;
+          }
+          let detail = null;
+          try {
+            const payload = await response.json();
+            if (payload && typeof payload.detail === "string") {
+              detail = payload.detail;
+            }
+          } catch (parseError) {
+            // Ignore parse errors and fall back to status text.
+          }
+          const error = new Error(detail || `Request failed with ${response.status}`);
+          error.status = response.status;
+          throw error;
+        }
+        return response;
+      }
+
+      async function executeManualToggle(options = {}) {
+        const { resumePreviousMotion = true } = options;
+        const currentSession = sessionState;
+        const manualActive = isManualSessionActive();
+        const stoppingManual = manualActive;
+        try {
+          if (stoppingManual) {
+            await postRecordingCommand("/api/surveillance/recordings/stop", {
+              allowConflict: true,
+            });
+            manualSessionPending = false;
+            manualSessionGraceDeadline = 0;
+            if (!resumePreviousMotion) {
+              pendingManualResume = null;
+            }
+          } else {
+            const wasMotionSession =
+              currentSession === "motion-monitoring" || currentSession === "motion-recording";
+            const shouldResumeMotion = resumePreviousMotion && wasMotionSession;
+            pendingManualResume = shouldResumeMotion ? "motion" : null;
+            if (wasMotionSession) {
+              await postRecordingCommand("/api/surveillance/recordings/stop", {
+                allowConflict: true,
+              });
+            }
+            try {
+              const response = await postRecordingCommand("/api/surveillance/recordings/start");
+              let startIso = null;
+              if (response) {
+                try {
+                  const payload = await response.json();
+                  if (
+                    payload &&
+                    typeof payload === "object" &&
+                    payload.recording &&
+                    typeof payload.recording === "object" &&
+                    typeof payload.recording.started_at === "string"
+                  ) {
+                    startIso = payload.recording.started_at;
+                  }
+                } catch (parseError) {
+                  console.warn("Failed to parse manual start response", parseError);
+                }
+              }
+              const fallbackIso = new Date().toISOString();
+              manualSessionPending = true;
+              manualSessionGraceDeadline = Date.now() + MANUAL_CONFIRMATION_GRACE_MS;
+              applySessionVisuals("manual");
+              startRecordingTimer(startIso || fallbackIso);
+            } catch (startError) {
+              if (pendingManualResume === "motion") {
+                pendingManualResume = null;
+                try {
+                  await postRecordingCommand("/api/surveillance/recordings/start-motion");
+                } catch (resumeError) {
+                  console.error(
+                    "Failed to restore motion detection after manual start failure",
+                    resumeError,
+                  );
+                }
+              }
+              throw startError;
+            }
+          }
+          return { stoppingManual };
+        } catch (error) {
+          if (!stoppingManual) {
+            pendingManualResume = null;
+            manualSessionPending = false;
+            manualSessionGraceDeadline = 0;
+          }
+          const failure =
+            error instanceof Error ? error : new Error("Recording request failed");
+          failure.stoppingManual = stoppingManual;
+          throw failure;
+        }
+      }
+
+      async function resumeMotionAfterManual() {
+        await postRecordingCommand("/api/surveillance/recordings/start-motion");
+        await loadStatus({ showLoading: true, suppressError: true });
+      }
+
       if (recordButton) {
         recordButton.addEventListener("click", async () => {
           const buttons = [recordButton, motionRecordButton].filter(Boolean);
@@ -1026,33 +1249,14 @@
             button.disabled = true;
           });
           try {
-            const stopMode = recordingMode === "continuous";
-            const endpoint = stopMode
-              ? "/api/surveillance/recordings/stop"
-              : "/api/surveillance/recordings/start";
-            const response = await fetch(endpoint, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-            });
-            if (!response.ok) {
-              throw new Error(`Recording request failed with ${response.status}`);
-            }
-            if (stopMode) {
-              manualRecordingPinned = false;
-              recordingMode = "idle";
-              isRecording = false;
-              stopRecordingTimer();
-            } else {
-              manualRecordingPinned = true;
-              recordingMode = "continuous";
-              isRecording = true;
-              startRecordingTimer(new Date().toISOString());
-            }
-            updateControlButtons();
-            updateMotionIndicators(lastMotionSnapshot);
+            await executeManualToggle({ resumePreviousMotion: true });
           } catch (error) {
-            console.error("Recording control error", error);
-            setStatus("Recording request failed", "error");
+            console.error("Manual recording control error", error);
+            const message =
+              error && typeof error.message === "string"
+                ? error.message
+                : "Recording request failed";
+            setStatus(message, "error");
             buttons.forEach((button) => {
               button.disabled = false;
             });
@@ -1062,8 +1266,12 @@
             await loadStatus({ showLoading: true });
           } catch (error) {
             console.error("Recording status refresh error", error);
+            applySessionVisuals(sessionState);
+            scheduleStatusRefresh();
           } finally {
-            updateControlButtons();
+            buttons.forEach((button) => {
+              button.disabled = false;
+            });
           }
         });
       }
@@ -1075,23 +1283,23 @@
             button.disabled = true;
           });
           try {
-            const stopMode = recordingMode === "motion";
-            const endpoint = stopMode
-              ? "/api/surveillance/recordings/stop"
-              : "/api/surveillance/recordings/start-motion";
-            const response = await fetch(endpoint, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-            });
-            if (!response.ok) {
-              throw new Error(`Recording request failed with ${response.status}`);
-            }
-            if (!stopMode) {
-              manualRecordingPinned = false;
+            const motionActive =
+              sessionState === "motion-monitoring" || sessionState === "motion-recording";
+            if (motionActive) {
+              await postRecordingCommand("/api/surveillance/recordings/stop", {
+                allowConflict: true,
+              });
+            } else {
+              pendingManualResume = null;
+              await postRecordingCommand("/api/surveillance/recordings/start-motion");
             }
           } catch (error) {
-            console.error("Motion recording control error", error);
-            setStatus("Recording request failed", "error");
+            console.error("Motion detection control error", error);
+            const message =
+              error && typeof error.message === "string"
+                ? error.message
+                : "Recording request failed";
+            setStatus(message, "error");
             buttons.forEach((button) => {
               button.disabled = false;
             });
@@ -1100,9 +1308,13 @@
           try {
             await loadStatus({ showLoading: true });
           } catch (error) {
-            console.error("Motion recording status refresh error", error);
+            console.error("Motion detection status refresh error", error);
+            applySessionVisuals(sessionState);
+            scheduleStatusRefresh();
           } finally {
-            updateControlButtons();
+            buttons.forEach((button) => {
+              button.disabled = false;
+            });
           }
         });
       }
