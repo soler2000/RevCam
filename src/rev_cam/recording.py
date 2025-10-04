@@ -286,33 +286,61 @@ def build_recording_video(
 
 
 def remove_recording_files(directory: Path, name: str) -> None:
-    """Delete recording data and metadata for ``name``."""
+    """Delete recording data, metadata, and derived artefacts for ``name``."""
 
     safe_name = _safe_recording_name(name)
-    paths = [
+    candidates: set[Path] = {
         directory / f"{safe_name}.json",
         directory / f"{safe_name}.json.gz",
         directory / f"{safe_name}.meta.json",
-    ]
-    metadata: dict[str, object] | None = None
-    meta_path = paths[1]
-    if meta_path.exists():
+        directory / f"{safe_name}.meta.json.gz",
+    }
+
+    metadata: Mapping[str, object] | None = None
+    for meta_path in (
+        directory / f"{safe_name}.meta.json",
+        directory / f"{safe_name}.meta.json.gz",
+        directory / f"{safe_name}.json.gz",
+        directory / f"{safe_name}.json",
+    ):
+        if not meta_path.exists():
+            continue
         try:
-            metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+            payload = _load_json_from_path(meta_path)
         except Exception:  # pragma: no cover - defensive parsing
-            metadata = None
-    if isinstance(metadata, Mapping):
+            continue
+        if isinstance(payload, Mapping):
+            metadata = payload
+            break
+
+    if metadata is not None:
         chunks = metadata.get("chunks")
         if isinstance(chunks, list):
             for entry in chunks:
                 if isinstance(entry, Mapping):
                     filename = entry.get("file")
                     if isinstance(filename, str):
-                        paths.append(directory / filename)
-    for candidate in paths:
+                        candidates.add(directory / filename)
+
+    for pattern in (
+        f"{safe_name}.chunk*.json",
+        f"{safe_name}.chunk*.json.gz",
+    ):
+        for chunk_path in directory.glob(pattern):
+            candidates.add(chunk_path)
+
+    for pattern in (
+        f"{safe_name}*.mp4",
+        f"{safe_name}*.jpg",
+        f"{safe_name}*.jpeg",
+    ):
+        for artefact in directory.glob(pattern):
+            candidates.add(artefact)
+
+    for candidate in candidates:
         try:
             candidate.unlink()
-        except FileNotFoundError:
+        except (FileNotFoundError, IsADirectoryError, PermissionError):
             continue
 
 
