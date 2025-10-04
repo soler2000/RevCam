@@ -428,6 +428,9 @@
           <button class="action" type="button" id="record-button" aria-pressed="false">
             Start manual recording
           </button>
+          <button class="action" type="button" id="manual-test-button" aria-pressed="false">
+            Test manual recording
+          </button>
           <button class="action" type="button" id="motion-record-button" aria-pressed="false">
             Start motion detection
           </button>
@@ -465,6 +468,7 @@
       const previewImage = document.getElementById("surveillance-preview");
       const previewMessage = document.getElementById("preview-message");
       const recordButton = document.getElementById("record-button");
+      const manualTestButton = document.getElementById("manual-test-button");
       const motionRecordButton = document.getElementById("motion-record-button");
       const recordingTimer = document.getElementById("recording-timer");
       const recordingTimerValue = recordingTimer
@@ -759,6 +763,14 @@
           recordButton.disabled =
             currentSession === "motion-monitoring" || currentSession === "motion-recording";
           recordButton.classList.toggle("recording-active", manualActive);
+        }
+        if (manualTestButton) {
+          const manualActive = currentSession === "manual";
+          manualTestButton.textContent = manualActive
+            ? "Stop manual test recording"
+            : "Test manual recording";
+          manualTestButton.setAttribute("aria-pressed", String(manualActive));
+          manualTestButton.classList.toggle("recording-active", manualActive);
         }
         if (motionRecordButton) {
           const motionSession =
@@ -1126,6 +1138,83 @@
         return response;
       }
 
+      async function executeManualToggle(options = {}) {
+        const { resumePreviousMotion = true } = options;
+        const currentSession = sessionState;
+        const stoppingManual = currentSession === "manual";
+        try {
+          if (stoppingManual) {
+            await postRecordingCommand("/api/surveillance/recordings/stop", {
+              allowConflict: true,
+            });
+            manualSessionPending = false;
+            manualSessionGraceDeadline = 0;
+            if (!resumePreviousMotion) {
+              pendingManualResume = null;
+            }
+          } else {
+            const wasMotionSession =
+              currentSession === "motion-monitoring" || currentSession === "motion-recording";
+            const shouldResumeMotion = resumePreviousMotion && wasMotionSession;
+            pendingManualResume = shouldResumeMotion ? "motion" : null;
+            if (wasMotionSession) {
+              await postRecordingCommand("/api/surveillance/recordings/stop", {
+                allowConflict: true,
+              });
+            }
+            try {
+              const response = await postRecordingCommand("/api/surveillance/recordings/start");
+              let startIso = null;
+              if (response) {
+                try {
+                  const payload = await response.json();
+                  if (
+                    payload &&
+                    typeof payload === "object" &&
+                    payload.recording &&
+                    typeof payload.recording === "object" &&
+                    typeof payload.recording.started_at === "string"
+                  ) {
+                    startIso = payload.recording.started_at;
+                  }
+                } catch (parseError) {
+                  console.warn("Failed to parse manual start response", parseError);
+                }
+              }
+              const fallbackIso = new Date().toISOString();
+              manualSessionPending = true;
+              manualSessionGraceDeadline = Date.now() + MANUAL_CONFIRMATION_GRACE_MS;
+              applySessionVisuals("manual");
+              startRecordingTimer(startIso || fallbackIso);
+            } catch (startError) {
+              if (pendingManualResume === "motion") {
+                pendingManualResume = null;
+                try {
+                  await postRecordingCommand("/api/surveillance/recordings/start-motion");
+                } catch (resumeError) {
+                  console.error(
+                    "Failed to restore motion detection after manual start failure",
+                    resumeError,
+                  );
+                }
+              }
+              throw startError;
+            }
+          }
+          return { stoppingManual };
+        } catch (error) {
+          if (!stoppingManual) {
+            pendingManualResume = null;
+            manualSessionPending = false;
+            manualSessionGraceDeadline = 0;
+          }
+          const failure =
+            error instanceof Error ? error : new Error("Recording request failed");
+          failure.stoppingManual = stoppingManual;
+          throw failure;
+        }
+      }
+
       async function resumeMotionAfterManual() {
         await postRecordingCommand("/api/surveillance/recordings/start-motion");
         await loadStatus({ showLoading: true, suppressError: true });
@@ -1133,74 +1222,14 @@
 
       if (recordButton) {
         recordButton.addEventListener("click", async () => {
-          const buttons = [recordButton, motionRecordButton].filter(Boolean);
+          const buttons = [recordButton, manualTestButton, motionRecordButton].filter(Boolean);
           buttons.forEach((button) => {
             button.disabled = true;
           });
           try {
-            const currentSession = sessionState;
-            const stoppingManual = currentSession === "manual";
-            if (stoppingManual) {
-              await postRecordingCommand("/api/surveillance/recordings/stop", {
-                allowConflict: true,
-              });
-              manualSessionPending = false;
-              manualSessionGraceDeadline = 0;
-            } else {
-              const wasMotionSession =
-                currentSession === "motion-monitoring" || currentSession === "motion-recording";
-              pendingManualResume = wasMotionSession ? "motion" : null;
-              if (wasMotionSession) {
-                await postRecordingCommand("/api/surveillance/recordings/stop", {
-                  allowConflict: true,
-                });
-              }
-              try {
-                const response = await postRecordingCommand("/api/surveillance/recordings/start");
-                let startIso = null;
-                if (response) {
-                  try {
-                    const payload = await response.json();
-                    if (
-                      payload &&
-                      typeof payload === "object" &&
-                      payload.recording &&
-                      typeof payload.recording === "object" &&
-                      typeof payload.recording.started_at === "string"
-                    ) {
-                      startIso = payload.recording.started_at;
-                    }
-                  } catch (parseError) {
-                    console.warn("Failed to parse manual start response", parseError);
-                  }
-                }
-                const fallbackIso = new Date().toISOString();
-                manualSessionPending = true;
-                manualSessionGraceDeadline = Date.now() + MANUAL_CONFIRMATION_GRACE_MS;
-                applySessionVisuals("manual");
-                startRecordingTimer(startIso || fallbackIso);
-              } catch (startError) {
-                if (pendingManualResume === "motion") {
-                  pendingManualResume = null;
-                  try {
-                    await postRecordingCommand("/api/surveillance/recordings/start-motion");
-                  } catch (resumeError) {
-                    console.error(
-                      "Failed to restore motion detection after manual start failure",
-                      resumeError,
-                    );
-                  }
-                }
-                throw startError;
-              }
-            }
+            await executeManualToggle({ resumePreviousMotion: true });
           } catch (error) {
             console.error("Manual recording control error", error);
-            if (!stoppingManual) {
-              pendingManualResume = null;
-              manualSessionPending = false;
-              manualSessionGraceDeadline = 0;
-            }
             const message =
               error && typeof error.message === "string"
                 ? error.message
@@ -1217,13 +1246,51 @@
             console.error("Recording status refresh error", error);
             applySessionVisuals(sessionState);
             scheduleStatusRefresh();
+          } finally {
+            buttons.forEach((button) => {
+              button.disabled = false;
+            });
+          }
+        });
+      }
+
+      if (manualTestButton) {
+        manualTestButton.addEventListener("click", async () => {
+          const buttons = [recordButton, manualTestButton, motionRecordButton].filter(Boolean);
+          buttons.forEach((button) => {
+            button.disabled = true;
+          });
+          try {
+            await executeManualToggle({ resumePreviousMotion: false });
+          } catch (error) {
+            console.error("Manual test control error", error);
+            const message =
+              error && typeof error.message === "string"
+                ? error.message
+                : "Recording request failed";
+            setStatus(message, "error");
+            buttons.forEach((button) => {
+              button.disabled = false;
+            });
+            return;
+          }
+          try {
+            await loadStatus({ showLoading: true });
+          } catch (error) {
+            console.error("Recording status refresh error", error);
+            applySessionVisuals(sessionState);
+            scheduleStatusRefresh();
+          } finally {
+            buttons.forEach((button) => {
+              button.disabled = false;
+            });
           }
         });
       }
 
       if (motionRecordButton) {
         motionRecordButton.addEventListener("click", async () => {
-          const buttons = [recordButton, motionRecordButton].filter(Boolean);
+          const buttons = [recordButton, manualTestButton, motionRecordButton].filter(Boolean);
           buttons.forEach((button) => {
             button.disabled = true;
           });
@@ -1256,6 +1323,10 @@
             console.error("Motion detection status refresh error", error);
             applySessionVisuals(sessionState);
             scheduleStatusRefresh();
+          } finally {
+            buttons.forEach((button) => {
+              button.disabled = false;
+            });
           }
         });
       }
