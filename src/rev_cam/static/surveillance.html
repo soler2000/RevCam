@@ -942,19 +942,23 @@
             }
           }
           const serverRecording = Boolean(payload && payload.recording);
+          const serverRecordingMode = serverRecording ? nextRecordingMode : "idle";
           if (!serverRecording) {
             nextRecordingMode = "idle";
           } else if (nextRecordingMode === "idle") {
             nextRecordingMode = "continuous";
           }
           if (manualRecordingPinned) {
-            if (!serverRecording || nextRecordingMode === "idle") {
+            const serverManual = serverRecording && serverRecordingMode !== "motion";
+            if (!serverManual) {
               manualRecordingPinned = false;
-            } else {
-              nextRecordingMode = "continuous";
             }
-          } else if (nextRecordingMode === "continuous" && serverRecording) {
+          }
+          if (!manualRecordingPinned && serverRecording && serverRecordingMode !== "motion") {
             manualRecordingPinned = true;
+          }
+          if (manualRecordingPinned) {
+            nextRecordingMode = "continuous";
           }
           recordingMode = nextRecordingMode;
           isRecording = recordingMode !== "idle";
