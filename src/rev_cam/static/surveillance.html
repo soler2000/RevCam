@@ -753,16 +753,13 @@
         if (manualRecordingActive) {
           return;
         }
-        if (!motionSnapshot || motionSnapshot.session_active !== true) {
-          return;
-        }
         const isMotionSession = recordingMode === "motion";
         if (!isMotionSession) {
           return;
         }
-        const sessionState = motionSnapshot.session_state;
-        const sessionRecording = motionSnapshot.session_recording === true;
-        const eventActive = motionSnapshot.event_active === true;
+        const sessionState = motionSnapshot ? motionSnapshot.session_state : null;
+        const sessionRecording = motionSnapshot && motionSnapshot.session_recording === true;
+        const eventActive = motionSnapshot && motionSnapshot.event_active === true;
         const motionRecording = sessionRecording || sessionState === "recording" || eventActive;
         if (motionRecording) {
           motionRecordButton.classList.add("motion-alert", "recording-active");
