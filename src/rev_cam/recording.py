@@ -117,7 +117,47 @@ def load_recording_metadata(directory: Path) -> list[dict[str, object]]:
     return items
 
 
-def load_recording_payload(directory: Path, name: str) -> dict[str, object]:
+def _collect_chunk_sources(
+    directory: Path, safe_name: str, metadata: Mapping[str, object] | None
+) -> tuple[list[dict[str, object]], list[tuple[dict[str, object], Path, str | None]]]:
+    chunk_entries: list[dict[str, object]] = []
+    sources: list[tuple[dict[str, object], Path, str | None]] = []
+    if not metadata:
+        return chunk_entries, sources
+    chunks = metadata.get("chunks")
+    if not isinstance(chunks, list):
+        return chunk_entries, sources
+    for entry in chunks:
+        if not isinstance(entry, Mapping):
+            continue
+        filename = entry.get("file")
+        if not isinstance(filename, str):
+            continue
+        chunk_entry = dict(entry)
+        compression = entry.get("compression")
+        compression_name: str | None
+        if isinstance(compression, str):
+            compression_name = compression.lower()
+        else:
+            compression_name = None
+        chunk_entries.append(chunk_entry)
+        sources.append((chunk_entry, directory / filename, compression_name))
+    return chunk_entries, sources
+
+
+def _normalise_frames(payload: object) -> list[dict[str, object]]:
+    if isinstance(payload, Mapping):
+        candidate = payload.get("frames")
+    else:
+        candidate = payload
+    if not isinstance(candidate, list):
+        return []
+    return [frame for frame in candidate if isinstance(frame, Mapping)]
+
+
+def load_recording_payload(
+    directory: Path, name: str, *, include_frames: bool = True
+) -> dict[str, object]:
     """Load a recording payload by ``name`` from ``directory`` synchronously."""
 
     safe_name = _safe_recording_name(name)
@@ -130,66 +170,156 @@ def load_recording_payload(directory: Path, name: str) -> dict[str, object]:
             metadata = None
         else:
             metadata = candidate if isinstance(candidate, dict) else None
+
+    chunk_entries, chunk_sources = _collect_chunk_sources(directory, safe_name, metadata)
+
     frames: list[dict[str, object]] = []
-    chunk_files: list[tuple[Path, str | None]] = []
-    if metadata and isinstance(metadata.get("chunks"), list):
-        for entry in metadata["chunks"]:  # type: ignore[index]
-            if isinstance(entry, Mapping):
-                filename = entry.get("file")
-                if isinstance(filename, str):
-                    chunk_path = directory / filename
-                    compression = entry.get("compression")
-                    compression_name: str | None
-                    if isinstance(compression, str):
-                        compression_name = compression.lower()
-                    else:
-                        compression_name = None
-                    chunk_files.append((chunk_path, compression_name))
-    if chunk_files:
-        for chunk_path, compression in chunk_files:
-            if not chunk_path.exists() or not chunk_path.is_file():
-                continue
-            try:
-                chunk_payload = _load_json_from_path(chunk_path, compression)
-            except Exception:  # pragma: no cover - best-effort parsing
-                continue
-            if isinstance(chunk_payload, Mapping):
-                chunk_frames = chunk_payload.get("frames")
-            else:
-                chunk_frames = chunk_payload
-            if isinstance(chunk_frames, list):
-                frames.extend(
-                    [frame for frame in chunk_frames if isinstance(frame, Mapping)]
-                )
-    else:
-        data_path = directory / f"{safe_name}.json"
-        if not data_path.exists() or not data_path.is_file():
-            gz_path = directory / f"{safe_name}.json.gz"
-            if gz_path.exists() and gz_path.is_file():
-                data_path = gz_path
-            else:
-                raise FileNotFoundError("Recording not found")
-        payload = _load_json_from_path(data_path)
-        if isinstance(payload, Mapping):
-            raw_frames = payload.get("frames")
-            if isinstance(raw_frames, list):
-                frames = [frame for frame in raw_frames if isinstance(frame, Mapping)]
-            else:
-                frames = []
-            if metadata is None:
-                metadata = {key: value for key, value in payload.items() if key != "frames"}
-        elif isinstance(payload, list):
-            frames = [frame for frame in payload if isinstance(frame, Mapping)]
+    if include_frames:
+        if chunk_sources:
+            for _, chunk_path, compression in chunk_sources:
+                if not chunk_path.exists() or not chunk_path.is_file():
+                    continue
+                try:
+                    chunk_payload = _load_json_from_path(chunk_path, compression)
+                except Exception:  # pragma: no cover - best-effort parsing
+                    continue
+                frames.extend(_normalise_frames(chunk_payload))
         else:
-            frames = []
+            data_path = directory / f"{safe_name}.json"
+            if not data_path.exists() or not data_path.is_file():
+                gz_path = directory / f"{safe_name}.json.gz"
+                if gz_path.exists() and gz_path.is_file():
+                    data_path = gz_path
+                else:
+                    raise FileNotFoundError("Recording not found")
+            payload = _load_json_from_path(data_path)
+            if metadata is None and isinstance(payload, Mapping):
+                metadata = {
+                    key: value for key, value in payload.items() if key != "frames"
+                }
+            frames = _normalise_frames(payload)
+    else:
+        # Ensure the recording exists even if we are not loading frames.
+        if not chunk_sources:
+            data_path = directory / f"{safe_name}.json"
+            if not data_path.exists() or not data_path.is_file():
+                gz_path = directory / f"{safe_name}.json.gz"
+                if not gz_path.exists() or not gz_path.is_file():
+                    raise FileNotFoundError("Recording not found")
+                data_path = gz_path
+            if metadata is None:
+                try:
+                    payload = _load_json_from_path(data_path)
+                except Exception:  # pragma: no cover - best-effort parsing
+                    metadata = None
+                else:
+                    if isinstance(payload, Mapping):
+                        metadata = {
+                            key: value for key, value in payload.items() if key != "frames"
+                        }
+
     payload: dict[str, object]
     if metadata is not None:
         payload = dict(metadata)
     else:
         payload = {"name": safe_name}
     payload.setdefault("name", safe_name)
-    payload["frames"] = frames
+    if chunk_entries:
+        payload["chunks"] = chunk_entries
+    if include_frames:
+        payload["frames"] = frames
     return payload
+
+
+def load_recording_chunk(
+    directory: Path, name: str, chunk_index: int
+) -> dict[str, object]:
+    """Load the frames for a specific ``chunk_index`` of ``name``."""
+
+    if chunk_index < 1:
+        raise FileNotFoundError("Chunk not found")
+
+    safe_name = _safe_recording_name(name)
+    payload = load_recording_payload(directory, safe_name, include_frames=False)
+    chunks = payload.get("chunks")
+    frames: list[dict[str, object]] = []
+    chunk_total = 0
+    chunk_file: str | None = None
+    if isinstance(chunks, list) and chunks:
+        chunk_total = len(chunks)
+        if chunk_index > chunk_total:
+            raise FileNotFoundError("Chunk not found")
+        entry = chunks[chunk_index - 1]
+        if not isinstance(entry, Mapping):
+            raise FileNotFoundError("Chunk not found")
+        filename = entry.get("file")
+        if not isinstance(filename, str):
+            raise FileNotFoundError("Chunk not found")
+        chunk_file = filename
+        compression = entry.get("compression")
+        compression_name = compression.lower() if isinstance(compression, str) else None
+        chunk_path = directory / filename
+        if not chunk_path.exists() or not chunk_path.is_file():
+            raise FileNotFoundError("Chunk not found")
+        chunk_payload = _load_json_from_path(chunk_path, compression_name)
+        frames = _normalise_frames(chunk_payload)
+    else:
+        if chunk_index != 1:
+            raise FileNotFoundError("Chunk not found")
+        fallback = load_recording_payload(directory, safe_name, include_frames=True)
+        raw_frames = fallback.get("frames")
+        if isinstance(raw_frames, list):
+            frames = [frame for frame in raw_frames if isinstance(frame, Mapping)]
+        chunk_total = 1 if frames else 0
+
+    return {
+        "name": safe_name,
+        "chunk_index": chunk_index,
+        "chunk_count": chunk_total,
+        "chunk_file": chunk_file,
+        "frame_count": len(frames),
+        "fps": payload.get("fps") if isinstance(payload, Mapping) else None,
+        "frames": frames,
+    }
+
+
+def iter_recording_frames(
+    directory: Path, name: str, metadata: Mapping[str, object] | None = None
+) -> Iterable[Mapping[str, object]]:
+    """Yield frames for ``name`` sequentially without loading them all at once."""
+
+    safe_name = _safe_recording_name(name)
+    base_metadata: Mapping[str, object] | None
+    if metadata is None:
+        base_metadata = load_recording_payload(
+            directory, safe_name, include_frames=False
+        )
+    else:
+        base_metadata = metadata
+
+    _, chunk_sources = _collect_chunk_sources(directory, safe_name, base_metadata)
+    if chunk_sources:
+        for _, chunk_path, compression in chunk_sources:
+            if not chunk_path.exists() or not chunk_path.is_file():
+                continue
+            try:
+                chunk_payload = _load_json_from_path(chunk_path, compression)
+            except Exception:  # pragma: no cover - best-effort parsing
+                continue
+            for frame in _normalise_frames(chunk_payload):
+                yield frame
+        return
+
+    data_path = directory / f"{safe_name}.json"
+    if not data_path.exists() or not data_path.is_file():
+        gz_path = directory / f"{safe_name}.json.gz"
+        if gz_path.exists() and gz_path.is_file():
+            data_path = gz_path
+        else:
+            raise FileNotFoundError("Recording not found")
+    payload = _load_json_from_path(data_path)
+    for frame in _normalise_frames(payload):
+        yield frame
 
 
 def build_recording_video(
@@ -198,27 +328,18 @@ def build_recording_video(
     """Render recording ``name`` to an MP4 file and return a file-like object."""
 
     safe_name = _safe_recording_name(name)
-    payload = load_recording_payload(directory, safe_name)
-    raw_frames = payload.get("frames")
-    if not isinstance(raw_frames, list):
-        raise ValueError("Recording does not contain any frames")
-
-    frames: list[Mapping[str, object]] = [
-        frame for frame in raw_frames if isinstance(frame, Mapping)
-    ]
-    if not frames:
-        raise ValueError("Recording does not contain any frames")
-
+    payload = load_recording_payload(directory, safe_name, include_frames=False)
     frame_rate_value = payload.get("fps")
     if isinstance(frame_rate_value, (int, float)) and frame_rate_value > 0:
         frame_rate = float(frame_rate_value)
     else:
         frame_rate = 10.0
 
+    frame_iterator = iter_recording_frames(directory, safe_name, payload)
+
     # Identify the first usable frame so we can determine the output dimensions.
-    first_index = None
     first_array = None
-    for idx, frame in enumerate(frames):
+    for frame in frame_iterator:
         jpeg_data = frame.get("jpeg")
         if not isinstance(jpeg_data, str) or not jpeg_data:
             continue
@@ -229,11 +350,10 @@ def build_recording_video(
             raise ValueError("Recording frames are invalid") from exc
         if array.ndim != 3 or array.shape[2] != 3:
             raise ValueError("Recording frames are invalid")
-        first_index = idx
         first_array = array
         break
 
-    if first_index is None or first_array is None:
+    if first_array is None:
         raise ValueError("Recording does not contain any usable frames")
 
     height, width = first_array.shape[:2]
@@ -262,7 +382,7 @@ def build_recording_video(
         _encode(first_array, position)
         position += 1
 
-        for frame in frames[first_index + 1 :]:
+        for frame in frame_iterator:
             jpeg_data = frame.get("jpeg")
             if not isinstance(jpeg_data, str) or not jpeg_data:
                 continue
@@ -832,8 +952,17 @@ class RecordingManager:
                 records.insert(0, processing)
         return records
 
-    async def get_recording(self, name: str) -> dict[str, object]:
-        return await asyncio.to_thread(load_recording_payload, self.directory, name)
+    async def get_recording(
+        self, name: str, *, include_frames: bool = True
+    ) -> dict[str, object]:
+        return await asyncio.to_thread(
+            load_recording_payload, self.directory, name, include_frames=include_frames
+        )
+
+    async def get_recording_chunk(self, name: str, chunk_index: int) -> dict[str, object]:
+        return await asyncio.to_thread(
+            load_recording_chunk, self.directory, name, chunk_index
+        )
 
     async def remove_recording(self, name: str) -> None:
         await asyncio.to_thread(remove_recording_files, self.directory, name)
@@ -1674,6 +1803,8 @@ __all__ = [
     "MotionDetector",
     "RecordingManager",
     "build_recording_video",
+    "iter_recording_frames",
+    "load_recording_chunk",
     "load_recording_metadata",
     "load_recording_payload",
     "remove_recording_files",

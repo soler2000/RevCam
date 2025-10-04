@@ -14,7 +14,7 @@ from urllib.parse import quote as urlquote
 
 from datetime import datetime, timedelta, timezone
 
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import FastAPI, HTTPException, Query, Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from pydantic import BaseModel, Field
@@ -43,6 +43,7 @@ from .pipeline import FramePipeline
 from .recording import (
     RecordingManager,
     build_recording_video,
+    load_recording_chunk,
     load_recording_metadata,
     load_recording_payload,
     purge_recordings,
@@ -1931,11 +1932,16 @@ def create_app(
         return {"recordings": status.get("recordings", [])}
 
     @app.get("/api/surveillance/recordings/{name}")
-    async def fetch_surveillance_recording(name: str) -> dict[str, object]:
+    async def fetch_surveillance_recording(
+        name: str, include_frames: bool = Query(False)
+    ) -> dict[str, object]:
         if recording_manager is None:
             try:
                 return await asyncio.to_thread(
-                    load_recording_payload, RECORDINGS_DIR, name
+                    load_recording_payload,
+                    RECORDINGS_DIR,
+                    name,
+                    include_frames=include_frames,
                 )
             except FileNotFoundError as exc:
                 raise HTTPException(status_code=404, detail="Recording not found") from exc
@@ -1945,9 +1951,31 @@ def create_app(
                     status_code=500, detail="Unable to load recording"
                 ) from exc
         try:
-            return await recording_manager.get_recording(name)
+            return await recording_manager.get_recording(
+                name, include_frames=include_frames
+            )
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Recording not found") from exc
+
+    @app.get("/api/surveillance/recordings/{name}/chunks/{chunk_index}")
+    async def fetch_surveillance_recording_chunk(name: str, chunk_index: int) -> dict[str, object]:
+        if chunk_index < 1:
+            raise HTTPException(status_code=404, detail="Recording chunk not found")
+        try:
+            if recording_manager is None:
+                return await asyncio.to_thread(
+                    load_recording_chunk, RECORDINGS_DIR, name, chunk_index
+                )
+            return await recording_manager.get_recording_chunk(name, chunk_index)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Recording chunk not found") from exc
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.exception(
+                "Failed to load surveillance chunk %s for %s", chunk_index, name
+            )
+            raise HTTPException(
+                status_code=500, detail="Unable to load recording chunk"
+            ) from exc
 
     @app.get("/api/surveillance/recordings/{name}/download")
     async def download_surveillance_recording(name: str) -> StreamingResponse:

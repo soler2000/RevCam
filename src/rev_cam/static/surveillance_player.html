@@ -852,27 +852,102 @@
         startPlayback();
       }
 
+      async function fetchRecordingPayload(includeFrames) {
+        const params = new URLSearchParams();
+        params.set("include_frames", includeFrames ? "true" : "false");
+        const response = await fetch(
+          `/api/surveillance/recordings/${encodeURIComponent(recordingName)}?${params.toString()}`,
+          { cache: "no-store" },
+        );
+        if (!response.ok) {
+          throw new Error(`Request failed with ${response.status}`);
+        }
+        const payload = await response.json();
+        if (!payload || typeof payload !== "object") {
+          throw new Error("Invalid recording payload");
+        }
+        return payload;
+      }
+
+      async function fetchRecordingChunk(index, total) {
+        if (Number.isFinite(total) && total > 0) {
+          setStatus(`Loading chunk ${index} of ${total}…`);
+        } else {
+          setStatus(`Loading chunk ${index}…`);
+        }
+        const response = await fetch(
+          `/api/surveillance/recordings/${encodeURIComponent(recordingName)}/chunks/${index}`,
+          { cache: "no-store" },
+        );
+        if (!response.ok) {
+          throw new Error(`Chunk request failed with ${response.status}`);
+        }
+        const payload = await response.json();
+        if (!payload || typeof payload !== "object") {
+          throw new Error("Invalid chunk payload");
+        }
+        return payload;
+      }
+
       async function loadRecording() {
         if (!recordingName) {
           setStatus("Missing recording identifier.", "error");
           return;
         }
         title.textContent = recordingName;
+        playbackFrame.hidden = true;
+        stopPlaybackTimer();
+        setStatus("Loading recording…");
         try {
-          const response = await fetch(
-            `/api/surveillance/recordings/${encodeURIComponent(recordingName)}`,
-            { cache: "no-store" },
-          );
-          if (!response.ok) {
-            throw new Error(`Request failed with ${response.status}`);
+          let payload;
+          let payloadIncludesFrames = false;
+          try {
+            payload = await fetchRecordingPayload(false);
+          } catch (metaError) {
+            console.warn("Falling back to full recording fetch", metaError);
+            payload = await fetchRecordingPayload(true);
+            payloadIncludesFrames = true;
           }
-          const payload = await response.json();
-          if (!payload || typeof payload !== "object") {
-            throw new Error("Invalid recording payload");
-          }
+
           renderMeta(payload);
+
+          let frames = [];
+          let fps = typeof payload.fps === "number" ? payload.fps : undefined;
+          if (payloadIncludesFrames && Array.isArray(payload.frames)) {
+            frames = payload.frames;
+          } else if (Array.isArray(payload.chunks) && payload.chunks.length > 0) {
+            const total = payload.chunks.length;
+            for (let idx = 0; idx < total; idx += 1) {
+              const chunkPayload = await fetchRecordingChunk(idx + 1, total);
+              if (
+                chunkPayload &&
+                typeof chunkPayload === "object" &&
+                Array.isArray(chunkPayload.frames)
+              ) {
+                frames.push(...chunkPayload.frames);
+              }
+              if (
+                typeof fps !== "number" &&
+                typeof chunkPayload.fps === "number" &&
+                Number.isFinite(chunkPayload.fps)
+              ) {
+                fps = chunkPayload.fps;
+              }
+            }
+          } else if (Array.isArray(payload.frames)) {
+            frames = payload.frames;
+          } else {
+            const fallback = await fetchRecordingPayload(true);
+            if (typeof fps !== "number" && typeof fallback.fps === "number") {
+              fps = fallback.fps;
+            }
+            if (Array.isArray(fallback.frames)) {
+              frames = fallback.frames;
+            }
+          }
+
           setStatus("Playing recording…");
-          playFrames(payload.frames, payload.fps);
+          playFrames(frames, fps);
         } catch (error) {
           console.error("Failed to load recording", error);
           setStatus("Unable to load recording", "error");
