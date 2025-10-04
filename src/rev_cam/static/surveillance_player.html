@@ -70,6 +70,34 @@
         font-size: 0.85rem;
         color: var(--text-muted);
       }
+      .playback-controls {
+        display: flex;
+        flex-direction: column;
+        gap: 0.35rem;
+        padding-inline: 0.4rem;
+      }
+      .playback-controls[hidden] {
+        display: none;
+      }
+      .time-display {
+        display: flex;
+        justify-content: space-between;
+        font-size: 0.9rem;
+        color: var(--text-muted);
+        gap: 0.5rem;
+      }
+      .time-display span {
+        white-space: nowrap;
+      }
+      input[type="range"] {
+        width: 100%;
+        accent-color: var(--accent);
+        cursor: pointer;
+      }
+      input[type="range"]:disabled {
+        cursor: not-allowed;
+        opacity: 0.5;
+      }
       .error {
         color: var(--danger);
         font-weight: 600;
@@ -93,6 +121,21 @@
         <p class="muted" id="status-text">Preparing playback…</p>
       </header>
       <img id="playback-frame" class="playback-frame" alt="Recording playback" hidden />
+      <div class="playback-controls" id="playback-controls" hidden>
+        <div class="time-display" aria-live="polite">
+          <span id="current-time" aria-label="Current position">Current 0:00</span>
+          <span id="total-time" aria-label="Clip length">Length 0:00</span>
+        </div>
+        <input
+          id="playback-slider"
+          type="range"
+          min="0"
+          max="0"
+          value="0"
+          step="1"
+          aria-label="Scrub through recording"
+        />
+      </div>
       <p class="muted">
         <a class="link" href="/surveillance">Back to surveillance</a>
       </p>
@@ -105,7 +148,21 @@
       const chunkSummary = document.getElementById("chunk-summary");
       const statusText = document.getElementById("status-text");
       const playbackFrame = document.getElementById("playback-frame");
-      let playbackTimer = null;
+      const playbackControls = document.getElementById("playback-controls");
+      const playbackSlider = document.getElementById("playback-slider");
+      const currentTimeLabel = document.getElementById("current-time");
+      const totalTimeLabel = document.getElementById("total-time");
+
+      const playbackState = {
+        frames: [],
+        intervals: [],
+        frameTimes: [],
+        fallbackInterval: 200,
+        index: 0,
+        timer: null,
+        isScrubbing: false,
+        totalDuration: 0,
+      };
 
       function setStatus(message, tone = "info") {
         if (tone === "error") {
@@ -129,6 +186,152 @@
         }
         const display = value >= 10 || index === 0 ? value.toFixed(0) : value.toFixed(1);
         return `${display.replace(/\.0$/, "")} ${units[index]}`;
+      }
+
+      function formatTime(seconds) {
+        if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds < 0) {
+          return "0:00";
+        }
+        const totalSeconds = Math.floor(seconds);
+        const hours = Math.floor(totalSeconds / 3600);
+        const minutes = Math.floor((totalSeconds % 3600) / 60);
+        const secs = totalSeconds % 60;
+        const pad = (value) => value.toString().padStart(2, "0");
+        if (hours > 0) {
+          return `${hours}:${pad(minutes)}:${pad(secs)}`;
+        }
+        return `${minutes}:${pad(secs)}`;
+      }
+
+      function stopPlaybackTimer() {
+        if (playbackState.timer) {
+          window.clearTimeout(playbackState.timer);
+          playbackState.timer = null;
+        }
+      }
+
+      function updateTimeDisplay(index) {
+        if (currentTimeLabel) {
+          const seconds = playbackState.frameTimes[index] ?? 0;
+          currentTimeLabel.textContent = `Current ${formatTime(seconds)}`;
+        }
+        if (totalTimeLabel) {
+          totalTimeLabel.textContent = `Length ${formatTime(playbackState.totalDuration)}`;
+        }
+      }
+
+      function showFrame(index, { updateSlider = true } = {}) {
+        if (!playbackFrame || !playbackState.frames.length) {
+          return;
+        }
+        const normalizedIndex = Math.max(0, Math.min(index, playbackState.frames.length - 1));
+        const frame = playbackState.frames[normalizedIndex];
+        if (!frame || typeof frame.jpeg !== "string") {
+          return;
+        }
+        playbackState.index = normalizedIndex;
+        playbackFrame.src = `data:image/jpeg;base64,${frame.jpeg}`;
+        if (
+          playbackSlider &&
+          updateSlider &&
+          !playbackState.isScrubbing &&
+          Number.isFinite(normalizedIndex)
+        ) {
+          playbackSlider.value = String(normalizedIndex);
+        }
+        updateTimeDisplay(normalizedIndex);
+      }
+
+      function scheduleNextFrame() {
+        stopPlaybackTimer();
+        if (playbackState.isScrubbing || playbackState.frames.length <= 1) {
+          return;
+        }
+        const currentIndex = playbackState.index;
+        const delay = playbackState.intervals[currentIndex] ?? playbackState.fallbackInterval;
+        playbackState.timer = window.setTimeout(() => {
+          if (playbackState.isScrubbing || !playbackState.frames.length) {
+            scheduleNextFrame();
+            return;
+          }
+          const nextIndex = (playbackState.index + 1) % playbackState.frames.length;
+          showFrame(nextIndex);
+          scheduleNextFrame();
+        }, delay);
+      }
+
+      function prepareControls(playable, frameTimes, intervals, fallbackInterval, cycleDurationMs) {
+        playbackState.frames = playable;
+        playbackState.frameTimes = frameTimes;
+        playbackState.fallbackInterval = fallbackInterval;
+        if (Array.isArray(intervals) && intervals.length === playable.length) {
+          playbackState.intervals = [...intervals];
+        } else {
+          playbackState.intervals = new Array(playable.length).fill(fallbackInterval);
+        }
+        const lastTime = frameTimes[frameTimes.length - 1];
+        const derivedTotal = Number.isFinite(lastTime) ? lastTime : 0;
+        const cycleSeconds = Number.isFinite(cycleDurationMs)
+          ? Math.max(0, cycleDurationMs / 1000)
+          : 0;
+        playbackState.totalDuration = derivedTotal > 0 ? derivedTotal : cycleSeconds;
+        playbackState.index = 0;
+        playbackState.isScrubbing = false;
+        stopPlaybackTimer();
+
+        if (playbackControls) {
+          playbackControls.hidden = false;
+        }
+        if (playbackSlider) {
+          playbackSlider.max = String(Math.max(playable.length - 1, 0));
+          playbackSlider.value = "0";
+          playbackSlider.disabled = playable.length <= 1;
+        }
+        updateTimeDisplay(0);
+      }
+
+      function setupSliderEvents() {
+        if (!playbackSlider) {
+          return;
+        }
+        if (playbackSlider.dataset.enhanced === "true") {
+          return;
+        }
+        const beginScrub = () => {
+          playbackState.isScrubbing = true;
+          stopPlaybackTimer();
+        };
+        const endScrub = () => {
+          if (!playbackState.frames.length) {
+            return;
+          }
+          playbackState.isScrubbing = false;
+          scheduleNextFrame();
+        };
+        playbackSlider.addEventListener("input", (event) => {
+          if (!playbackState.frames.length) {
+            return;
+          }
+          beginScrub();
+          const target = event.target;
+          const value = Number(target && typeof target.value === "string" ? target.value : playbackSlider.value);
+          if (Number.isFinite(value)) {
+            showFrame(Math.round(value), { updateSlider: false });
+          }
+        });
+        playbackSlider.addEventListener("change", endScrub);
+        playbackSlider.addEventListener("pointerdown", beginScrub);
+        playbackSlider.addEventListener("pointerup", endScrub);
+        playbackSlider.addEventListener("mousedown", beginScrub);
+        playbackSlider.addEventListener("mouseup", endScrub);
+        playbackSlider.addEventListener("touchstart", beginScrub, { passive: true });
+        playbackSlider.addEventListener("touchend", endScrub, { passive: true });
+        playbackSlider.addEventListener("blur", () => {
+          if (playbackState.isScrubbing) {
+            endScrub();
+          }
+        });
+        playbackSlider.dataset.enhanced = "true";
       }
 
       function renderMeta(data) {
@@ -267,18 +470,32 @@
           return delay;
         });
 
-        let index = 0;
+        const frameTimes = [];
+        for (let idx = 0; idx < playable.length; idx += 1) {
+          if (idx === 0) {
+            frameTimes.push(0);
+            continue;
+          }
+          const currentTs = playable[idx].timestamp;
+          if (
+            currentTs !== null &&
+            Number.isFinite(currentTs) &&
+            firstTimestamp !== null &&
+            Number.isFinite(firstTimestamp)
+          ) {
+            frameTimes.push(Math.max(0, currentTs - firstTimestamp));
+            continue;
+          }
+          const priorTime = frameTimes[idx - 1] ?? 0;
+          const interval = intervals[idx - 1] ?? fallbackInterval;
+          frameTimes.push(priorTime + interval / 1000);
+        }
+
         playbackFrame.hidden = false;
-
-        const advance = () => {
-          const frame = playable[index];
-          playbackFrame.src = `data:image/jpeg;base64,${frame.jpeg}`;
-          const delay = intervals[index] ?? fallbackInterval;
-          index = (index + 1) % playable.length;
-          playbackTimer = window.setTimeout(advance, delay);
-        };
-
-        advance();
+        setupSliderEvents();
+        prepareControls(playable, frameTimes, intervals, fallbackInterval, cycleDurationMs);
+        showFrame(0);
+        scheduleNextFrame();
       }
 
       async function loadRecording() {
@@ -309,9 +526,7 @@
       }
 
       window.addEventListener("beforeunload", () => {
-        if (playbackTimer) {
-          window.clearTimeout(playbackTimer);
-        }
+        stopPlaybackTimer();
       });
 
       loadRecording();
