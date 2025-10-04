@@ -775,6 +775,20 @@
         }
       }
 
+      function isManualProcessingRecord(record) {
+        if (!record || typeof record !== "object") {
+          return false;
+        }
+        const motionInfo = record.motion_detection;
+        if (!motionInfo || typeof motionInfo !== "object") {
+          return false;
+        }
+        if (motionInfo.enabled === false) {
+          return true;
+        }
+        return motionInfo.session_override === true && motionInfo.enabled !== true;
+      }
+
       function createActionButton(label, className) {
         const button = document.createElement("button");
         button.type = "button";
@@ -934,40 +948,52 @@
               return;
             }
           }
-          let nextRecordingMode = "idle";
+          const processingRecord = payload ? payload.processing_recording : null;
+          const isProcessing = Boolean(payload && payload.processing);
+          const motionSnapshot = payload ? payload.motion : null;
+          const serverRecording = Boolean(payload && payload.recording);
+          let serverModeHint = "idle";
           if (payload && typeof payload.recording_mode === "string") {
             const candidate = payload.recording_mode;
             if (candidate === "motion" || candidate === "continuous") {
-              nextRecordingMode = candidate;
+              serverModeHint = candidate;
             }
           }
-          const serverRecording = Boolean(payload && payload.recording);
-          const serverRecordingMode = serverRecording ? nextRecordingMode : "idle";
-          if (!serverRecording) {
-            nextRecordingMode = "idle";
-          } else if (nextRecordingMode === "idle") {
-            nextRecordingMode = "continuous";
+          let serverRecordingMode = serverRecording ? serverModeHint : "idle";
+          if (serverRecordingMode === "idle" && serverRecording) {
+            serverRecordingMode = "continuous";
           }
+          const manualSessionOverride = Boolean(
+            serverRecording &&
+              motionSnapshot &&
+              motionSnapshot.session_override === true &&
+              motionSnapshot.enabled === false,
+          );
+          const manualProcessingActive = Boolean(
+            isProcessing && isManualProcessingRecord(processingRecord),
+          );
+          const manualServerActive =
+            manualSessionOverride ||
+            manualProcessingActive ||
+            (manualRecordingPinned && serverRecording && serverRecordingMode === "continuous");
           if (manualRecordingPinned) {
-            const serverManual = serverRecording && serverRecordingMode !== "motion";
-            if (!serverManual) {
+            if (!manualServerActive) {
               manualRecordingPinned = false;
             }
-          }
-          if (!manualRecordingPinned && serverRecording && serverRecordingMode !== "motion") {
+          } else if (manualServerActive) {
             manualRecordingPinned = true;
           }
-          if (manualRecordingPinned) {
+          let nextRecordingMode = serverRecording ? serverRecordingMode : "idle";
+          if (manualRecordingPinned && serverRecording) {
             nextRecordingMode = "continuous";
           }
           recordingMode = nextRecordingMode;
-          isRecording = recordingMode !== "idle";
+          isRecording = serverRecording;
           updateControlButtons();
           updatePreview(payload ? payload.preview : null);
           renderRecordings(payload && Array.isArray(payload.recordings) ? payload.recordings : []);
           const storage = payload ? payload.storage : null;
           updateStorage(storage);
-          const motionSnapshot = payload ? payload.motion : null;
           lastMotionSnapshot = motionSnapshot;
           updateMotionIndicators(motionSnapshot);
           const startedAtIso =
@@ -975,8 +1001,6 @@
               ? payload.recording_started_at
               : null;
           syncRecordingTimer(startedAtIso, motionSnapshot);
-          const processingRecord = payload ? payload.processing_recording : null;
-          const isProcessing = Boolean(payload && payload.processing);
           const processingError =
             processingRecord &&
             typeof processingRecord.processing_error === "string" &&
