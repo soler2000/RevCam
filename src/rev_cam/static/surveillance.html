@@ -687,8 +687,32 @@
         return sessionRecording || eventActive;
       }
 
+      function isManualOverrideActive(serverRecording, serverMode, motionSnapshot) {
+        if (!serverRecording) {
+          return false;
+        }
+        if (serverMode === "continuous") {
+          return true;
+        }
+        if (!motionSnapshot || typeof motionSnapshot !== "object") {
+          return serverMode !== "motion";
+        }
+        if (motionSnapshot.session_override === true && motionSnapshot.enabled !== true) {
+          return true;
+        }
+        if (motionSnapshot.enabled === false) {
+          return true;
+        }
+        const sessionActive = motionSnapshot.session_active === true;
+        const sessionState = motionSnapshot.session_state;
+        if (!sessionActive && (sessionState === null || sessionState === undefined)) {
+          return true;
+        }
+        return false;
+      }
+
       function determineSessionState(serverRecording, serverMode, motionSnapshot) {
-        if (serverRecording && serverMode === "continuous") {
+        if (isManualOverrideActive(serverRecording, serverMode, motionSnapshot)) {
           return "manual";
         }
         if (serverRecording && serverMode === "motion") {
