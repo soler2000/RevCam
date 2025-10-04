@@ -176,6 +176,7 @@ class SurveillanceSettingsPayload(BaseModel):
     expert_fps: int | None = None
     expert_jpeg_quality: int | None = None
     chunk_duration_seconds: int | None = None
+    chunk_mp4_enabled: bool | None = None
     overlays_enabled: bool | None = None
     remember_recording_state: bool | None = None
     motion_detection_enabled: bool | None = None
@@ -620,6 +621,7 @@ def create_app(
                 jpeg_quality=jpeg_quality,
                 directory=RECORDINGS_DIR,
                 chunk_duration_seconds=surveillance_settings.chunk_duration_seconds,
+                chunk_mp4_enabled=surveillance_settings.chunk_mp4_enabled,
                 storage_threshold_percent=surveillance_settings.storage_threshold_percent,
                 motion_detection_enabled=surveillance_settings.motion_detection_enabled,
                 motion_sensitivity=surveillance_settings.motion_sensitivity,
@@ -633,6 +635,7 @@ def create_app(
                 fps=fps,
                 jpeg_quality=jpeg_quality,
                 chunk_duration_seconds=surveillance_settings.chunk_duration_seconds,
+                chunk_mp4_enabled=surveillance_settings.chunk_mp4_enabled,
                 storage_threshold_percent=surveillance_settings.storage_threshold_percent,
                 motion_detection_enabled=surveillance_settings.motion_detection_enabled,
                 motion_sensitivity=surveillance_settings.motion_sensitivity,
@@ -1824,6 +1827,7 @@ def create_app(
                     fps=settings.resolved_fps,
                     jpeg_quality=settings.resolved_jpeg_quality,
                     chunk_duration_seconds=settings.chunk_duration_seconds,
+                    chunk_mp4_enabled=settings.chunk_mp4_enabled,
                     storage_threshold_percent=settings.storage_threshold_percent,
                     motion_detection_enabled=settings.motion_detection_enabled,
                     motion_sensitivity=settings.motion_sensitivity,
