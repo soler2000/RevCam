@@ -676,14 +676,6 @@
     <header>
       <div class="brand-area">
         <strong class="brand">RevCam</strong>
-        <div class="mode-toggle" data-mode-toggle role="group" aria-label="Viewing mode">
-          <button class="mode-toggle-button" type="button" data-mode="revcam" aria-pressed="true">
-            RevCam
-          </button>
-          <button class="mode-toggle-button" type="button" data-mode="surveillance" aria-pressed="false">
-            Surveillance
-          </button>
-        </div>
       </div>
       <div class="header-panels">
         <div class="pill status-pill is-busy" id="status-pill" role="status" aria-live="polite">
@@ -863,11 +855,6 @@
       const illuminationIntensityDisplay = document.getElementById("illumination-intensity-display");
       const illuminationColourInput = document.getElementById("illumination-colour");
       const illuminationStatusBox = document.getElementById("illumination-status");
-      const modeToggle = document.querySelector("[data-mode-toggle]");
-      const modeButtons = modeToggle
-        ? Array.from(modeToggle.querySelectorAll(".mode-toggle-button"))
-        : [];
-      let currentMode = "revcam";
       const BATTERY_LEVEL_MAX = 32;
       const isFullscreenSupported = () => {
         if (document.fullscreenEnabled || document.webkitFullscreenEnabled) {
@@ -1848,105 +1835,6 @@
         toggleButton.setAttribute("aria-pressed", "false");
       }
 
-      function updateModeButtons(mode) {
-        if (!modeButtons.length) {
-          return;
-        }
-        modeButtons.forEach((button) => {
-          const target = button.dataset.mode || "";
-          button.setAttribute("aria-pressed", String(target === mode));
-        });
-      }
-
-      async function fetchSurveillanceStatus() {
-        try {
-          const response = await fetch("/api/surveillance/status", { cache: "no-store" });
-          if (!response.ok) {
-            return null;
-          }
-          const payload = await response.json();
-          return payload && typeof payload === "object" ? payload : null;
-        } catch (error) {
-          console.error("Surveillance status error", error);
-          return null;
-        }
-      }
-
-      async function changeViewingMode(targetMode) {
-        if (!modeButtons.length) {
-          return;
-        }
-        const desired = targetMode === "surveillance" ? "surveillance" : "revcam";
-        if (desired === currentMode) {
-          if (desired === "surveillance") {
-            window.location.href = "/surveillance";
-          }
-          return;
-        }
-        modeButtons.forEach((button) => {
-          button.disabled = true;
-        });
-        updateModeButtons(desired);
-        if (desired === "surveillance") {
-          stopStream("Switching to surveillance…");
-        }
-        try {
-          const response = await fetch("/api/surveillance/mode", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ mode: desired }),
-          });
-          if (!response.ok) {
-            throw new Error(`Mode switch failed with ${response.status}`);
-          }
-          currentMode = desired;
-          updateModeButtons(currentMode);
-          if (currentMode === "surveillance") {
-            window.location.href = "/surveillance";
-            return;
-          }
-          await startStream({ message: "Connecting to camera…", refreshCapabilities: true });
-        } catch (error) {
-          console.error("Mode switch error", error);
-          updateModeButtons(currentMode);
-          const message =
-            desired === "surveillance"
-              ? "Unable to enable surveillance mode"
-              : "Unable to enable RevCam mode";
-          setStatus(message, "error");
-        } finally {
-          modeButtons.forEach((button) => {
-            button.disabled = false;
-          });
-        }
-      }
-
-      async function initialiseModeToggle() {
-        if (!modeButtons.length) {
-          return "revcam";
-        }
-        updateModeButtons(currentMode);
-        modeButtons.forEach((button) => {
-          button.addEventListener("click", () => {
-            const target = button.dataset.mode || "revcam";
-            changeViewingMode(target).catch((error) =>
-              console.error("Viewing mode toggle error", error),
-            );
-          });
-        });
-        const status = await fetchSurveillanceStatus();
-        if (status && typeof status.mode === "string") {
-          const resolved = status.mode === "surveillance" ? "surveillance" : "revcam";
-          currentMode = resolved;
-          updateModeButtons(currentMode);
-          if (resolved === "surveillance") {
-            window.location.replace("/surveillance");
-            return "surveillance";
-          }
-        }
-        return currentMode;
-      }
-
       async function saveSnapshot() {
         if (!snapshotButton) {
           return;
@@ -2154,20 +2042,10 @@
 
       refreshIlluminationState({ showLoading: true });
       scheduleBatteryUpdates();
-      initialiseModeToggle()
-        .then((mode) => {
-          if (mode === "surveillance") {
-            return null;
-          }
-          return startStream({ refreshCapabilities: true });
-        })
-        .catch((error) => {
-          console.error("Mode initialisation error", error);
-          return startStream({ refreshCapabilities: true });
-        })
-        .catch((error) => {
-          console.error("Initial stream error", error);
-        });
+
+      startStream({ refreshCapabilities: true }).catch((error) => {
+        console.error("Initial stream error", error);
+      });
     </script>
   </body>
 </html>
