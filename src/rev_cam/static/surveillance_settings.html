@@ -453,8 +453,8 @@
             </p>
             <div class="storage-grid">
               <div>
-                <label for="chunk-duration">Split recordings every (minutes)</label>
-                <input id="chunk-duration" type="number" min="0" max="1440" step="1" />
+                <label for="chunk-duration">Split recordings every (seconds)</label>
+                <input id="chunk-duration" type="number" min="0" max="86400" step="1" />
                 <span class="muted">Set to 0 to keep each recording as a single file.</span>
               </div>
               <div>
@@ -580,6 +580,42 @@
           return value.toFixed(1).replace(/\.0$/, "");
         }
         return value.toFixed(2);
+      }
+
+      function formatDurationSeconds(seconds) {
+        if (!Number.isFinite(seconds) || seconds <= 0) {
+          return null;
+        }
+        const rounded = Math.round(seconds);
+        if (rounded < 60) {
+          return `${rounded}s`;
+        }
+        if (rounded % 3600 === 0) {
+          const hours = Math.round(rounded / 3600);
+          return `${hours} hr${hours === 1 ? "" : "s"}`;
+        }
+        if (rounded % 60 === 0) {
+          const minutes = Math.round(rounded / 60);
+          return `${minutes} min`;
+        }
+        const minutes = Math.floor(rounded / 60);
+        const remainder = rounded % 60;
+        if (minutes >= 60) {
+          const hours = Math.floor(minutes / 60);
+          const remainingMinutes = minutes % 60;
+          const parts = [];
+          if (hours > 0) {
+            parts.push(`${hours} hr${hours === 1 ? "" : "s"}`);
+          }
+          if (remainingMinutes > 0) {
+            parts.push(`${remainingMinutes} min`);
+          }
+          if (remainder > 0) {
+            parts.push(`${remainder}s`);
+          }
+          return parts.join(" ");
+        }
+        return `${minutes} min ${remainder}s`;
       }
 
       function formatTemperatureCelsius(value) {
@@ -750,9 +786,10 @@
           text += "—";
         }
         if (chunkDurationInput) {
-          const minutes = parseInt(chunkDurationInput.value, 10);
-          if (Number.isFinite(minutes) && minutes > 0) {
-            text += ` • Split every ${minutes} min`;
+          const seconds = parseInt(chunkDurationInput.value, 10);
+          const durationLabel = formatDurationSeconds(Number.isFinite(seconds) ? seconds : 0);
+          if (durationLabel) {
+            text += ` • Split every ${durationLabel}`;
           }
         }
         if (motionEnabledInput && motionEnabledInput.checked && effective.fps) {
@@ -796,8 +833,8 @@
         }
         if (chunkDurationInput) {
           const seconds = Number(settings.chunk_duration_seconds ?? 0);
-          const minutes = Number.isFinite(seconds) && seconds > 0 ? Math.round(seconds / 60) : 0;
-          chunkDurationInput.value = minutes;
+          const normalised = Number.isFinite(seconds) && seconds > 0 ? Math.round(seconds) : 0;
+          chunkDurationInput.value = normalised;
         }
         if (storageThresholdInput) {
           const threshold = Number(settings.storage_threshold_percent ?? 10);
@@ -922,14 +959,14 @@
           }
         }
         if (chunkDurationInput) {
-          const chunkMinutes = parseInt(chunkDurationInput.value, 10);
-          if (Number.isFinite(chunkMinutes) && chunkMinutes > 0) {
-            if (chunkMinutes > 24 * 60) {
-              statusText.textContent = "Chunk duration must be 1440 minutes or less.";
+          const chunkSeconds = parseInt(chunkDurationInput.value, 10);
+          if (Number.isFinite(chunkSeconds) && chunkSeconds > 0) {
+            if (chunkSeconds > 86400) {
+              statusText.textContent = "Chunk duration must be 86400 seconds or less.";
               chunkDurationInput.focus();
               return;
             }
-            payload.chunk_duration_seconds = chunkMinutes * 60;
+            payload.chunk_duration_seconds = chunkSeconds;
           } else {
             payload.chunk_duration_seconds = 0;
           }
