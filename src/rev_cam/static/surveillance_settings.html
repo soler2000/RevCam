@@ -472,6 +472,9 @@
           <div class="summary" id="settings-summary" role="status" aria-live="polite">
             Effective capture: —
           </div>
+          <p class="muted" id="system-temperature" aria-live="polite">
+            CPU temperature: —
+          </p>
           <button type="submit">Save surveillance settings</button>
           <p class="muted status" id="settings-status"></p>
         </form>
@@ -509,6 +512,7 @@
       const expertQualityInput = document.getElementById("expert-quality");
       const statusText = document.getElementById("settings-status");
       const summary = document.getElementById("settings-summary");
+      const systemTemperatureText = document.getElementById("system-temperature");
       const tabButtons = Array.from(document.querySelectorAll(".tab-button"));
       const tabPanels = Array.from(document.querySelectorAll("[data-tab-panel]"));
       const overlayCheckbox = document.getElementById("recording-overlays");
@@ -576,6 +580,55 @@
           return value.toFixed(1).replace(/\.0$/, "");
         }
         return value.toFixed(2);
+      }
+
+      function formatTemperatureCelsius(value) {
+        if (typeof value !== "number" || !Number.isFinite(value)) {
+          return "";
+        }
+        const rounded = Math.round(value * 10) / 10;
+        let text = rounded.toFixed(1);
+        if (text.endsWith(".0")) {
+          text = text.slice(0, -2);
+        }
+        return `${text}°C`;
+      }
+
+      function setSystemTemperatureLabel(text) {
+        if (!systemTemperatureText) {
+          return;
+        }
+        const suffix = text && text.length > 0 ? text : "—";
+        systemTemperatureText.textContent = `CPU temperature: ${suffix}`;
+      }
+
+      async function refreshSystemTemperature() {
+        if (!systemTemperatureText) {
+          return;
+        }
+        setSystemTemperatureLabel("Loading…");
+        try {
+          const response = await fetch("/api/diagnostics", { cache: "no-store" });
+          if (!response.ok) {
+            throw new Error(`Diagnostics request failed with ${response.status}`);
+          }
+          const payload = await response.json();
+          const system = payload && typeof payload.system === "object" ? payload.system : null;
+          const cpu = system && typeof system.cpu === "object" ? system.cpu : null;
+          const temperature =
+            cpu && typeof cpu.temperature_celsius === "number" && Number.isFinite(cpu.temperature_celsius)
+              ? cpu.temperature_celsius
+              : null;
+          if (temperature === null) {
+            setSystemTemperatureLabel("Unavailable");
+            return;
+          }
+          const formatted = formatTemperatureCelsius(temperature);
+          setSystemTemperatureLabel(formatted || "Unavailable");
+        } catch (error) {
+          console.error("Failed to load system diagnostics", error);
+          setSystemTemperatureLabel("Unable to load");
+        }
       }
 
       function updateMotionGuidance() {
@@ -921,6 +974,7 @@
       });
 
       loadSettings();
+      refreshSystemTemperature();
     </script>
   </body>
 </html>

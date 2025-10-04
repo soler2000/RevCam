@@ -2694,6 +2694,10 @@
                     <dd id="diagnostics-system-cpu">—</dd>
                   </div>
                   <div>
+                    <dt>CPU temperature</dt>
+                    <dd id="diagnostics-system-temperature">—</dd>
+                  </div>
+                  <div>
                     <dt>Per-core usage</dt>
                     <dd id="diagnostics-system-per-core">—</dd>
                   </div>
@@ -2747,6 +2751,12 @@
               <div>
                 <dt>CPU usage</dt>
                 <dd id="development-system-cpu">Enable development features to collect system metrics.</dd>
+              </div>
+              <div>
+                <dt>CPU temperature</dt>
+                <dd id="development-system-temperature">
+                  Enable development features to collect system metrics.
+                </dd>
               </div>
               <div>
                 <dt>Per-core usage</dt>
@@ -2978,6 +2988,7 @@
       const developmentStatus = document.getElementById("development-status");
       const developmentSystemCard = document.getElementById("development-system-card");
       const developmentSystemCpu = document.getElementById("development-system-cpu");
+      const developmentSystemTemperature = document.getElementById("development-system-temperature");
       const developmentSystemPerCore = document.getElementById("development-system-per-core");
       const developmentSystemMemory = document.getElementById("development-system-memory");
       const developmentDistanceCard = document.getElementById("development-distance-card");
@@ -3172,6 +3183,7 @@
       const diagnosticsResults = document.getElementById("diagnostics-results");
       const diagnosticsSummary = document.getElementById("diagnostics-summary");
       const diagnosticsSystemCpu = document.getElementById("diagnostics-system-cpu");
+      const diagnosticsSystemTemperature = document.getElementById("diagnostics-system-temperature");
       const diagnosticsSystemPerCore = document.getElementById("diagnostics-system-per-core");
       const diagnosticsSystemMemory = document.getElementById("diagnostics-system-memory");
       const diagnosticsConflicts = document.getElementById("diagnostics-conflicts");
@@ -3612,6 +3624,18 @@
           text = text.slice(0, -2);
         }
         return text;
+      }
+
+      function formatTemperatureCelsius(value) {
+        if (typeof value !== "number" || !Number.isFinite(value)) {
+          return "";
+        }
+        const rounded = Math.round(value * 10) / 10;
+        let text = rounded.toFixed(1);
+        if (text.endsWith(".0")) {
+          text = text.slice(0, -2);
+        }
+        return `${text}°C`;
       }
 
       function formatLoadAverage(value) {
@@ -4926,6 +4950,9 @@
         if (developmentSystemCpu) {
           developmentSystemCpu.textContent = text;
         }
+        if (developmentSystemTemperature) {
+          developmentSystemTemperature.textContent = text;
+        }
         if (developmentSystemPerCore) {
           developmentSystemPerCore.textContent = text;
         }
@@ -5332,6 +5359,21 @@
         return parts.length > 0 ? parts.join(" • ") : "Unavailable";
       }
 
+      function summariseCpuTemperature(cpu) {
+        if (!cpu || typeof cpu !== "object") {
+          return "Unavailable";
+        }
+        const temperature =
+          typeof cpu.temperature_celsius === "number" && Number.isFinite(cpu.temperature_celsius)
+            ? cpu.temperature_celsius
+            : null;
+        if (temperature === null) {
+          return "Unavailable";
+        }
+        const formatted = formatTemperatureCelsius(temperature);
+        return formatted || "Unavailable";
+      }
+
       function summarisePerCoreCpuMetrics(cpu) {
         if (!cpu || typeof cpu !== "object") {
           return "";
@@ -5424,6 +5466,13 @@
         }
         if (developmentSystemCpu) {
           developmentSystemCpu.textContent = cpuSummary;
+        }
+        const temperatureSummary = summariseCpuTemperature(cpu);
+        if (diagnosticsSystemTemperature) {
+          diagnosticsSystemTemperature.textContent = temperatureSummary;
+        }
+        if (developmentSystemTemperature) {
+          developmentSystemTemperature.textContent = temperatureSummary;
         }
         const perCoreSummary = summarisePerCoreCpuMetrics(cpu);
         if (diagnosticsSystemPerCore) {

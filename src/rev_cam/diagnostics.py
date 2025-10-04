@@ -201,6 +201,10 @@ def _collect_cpu_metrics() -> dict[str, object] | None:
     if per_core_metrics:
         metrics["per_core"] = per_core_metrics
 
+    temperature_celsius = _collect_cpu_temperature()
+    if temperature_celsius is not None:
+        metrics["temperature_celsius"] = temperature_celsius
+
     return metrics or None
 
 
@@ -272,6 +276,38 @@ def _collect_per_core_cpu_usage() -> list[dict[str, object]]:
     )
 
     return per_core
+
+
+def _collect_cpu_temperature() -> float | None:
+    """Return the CPU temperature in Celsius if available."""
+
+    candidates = (
+        "/sys/class/thermal/thermal_zone0/temp",
+        "/sys/devices/virtual/thermal/thermal_zone0/temp",
+    )
+
+    for path in candidates:
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                raw_value = handle.read().strip()
+        except OSError:
+            continue
+
+        if not raw_value:
+            continue
+
+        try:
+            temperature = float(raw_value)
+        except ValueError:
+            continue
+
+        if temperature > 200.0:
+            temperature /= 1000.0
+
+        if temperature > -200.0 and temperature < 200.0:
+            return temperature
+
+    return None
 
 
 def _collect_memory_metrics() -> dict[str, object] | None:
@@ -456,6 +492,9 @@ def run(argv: Sequence[str] | None = None) -> int:
             cpu_count = cpu_metrics.get("count")
             if isinstance(cpu_count, int) and cpu_count > 0:
                 cpu_parts.append(f"{cpu_count} cores")
+            temperature_c = cpu_metrics.get("temperature_celsius")
+            if isinstance(temperature_c, (int, float)):
+                cpu_parts.append(f"{temperature_c:.1f}°C")
             cpu_summary = ", ".join(cpu_parts) if cpu_parts else "data unavailable"
             print(f" - CPU: {cpu_summary}")
             per_core_metrics = cpu_metrics.get("per_core")

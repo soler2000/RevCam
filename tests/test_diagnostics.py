@@ -31,6 +31,7 @@ def test_collect_diagnostics(monkeypatch: pytest.MonkeyPatch) -> None:
                 "usage_percent": 12.5,
                 "count": 4,
                 "load": {"1m": 0.5},
+                "temperature_celsius": 47.5,
                 "per_core": [
                     {"index": 0, "usage_percent": 10.0},
                     {"index": 1, "usage_percent": 15.0},
@@ -51,6 +52,7 @@ def test_collect_diagnostics(monkeypatch: pytest.MonkeyPatch) -> None:
             "usage_percent": 12.5,
             "count": 4,
             "load": {"1m": 0.5},
+            "temperature_celsius": 47.5,
             "per_core": [
                 {"index": 0, "usage_percent": 10.0},
                 {"index": 1, "usage_percent": 15.0},
@@ -80,6 +82,7 @@ def test_run_outputs_conflicts(capsys: pytest.CaptureFixture[str], monkeypatch: 
                 "usage_percent": 65.0,
                 "count": 4,
                 "load": {"1m": 2.6},
+                "temperature_celsius": 62.0,
                 "per_core": [
                     {"index": 0, "usage_percent": 72.5},
                     {"index": 1, "usage_percent": 58.0},
@@ -129,6 +132,7 @@ def test_run_json(monkeypatch: pytest.MonkeyPatch) -> None:
                 "usage_percent": 33.3,
                 "count": 4,
                 "load": {"1m": 1.2},
+                "temperature_celsius": 52.25,
                 "per_core": [
                     {"index": 0, "usage_percent": 25.0},
                     {"index": 1, "usage_percent": 41.5},
@@ -164,6 +168,7 @@ def test_run_json(monkeypatch: pytest.MonkeyPatch) -> None:
             "usage_percent": 33.3,
             "count": 4,
             "load": {"1m": 1.2},
+            "temperature_celsius": 52.25,
             "per_core": [
                 {"index": 0, "usage_percent": 25.0},
                 {"index": 1, "usage_percent": 41.5},
