@@ -42,7 +42,7 @@ from .sensor_fusion import Gy85KalmanFilter, SensorSample, Vector3
 from .pipeline import FramePipeline
 from .recording import (
     RecordingManager,
-    build_recording_archive,
+    build_recording_video,
     load_recording_metadata,
     load_recording_payload,
     purge_recordings,
@@ -1953,15 +1953,22 @@ def create_app(
     async def download_surveillance_recording(name: str) -> StreamingResponse:
         try:
             safe_name, archive = await asyncio.to_thread(
-                build_recording_archive, RECORDINGS_DIR, name
+                build_recording_video, RECORDINGS_DIR, name
             )
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Recording not found") from exc
+        except ValueError as exc:
+            logger.warning(
+                "Recording %s is not ready for download: %s", name, exc, exc_info=True
+            )
+            raise HTTPException(
+                status_code=409, detail="Recording is not ready for download"
+            ) from exc
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.exception("Failed to prepare surveillance recording %s", name)
             raise HTTPException(status_code=500, detail="Unable to download recording") from exc
 
-        filename = f"{safe_name}.zip".replace("\"", "")
+        filename = f"{safe_name}.mp4".replace("\"", "")
         disposition = (
             f'attachment; filename="{filename}"; filename*=UTF-8\'\'{urlquote(filename)}'
         )
@@ -1977,7 +1984,7 @@ def create_app(
                 archive.close()
 
         return StreamingResponse(
-            _iterator(), media_type="application/zip", headers={"Content-Disposition": disposition}
+            _iterator(), media_type="video/mp4", headers={"Content-Disposition": disposition}
         )
 
     @app.delete("/api/surveillance/recordings/{name}")

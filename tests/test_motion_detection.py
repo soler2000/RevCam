@@ -6,6 +6,7 @@ from pathlib import Path
 
 import asyncio
 
+import av
 import numpy as np
 import pytest
 
@@ -16,6 +17,7 @@ from rev_cam.pipeline import FramePipeline
 from rev_cam.recording import (
     MotionDetector,
     RecordingManager,
+    build_recording_video,
     load_recording_metadata,
     load_recording_payload,
 )
@@ -519,3 +521,53 @@ async def test_recording_finalise_cancellation(tmp_path: Path, anyio_backend) ->
     assert processing.get("processing_error") == "cancelled"
 
     await manager.aclose()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("anyio_backend", ["asyncio"], indirect=True)
+async def test_build_recording_video_exports_mp4(tmp_path: Path, anyio_backend) -> None:
+    camera = _StaticCamera()
+    pipeline = _pipeline()
+    manager = RecordingManager(
+        camera=camera,
+        pipeline=pipeline,
+        directory=tmp_path,
+        fps=6,
+        chunk_duration_seconds=1,
+    )
+
+    async def _noop(self):
+        return None
+
+    manager._ensure_producer_running = types.MethodType(_noop, manager)
+
+    await manager.start_recording()
+    frame = np.zeros((32, 32, 3), dtype=np.uint8)
+    for index in range(6):
+        frame[:] = (index * 20) % 255
+        payload = manager._encode_frame(frame)
+        await manager._record_frame(payload, index * (1 / 6), frame)
+
+    metadata = await manager.stop_recording()
+    assert metadata["processing"] is True
+    finalised = await manager.wait_for_processing()
+    assert finalised is not None
+    await manager.aclose()
+
+    safe_name, handle = build_recording_video(tmp_path, finalised["name"])
+    assert safe_name == finalised["name"]
+
+    header = handle.read(8)
+    assert header.startswith(b"\x00\x00\x00")
+    handle.seek(0)
+
+    with av.open(handle, mode="r") as container:
+        video_streams = [stream for stream in container.streams if stream.type == "video"]
+        assert video_streams
+        decoded_frames = 0
+        for packet in container.demux(video_streams[0]):
+            for frame in packet.decode():
+                decoded_frames += 1
+        assert decoded_frames >= finalised["frame_count"]
+
+    handle.close()
