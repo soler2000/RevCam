@@ -716,6 +716,7 @@ class RecordingManager:
     boundary: str = "recording"
     max_frames: int | None = None
     chunk_duration_seconds: int | None = None
+    chunk_data_limit_bytes: int | None = 32 * 1024 * 1024
     storage_threshold_percent: float = 10.0
     motion_detection_enabled: bool = False
     motion_sensitivity: int = 50
@@ -735,6 +736,7 @@ class RecordingManager:
     )
     _chunk_index: int = field(init=False, default=0)
     _chunk_frame_limit: int = field(init=False, default=0)
+    _chunk_byte_limit: int = field(init=False, default=0)
     _total_frame_count: int = field(init=False, default=0)
     _recording_started_at: datetime | None = field(init=False, default=None)
     _recording_started_monotonic: float | None = field(init=False, default=None)
@@ -766,6 +768,7 @@ class RecordingManager:
     _motion_event_active: bool = field(init=False, default=False)
     _motion_event_pending_stop: float | None = field(init=False, default=None)
     _motion_state_hold_until: float | None = field(init=False, default=None)
+    _active_chunk_bytes: int = field(init=False, default=0)
 
     def __post_init__(self) -> None:
         if self.fps <= 0:
@@ -792,6 +795,12 @@ class RecordingManager:
             sensitivity=self.motion_sensitivity,
             inactivity_timeout=self.motion_inactivity_timeout_seconds,
             frame_decimation=self.motion_frame_decimation,
+        )
+        self.chunk_data_limit_bytes = self._normalise_chunk_byte_limit(
+            self.chunk_data_limit_bytes
+        )
+        self._chunk_byte_limit = (
+            0 if self.chunk_data_limit_bytes is None else int(self.chunk_data_limit_bytes)
         )
         self._chunk_frame_limit = self._calculate_chunk_frame_limit()
 
@@ -859,6 +868,7 @@ class RecordingManager:
             self._motion_state = "monitoring" if motion_enabled else None
             self._recording_active = True
             self._active_chunk_frames = []
+            self._active_chunk_bytes = 0
             self._chunk_write_tasks.clear()
             self._chunk_index = 0
             self._total_frame_count = 0
@@ -1152,7 +1162,13 @@ class RecordingManager:
                 if (
                     self._recording_active
                     and self._active_chunk_frames
-                    and len(self._active_chunk_frames) >= self._chunk_frame_limit
+                    and (
+                        (
+                            self._chunk_byte_limit
+                            and self._active_chunk_bytes >= self._chunk_byte_limit
+                        )
+                        or len(self._active_chunk_frames) >= self._chunk_frame_limit
+                    )
                 ):
                     flush_request = self._pop_active_chunk_locked()
 
@@ -1376,9 +1392,15 @@ class RecordingManager:
                     "jpeg": encoded,
                 }
                 self._active_chunk_frames.append(frame_entry)
+                self._active_chunk_bytes += len(encoded)
                 self._total_frame_count += 1
                 self._motion_detector.notify_recorded()
                 if (
+                    self._chunk_byte_limit
+                    and self._active_chunk_bytes >= self._chunk_byte_limit
+                ):
+                    flush_request = self._pop_active_chunk_locked()
+                elif (
                     self._chunk_frame_limit
                     and len(self._active_chunk_frames) >= self._chunk_frame_limit
                 ):
@@ -1424,6 +1446,7 @@ class RecordingManager:
         self._recording_started_at = started_at
         self._recording_started_monotonic = frame_time
         self._active_chunk_frames = []
+        self._active_chunk_bytes = 0
         self._chunk_write_tasks.clear()
         self._chunk_index = 0
         self._total_frame_count = 0
@@ -1475,6 +1498,7 @@ class RecordingManager:
                     self._cancel_auto_stop_task()
                     self._total_frame_count = 0
                     self._chunk_index = 0
+                    self._active_chunk_bytes = 0
                     self._motion_event_base = None
                     self._motion_event_index = 0
                     self._current_motion_event_index = 0
@@ -1506,6 +1530,7 @@ class RecordingManager:
         )
         self._total_frame_count = 0
         self._chunk_index = 0
+        self._active_chunk_bytes = 0
         self._recording_started_at = None
         self._recording_started_monotonic = None
         self._recording_name = None
@@ -1690,6 +1715,7 @@ class RecordingManager:
             return None
         self._chunk_index += 1
         self._active_chunk_frames = []
+        self._active_chunk_bytes = 0
         return (name, self._chunk_index, frames)
 
     async def _persist_chunk(
@@ -1731,6 +1757,19 @@ class RecordingManager:
         if duration > 24 * 60 * 60:
             return 24 * 60 * 60
         return duration
+
+    def _normalise_chunk_byte_limit(self, value: int | float | None) -> int | None:
+        if value in (None, "", 0):
+            return None
+        try:
+            numeric = int(float(value))
+        except (TypeError, ValueError):  # pragma: no cover - defensive branch
+            return None
+        if numeric < 1_048_576:
+            numeric = 1_048_576
+        elif numeric > 268_435_456:
+            numeric = 268_435_456
+        return numeric
 
     def _normalise_storage_threshold(self, value: float | int | None) -> float:
         if value is None:
