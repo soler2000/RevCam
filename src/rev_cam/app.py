@@ -5,14 +5,9 @@ import asyncio
 import logging
 import math
 import os
-import shutil
 import string
-from enum import Enum
 from pathlib import Path
 from typing import Literal
-from urllib.parse import quote as urlquote
-
-from datetime import datetime, timedelta, timezone
 
 from fastapi import FastAPI, HTTPException, Query, Response
 from fastapi.concurrency import run_in_threadpool
@@ -32,7 +27,6 @@ from .config import (
     Resolution,
     RESOLUTION_PRESETS,
     StreamSettings,
-    SURVEILLANCE_STANDARD_PRESETS,
 )
 from .diagnostics import collect_diagnostics
 from .distance import DistanceCalibration, DistanceMonitor, create_distance_overlay
@@ -40,15 +34,6 @@ from .led_matrix import LedRing
 from .reversing_aids import create_reversing_aids_overlay
 from .sensor_fusion import Gy85KalmanFilter, SensorSample, Vector3
 from .pipeline import FramePipeline
-from .recording import (
-    RecordingManager,
-    build_recording_video,
-    load_recording_chunk,
-    load_recording_metadata,
-    load_recording_payload,
-    purge_recordings,
-    remove_recording_files,
-)
 from .streaming import MJPEGStreamer, WebRTCManager, encode_frame_to_jpeg
 from .system_log import SystemLog
 from .version import APP_VERSION
@@ -56,9 +41,6 @@ from .wifi import WiFiCredentialStore, WiFiError, WiFiManager
 from .trailer_leveling import evaluate_leveling
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
-RECORDINGS_DIR = Path(os.environ.get("REVCAM_RECORDINGS_DIR", STATIC_DIR / "recordings"))
-
-
 def _load_static(name: str) -> str:
     path = STATIC_DIR / name
     if not path.exists():  # pragma: no cover - sanity check
@@ -97,9 +79,7 @@ class OrientationPayload(BaseModel):
     flip_vertical: bool = False
 
 
-class StreamMode(str, Enum):
-    REVCAM = "revcam"
-    SURVEILLANCE = "surveillance"
+
 
 
 class CameraPayload(BaseModel):
@@ -150,8 +130,7 @@ class DistanceDisplayModePayload(BaseModel):
     use_projected_distance: bool
 
 
-class SurveillanceModePayload(BaseModel):
-    mode: Literal["revcam", "surveillance"]
+
 
 
 class BatteryLimitsPayload(BaseModel):
@@ -168,23 +147,7 @@ class StreamSettingsPayload(BaseModel):
     jpeg_quality: int | None = None
 
 
-class SurveillanceSettingsPayload(BaseModel):
-    profile: Literal["standard", "expert"] | None = None
-    preset: str | None = None
-    fps: int | None = None
-    jpeg_quality: int | None = None
-    expert_fps: int | None = None
-    expert_jpeg_quality: int | None = None
-    chunk_duration_seconds: int | None = None
-    chunk_mp4_enabled: bool | None = None
-    overlays_enabled: bool | None = None
-    remember_recording_state: bool | None = None
-    motion_detection_enabled: bool | None = None
-    motion_sensitivity: int | None = None
-    motion_frame_decimation: int | None = None
-    motion_post_event_seconds: float | None = None
-    auto_purge_days: int | None = None
-    storage_threshold_percent: float | None = None
+
 
 
 class WebRTCOfferPayload(BaseModel):
@@ -346,20 +309,8 @@ def create_app(
         system_log=shared_system_log,
     )
 
-    current_mode: StreamMode = StreamMode.REVCAM
-
     def _overlays_enabled() -> bool:
-        master_enabled = config_manager.get_overlay_master_enabled()
-        if not master_enabled:
-            return False
-        if current_mode is StreamMode.SURVEILLANCE:
-            try:
-                surveillance = config_manager.get_surveillance_settings()
-            except Exception:  # pragma: no cover - defensive fallback
-                return master_enabled
-            if not surveillance.overlays_enabled:
-                return False
-        return True
+        return bool(config_manager.get_overlay_master_enabled())
 
     pipeline = FramePipeline(
         lambda: config_manager.get_orientation(),
@@ -393,81 +344,14 @@ def create_app(
             enabled_provider=config_manager.get_reversing_overlay_enabled,
         )
     )
-    RECORDINGS_DIR.mkdir(parents=True, exist_ok=True)
     camera: BaseCamera | None = None
     streamer: MJPEGStreamer | None = None
     webrtc_manager: WebRTCManager | None = None
-    recording_manager: RecordingManager | None = None
     stream_error: str | None = None
     webrtc_error: str | None = None
     active_camera_choice: str = "unknown"
     active_resolution: Resolution = config_manager.get_resolution()
     camera_errors: dict[str, str] = {}
-    def _persist_surveillance_state(recording: bool | None = None) -> None:
-        try:
-            settings = config_manager.get_surveillance_settings()
-        except Exception:  # pragma: no cover - defensive guard
-            return
-        if not settings.remember_recording_state:
-            return
-        if recording is None:
-            recording = recording_manager.is_recording if recording_manager else False
-        try:
-            config_manager.update_surveillance_state(current_mode.value, bool(recording))
-        except Exception:  # pragma: no cover - defensive guard
-            logger.exception("Failed to persist surveillance runtime state")
-
-    async def _handle_recording_stopped(metadata: dict[str, object]) -> None:
-        _persist_surveillance_state(False)
-
-    async def _apply_auto_purge(settings) -> None:
-        days = getattr(settings, "auto_purge_days", None)
-        if days in (None, 0):
-            return
-        try:
-            days_value = float(days)
-        except (TypeError, ValueError):  # pragma: no cover - defensive guard
-            return
-        if days_value <= 0:
-            return
-        cutoff = datetime.now(timezone.utc) - timedelta(days=days_value)
-        try:
-            removed = await asyncio.to_thread(purge_recordings, RECORDINGS_DIR, cutoff)
-        except Exception:  # pragma: no cover - defensive logging
-            logger.exception("Failed to auto purge surveillance recordings")
-            return
-        if removed:
-            logger.info("Purged %d old surveillance recordings", len(removed))
-
-    def _build_storage_status(settings=None) -> dict[str, object]:
-        status: dict[str, object]
-        try:
-            if recording_manager is not None:
-                status = recording_manager.get_storage_status()
-            else:
-                usage = shutil.disk_usage(RECORDINGS_DIR)
-                total = int(getattr(usage, "total", 0))
-                free = int(getattr(usage, "free", 0))
-                used = int(getattr(usage, "used", total - free))
-                free_percent = 100.0 if total <= 0 else max(0.0, min(100.0, (free / total) * 100.0))
-                status = {
-                    "total_bytes": total,
-                    "free_bytes": free,
-                    "used_bytes": used,
-                    "free_percent": round(free_percent, 3),
-                }
-        except Exception:  # pragma: no cover - defensive logging
-            logger.exception("Failed to compute storage status")
-            status = {}
-        if settings is None:
-            try:
-                settings = config_manager.get_surveillance_settings()
-            except Exception:  # pragma: no cover - defensive guard
-                settings = None
-        if settings is not None:
-            status.setdefault("threshold_percent", float(settings.storage_threshold_percent))
-        return status
-
     def _distance_payload(
         reading,
         *,
@@ -516,11 +400,7 @@ def create_app(
     app.state.system_log = shared_system_log
 
     async def _set_ready_pattern() -> None:
-        available = (
-            streamer is not None
-            or webrtc_manager is not None
-            or (recording_manager is not None and current_mode is StreamMode.SURVEILLANCE)
-        )
+        available = streamer is not None or webrtc_manager is not None
         await led_ring.set_pattern("ready" if available else "error")
 
     async def _serialise_led_status() -> dict[str, object]:
@@ -544,161 +424,9 @@ def create_app(
             },
         }
 
-    async def _serialise_surveillance_status() -> dict[str, object]:
-        recordings: list[dict[str, object]] = []
-        processing_record: dict[str, object] | None = None
-        processing_active = False
-        if recording_manager is not None:
-            try:
-                recordings = await recording_manager.list_recordings()
-            except Exception:  # pragma: no cover - defensive logging
-                logger.exception("Failed to list surveillance recordings")
-                recordings = []
-            try:
-                processing_record = await recording_manager.get_processing_metadata()
-            except Exception:  # pragma: no cover - defensive logging
-                logger.exception("Failed to read in-flight surveillance metadata")
-                processing_record = None
-            processing_active = recording_manager.is_processing
-        else:
-            try:
-                recordings = await asyncio.to_thread(
-                    load_recording_metadata, RECORDINGS_DIR
-                )
-            except Exception:  # pragma: no cover - defensive logging
-                logger.exception("Failed to list surveillance recordings")
-                recordings = []
-        preview: dict[str, object] | None = None
-        if current_mode is StreamMode.SURVEILLANCE and recording_manager is not None:
-            preview = {
-                "endpoint": "/surveillance/preview.mjpeg",
-                "content_type": recording_manager.media_type,
-            }
-        settings_obj = config_manager.get_surveillance_settings()
-        await _apply_auto_purge(settings_obj)
-        surveillance_settings = settings_obj.serialise()
-        storage_status = _build_storage_status(settings_obj)
-        motion_state = (
-            recording_manager.get_motion_status() if recording_manager is not None else None
-        )
-        recording_mode = (
-            recording_manager.recording_mode if recording_manager is not None else "idle"
-        )
-        started_at_iso: str | None = None
-        if recording_manager is not None:
-            started_at_value = recording_manager.recording_started_at
-            if started_at_value is not None:
-                started_at_iso = started_at_value.isoformat()
-        is_recording_flag = recording_manager.is_recording if recording_manager else False
-        state = config_manager.get_surveillance_state().to_dict()
-        return {
-            "mode": current_mode.value,
-            "recording": is_recording_flag,
-            "recording_mode": recording_mode,
-            "recording_started_at": started_at_iso,
-            "recordings": recordings,
-            "preview": preview,
-            "settings": surveillance_settings,
-            "storage": storage_status,
-            "motion": motion_state,
-            "resume_state": state,
-            "processing": processing_active,
-            "processing_recording": processing_record,
-        }
-
-    async def _ensure_recording_manager() -> RecordingManager:
-        nonlocal recording_manager
-        if camera is None:
-            raise RuntimeError("Camera unavailable for surveillance mode")
-        surveillance_settings = config_manager.get_surveillance_settings()
-        fps = surveillance_settings.resolved_fps
-        jpeg_quality = surveillance_settings.resolved_jpeg_quality
-        if recording_manager is None:
-            recording_manager = RecordingManager(
-                camera=camera,
-                pipeline=pipeline,
-                fps=fps,
-                jpeg_quality=jpeg_quality,
-                directory=RECORDINGS_DIR,
-                chunk_duration_seconds=surveillance_settings.chunk_duration_seconds,
-                chunk_mp4_enabled=surveillance_settings.chunk_mp4_enabled,
-                storage_threshold_percent=surveillance_settings.storage_threshold_percent,
-                motion_detection_enabled=surveillance_settings.motion_detection_enabled,
-                motion_sensitivity=surveillance_settings.motion_sensitivity,
-                motion_frame_decimation=surveillance_settings.motion_frame_decimation,
-                motion_post_event_seconds=surveillance_settings.motion_post_event_seconds,
-                on_stop=_handle_recording_stopped,
-            )
-        else:
-            recording_manager.camera = camera
-            await recording_manager.apply_settings(
-                fps=fps,
-                jpeg_quality=jpeg_quality,
-                chunk_duration_seconds=surveillance_settings.chunk_duration_seconds,
-                chunk_mp4_enabled=surveillance_settings.chunk_mp4_enabled,
-                storage_threshold_percent=surveillance_settings.storage_threshold_percent,
-                motion_detection_enabled=surveillance_settings.motion_detection_enabled,
-                motion_sensitivity=surveillance_settings.motion_sensitivity,
-                motion_frame_decimation=surveillance_settings.motion_frame_decimation,
-                motion_post_event_seconds=surveillance_settings.motion_post_event_seconds,
-            )
-        return recording_manager
-
-    async def _activate_surveillance_mode() -> RecordingManager:
-        nonlocal streamer, webrtc_manager, recording_manager, current_mode
-        nonlocal stream_error, webrtc_error
-        if current_mode is StreamMode.SURVEILLANCE and recording_manager is not None:
-            return recording_manager
-        if streamer is not None:
-            await streamer.aclose()
-            streamer = None
-        if webrtc_manager is not None:
-            await webrtc_manager.aclose()
-            webrtc_manager = None
-        stream_error = None
-        webrtc_error = None
-        manager = await _ensure_recording_manager()
-        current_mode = StreamMode.SURVEILLANCE
-        _persist_surveillance_state()
-        await _set_ready_pattern()
-        return manager
-
-    async def _activate_revcam_mode() -> None:
-        nonlocal streamer, webrtc_manager, recording_manager, current_mode
-        nonlocal stream_error, webrtc_error
-        if recording_manager is not None:
-            try:
-                if recording_manager.is_recording:
-                    await recording_manager.stop_recording()
-            except Exception:  # pragma: no cover - defensive logging
-                logger.exception("Failed to finalise active recording while switching modes")
-            await recording_manager.aclose()
-            recording_manager = None
-        current_mode = StreamMode.REVCAM
-        _persist_surveillance_state(False)
-        await _refresh_video_services()
-        await _set_ready_pattern()
-
     async def _refresh_video_services() -> None:
-        nonlocal streamer, webrtc_manager, stream_error, webrtc_error, recording_manager
+        nonlocal streamer, webrtc_manager, stream_error, webrtc_error
         stream_settings = config_manager.get_stream_settings()
-        if current_mode is StreamMode.SURVEILLANCE:
-            if streamer is not None:
-                await streamer.aclose()
-                streamer = None
-            if webrtc_manager is not None:
-                await webrtc_manager.aclose()
-                webrtc_manager = None
-            stream_error = None
-            webrtc_error = None
-            if camera is not None:
-                try:
-                    await _ensure_recording_manager()
-                except Exception:  # pragma: no cover - defensive logging
-                    logger.exception("Failed to prepare surveillance manager")
-                    raise
-            return
-
         if camera is None:
             streamer = None
             webrtc_manager = None
@@ -846,22 +574,12 @@ def create_app(
 
     def _build_stream_info() -> dict[str, object | None]:
         stream_settings = config_manager.get_stream_settings()
-        in_surveillance = current_mode is StreamMode.SURVEILLANCE
-        recording_available = recording_manager is not None
-        preview_details: dict[str, object | None] | None = None
-        if in_surveillance and recording_available:
-            preview_details = {
-                "enabled": True,
-                "endpoint": "/surveillance/preview.mjpeg",
-                "content_type": recording_manager.media_type,
-            }
-
-        if not in_surveillance and streamer is not None:
+        if streamer is not None:
             active_details: dict[str, int | None] | None = {
                 "fps": streamer.fps,
                 "jpeg_quality": streamer.jpeg_quality,
             }
-        elif not in_surveillance and webrtc_manager is not None:
+        elif webrtc_manager is not None:
             active_details = {"fps": webrtc_manager.fps, "jpeg_quality": None}
         else:
             active_details = None
@@ -871,30 +589,28 @@ def create_app(
         else:
             overall_error = stream_error if streamer is None else None
 
-        mjpeg_enabled = (not in_surveillance) and (streamer is not None)
-        webrtc_enabled = (not in_surveillance) and (webrtc_manager is not None)
+        mjpeg_enabled = streamer is not None
+        webrtc_enabled = webrtc_manager is not None
 
         return {
-            "mode": current_mode.value,
             "enabled": mjpeg_enabled or webrtc_enabled,
             "endpoint": "/stream/mjpeg" if mjpeg_enabled else None,
             "content_type": streamer.media_type if mjpeg_enabled and streamer else None,
-            "error": overall_error if not in_surveillance else "Surveillance mode active",
+            "error": overall_error,
             "settings": stream_settings.to_dict(),
             "active": active_details,
             "webrtc": {
                 "enabled": webrtc_enabled,
                 "endpoint": "/stream/webrtc",
-                "error": webrtc_error if not in_surveillance else "Surveillance mode active",
+                "error": webrtc_error,
                 "fps": webrtc_manager.fps if webrtc_enabled and webrtc_manager is not None else None,
             },
             "mjpeg": {
                 "enabled": mjpeg_enabled,
                 "endpoint": "/stream/mjpeg",
-                "error": stream_error if mjpeg_enabled else ("Surveillance mode active" if in_surveillance else stream_error),
+                "error": stream_error,
                 "content_type": streamer.media_type if mjpeg_enabled and streamer else None,
             },
-            "surveillance": preview_details,
         }
 
     def _build_camera(
@@ -945,7 +661,7 @@ def create_app(
     @app.on_event("startup")
     async def startup() -> None:  # pragma: no cover - framework hook
         nonlocal camera, active_camera_choice, streamer, webrtc_manager, active_resolution
-        nonlocal stream_error, webrtc_error, recording_manager, current_mode
+        nonlocal stream_error, webrtc_error
         if isinstance(shared_system_log, SystemLog):
             shared_system_log.record(
                 "system",
@@ -999,45 +715,9 @@ def create_app(
         else:
             webrtc_error = None
         await _set_ready_pattern()
-        recording_manager = None
-        current_mode = StreamMode.REVCAM
-        battery_supervisor.start()
-        if isinstance(shared_system_log, SystemLog):
-            startup_metadata = {
-                "camera": active_camera_choice,
-                "resolution": active_resolution.key()
-                if hasattr(active_resolution, "key")
-                else None,
-                "stream": stream_settings.to_dict(),
-            }
-            shared_system_log.record(
-                "system",
-                "startup_complete",
-                "RevCam startup sequence completed.",
-                metadata={k: v for k, v in startup_metadata.items() if v is not None},
-            )
-        try:
-            surveillance_settings = config_manager.get_surveillance_settings()
-            runtime_state = config_manager.get_surveillance_state()
-        except Exception:  # pragma: no cover - defensive guard
-            surveillance_settings = None
-            runtime_state = None
-        if (
-            surveillance_settings is not None
-            and runtime_state is not None
-            and surveillance_settings.remember_recording_state
-            and runtime_state.mode == "surveillance"
-        ):
-            try:
-                manager = await _activate_surveillance_mode()
-                if runtime_state.recording:
-                    await manager.start_recording()
-            except Exception:  # pragma: no cover - defensive logging
-                logger.exception("Failed to resume surveillance recording state")
-
     @app.on_event("shutdown")
     async def shutdown() -> None:  # pragma: no cover - framework hook
-        nonlocal streamer, webrtc_manager, recording_manager
+        nonlocal streamer, webrtc_manager
         if isinstance(shared_system_log, SystemLog):
             shared_system_log.record(
                 "system",
@@ -1051,10 +731,6 @@ def create_app(
         if webrtc_manager is not None:
             await webrtc_manager.aclose()
             webrtc_manager = None
-        if recording_manager is not None:
-            await recording_manager.aclose()
-            recording_manager = None
-        _persist_surveillance_state(False)
         if camera:
             await camera.close()
         await battery_supervisor.aclose()
@@ -1082,22 +758,6 @@ def create_app(
     @app.get("/leveling", response_class=HTMLResponse)
     async def leveling_page() -> str:
         return _load_static("leveling.html")
-
-    @app.get("/surveillance", response_class=HTMLResponse)
-    async def surveillance_page() -> str:
-        return _load_static("surveillance.html")
-
-    @app.get("/surveillance/player", response_class=HTMLResponse)
-    async def surveillance_player_page() -> str:
-        return _load_static("surveillance_player.html")
-
-    @app.get("/surveillance/settings", response_class=HTMLResponse)
-    async def surveillance_settings_page() -> str:
-        return _load_static("surveillance_settings.html")
-
-    @app.get("/surveillance/timeline", response_class=HTMLResponse)
-    async def surveillance_timeline_page() -> str:
-        return _load_static("surveillance_timeline.html")
 
     @app.get("/images/{asset}")
     async def get_image(asset: str):
@@ -1287,7 +947,7 @@ def create_app(
 
     @app.post("/api/stream/settings")
     async def update_stream_settings(payload: StreamSettingsPayload) -> dict[str, object | None]:
-        nonlocal streamer, webrtc_manager, recording_manager
+        nonlocal streamer, webrtc_manager
         data = payload.model_dump(exclude_none=True)
         if not data:
             raise HTTPException(status_code=400, detail="No streaming settings provided")
@@ -1311,17 +971,6 @@ def create_app(
             except Exception as exc:  # pragma: no cover - defensive logging
                 logger.exception("Failed to apply WebRTC streaming settings")
                 raise HTTPException(status_code=500, detail="Unable to apply streaming settings") from exc
-        if recording_manager is not None:
-            try:
-                surveillance_settings = config_manager.get_surveillance_settings()
-                await recording_manager.apply_settings(
-                    fps=surveillance_settings.resolved_fps,
-                    jpeg_quality=surveillance_settings.resolved_jpeg_quality,
-                )
-            except Exception as exc:  # pragma: no cover - defensive logging
-                logger.exception("Failed to apply surveillance recording settings")
-                raise HTTPException(status_code=500, detail="Unable to apply streaming settings") from exc
-
         response: dict[str, object | None] = settings.to_dict()
         if streamer is not None:
             response["active"] = {
@@ -1660,7 +1309,7 @@ def create_app(
     @app.post("/api/camera")
     async def update_camera(payload: CameraPayload) -> dict[str, object]:
         nonlocal camera, active_camera_choice, streamer, webrtc_manager
-        nonlocal active_resolution, stream_error, webrtc_error, recording_manager, current_mode
+        nonlocal active_resolution, stream_error, webrtc_error
         selection = payload.source.strip().lower()
         if selection not in CAMERA_SOURCES:
             raise HTTPException(status_code=400, detail="Unknown camera source")
@@ -1782,261 +1431,677 @@ def create_app(
             raise HTTPException(status_code=500, detail="Failed to establish WebRTC session") from exc
         return {"sdp": description.sdp, "type": description.type}
 
-    @app.get("/surveillance/preview.mjpeg")
-    async def surveillance_preview():
-        if current_mode is not StreamMode.SURVEILLANCE:
-            raise HTTPException(status_code=409, detail="Surveillance mode inactive")
+    @app.get("/images/{asset}")
+    async def get_image(asset: str):
+        safe_name = Path(asset).name
+        if safe_name != asset:
+            raise HTTPException(status_code=404, detail="Asset not found")
+        path = STATIC_DIR / "images" / safe_name
+        if not path.exists() or path.is_dir():
+            raise HTTPException(status_code=404, detail="Asset not found")
+        media_type = "image/svg+xml" if path.suffix.lower() == ".svg" else None
+        return FileResponse(path, media_type=media_type)
+
+    @app.get("/models/{asset}")
+    async def get_model(asset: str):
+        safe_name = Path(asset).name
+        if safe_name != asset:
+            raise HTTPException(status_code=404, detail="Asset not found")
+        path = STATIC_DIR / "models" / safe_name
+        if not path.exists() or path.is_dir():
+            raise HTTPException(status_code=404, detail="Asset not found")
+        media_type = "model/stl" if path.suffix.lower() == ".stl" else None
+        return FileResponse(path, media_type=media_type)
+
+    @app.get("/api/led")
+    async def get_led_status() -> dict[str, object]:
+        return await _serialise_led_status()
+
+    @app.post("/api/led")
+    async def update_led_status(payload: LedSettingsPayload) -> dict[str, object]:
+        updated = False
+        if payload.pattern is not None:
+            candidate = payload.pattern.strip().lower()
+            if not candidate:
+                raise HTTPException(status_code=400, detail="Pattern name must be provided")
+            try:
+                await led_ring.set_pattern(candidate)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            updated = True
+        if payload.error is not None:
+            await led_ring.set_error(bool(payload.error))
+            updated = True
+        colour_value: tuple[int, int, int] | None = None
+        intensity_value: float | None = None
+        if payload.illumination_color is not None:
+            try:
+                colour_value = _parse_hex_colour(payload.illumination_color)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if payload.illumination_intensity is not None:
+            try:
+                intensity_value = _parse_illumination_intensity(payload.illumination_intensity)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if colour_value is not None or intensity_value is not None:
+            await led_ring.set_illumination(color=colour_value, intensity=intensity_value)
+            updated = True
+        if not updated:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Specify a pattern, error flag, or illumination setting to update the LED ring"
+                ),
+            )
+        return await _serialise_led_status()
+
+    @app.get("/api/orientation")
+    async def get_orientation() -> dict[str, int | bool]:
+        orientation = config_manager.get_orientation()
+        return {
+            "rotation": orientation.rotation,
+            "flip_horizontal": orientation.flip_horizontal,
+            "flip_vertical": orientation.flip_vertical,
+        }
+
+    @app.get("/api/diagnostics")
+    async def get_diagnostics() -> dict[str, object]:
         try:
-            manager = await _ensure_recording_manager()
-        except RuntimeError as exc:
+            return await run_in_threadpool(collect_diagnostics)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.exception("Diagnostics collection failed")
+            detail = str(exc).strip()
+            if detail:
+                message = f"Unable to collect diagnostics: {detail}"
+            else:
+                message = "Unable to collect diagnostics"
+            raise HTTPException(status_code=500, detail=message) from exc
+
+    @app.post("/api/orientation")
+    async def update_orientation(payload: OrientationPayload) -> dict[str, int | bool]:
+        try:
+            orientation = config_manager.set_orientation(payload.model_dump())
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {
+            "rotation": orientation.rotation,
+            "flip_horizontal": orientation.flip_horizontal,
+            "flip_vertical": orientation.flip_vertical,
+        }
+
+    @app.get("/api/leveling/config")
+    async def get_leveling_config() -> dict[str, object]:
+        settings = config_manager.get_leveling_settings()
+        return settings.to_dict()
+
+    @app.post("/api/leveling/config")
+    async def update_leveling_config(payload: LevelingConfigPayload) -> dict[str, object]:
+        update_payload: dict[str, object] = {}
+        if payload.geometry is not None:
+            geometry_data = {
+                key: value
+                for key, value in payload.geometry.model_dump().items()
+                if value is not None
+            }
+            if geometry_data:
+                update_payload["geometry"] = geometry_data
+        if payload.ramp is not None:
+            ramp_data = {
+                key: value
+                for key, value in payload.ramp.model_dump().items()
+                if value is not None
+            }
+            if ramp_data:
+                update_payload["ramp"] = ramp_data
+        if not update_payload:
+            raise HTTPException(status_code=400, detail="No levelling values provided")
+        try:
+            settings = config_manager.set_leveling_settings(update_payload)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return settings.to_dict()
+
+    @app.post("/api/leveling/sample")
+    async def process_leveling_sample(payload: LevelingSamplePayload) -> dict[str, object]:
+        sample = SensorSample(
+            accelerometer=Vector3(**payload.accelerometer.model_dump()),
+            gyroscope=Vector3(**payload.gyroscope.model_dump()),
+            magnetometer=Vector3(**payload.magnetometer.model_dump()),
+        )
+        async with level_filter_lock:
+            orientation = level_filter.update(sample, dt=payload.dt)
+        settings = config_manager.get_leveling_settings()
+        evaluation = evaluate_leveling(orientation, settings)
+        mode_key = "hitched" if payload.mode == "hitched" else "unhitched"
+        return {
+            "mode": payload.mode,
+            "orientation": evaluation["orientation"],
+            "analysis": evaluation[mode_key],
+            "hitched": evaluation["hitched"],
+            "unhitched": evaluation["unhitched"],
+            "support_points": evaluation["support_points"],
+            "settings": settings.to_dict(),
+        }
+
+    @app.get("/api/camera")
+    async def get_camera_config() -> dict[str, object]:
+        options = [{"value": value, "label": label} for value, label in CAMERA_SOURCES.items()]
+        errors = {source: message for source, message in camera_errors.items() if message}
+        current_resolution = config_manager.get_resolution()
+        resolution_options = [
+            {
+                "value": key,
+                "label": f"{preset.width}×{preset.height}",
+            }
+            for key, preset in RESOLUTION_PRESETS.items()
+        ]
+        stream_info = _build_stream_info()
+        return {
+            "selected": config_manager.get_camera(),
+            "active": active_camera_choice,
+            "options": options,
+            "errors": errors,
+            "version": APP_VERSION,
+            "stream": stream_info,
+            "resolution": {
+                "selected": current_resolution.key(),
+                "active": active_resolution.key(),
+                "options": resolution_options,
+            },
+        }
+
+    @app.get("/api/stream")
+    async def get_stream_status() -> dict[str, object | None]:
+        """Return the current streaming capabilities."""
+
+        return _build_stream_info()
+
+    @app.post("/api/stream/settings")
+    async def update_stream_settings(payload: StreamSettingsPayload) -> dict[str, object | None]:
+        nonlocal streamer, webrtc_manager
+        data = payload.model_dump(exclude_none=True)
+        if not data:
+            raise HTTPException(status_code=400, detail="No streaming settings provided")
+        try:
+            settings = config_manager.set_stream_settings(data)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        if streamer is not None:
+            try:
+                streamer.apply_settings(
+                    fps=settings.fps,
+                    jpeg_quality=settings.jpeg_quality,
+                )
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.exception("Failed to apply streaming settings")
+                raise HTTPException(status_code=500, detail="Unable to apply streaming settings") from exc
+        if webrtc_manager is not None:
+            try:
+                webrtc_manager.apply_settings(fps=settings.fps)
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.exception("Failed to apply WebRTC streaming settings")
+                raise HTTPException(status_code=500, detail="Unable to apply streaming settings") from exc
+        response: dict[str, object | None] = settings.to_dict()
+        if streamer is not None:
+            response["active"] = {
+                "fps": streamer.fps,
+                "jpeg_quality": streamer.jpeg_quality,
+            }
+        elif webrtc_manager is not None:
+            response["active"] = {"fps": webrtc_manager.fps, "jpeg_quality": None}
+        else:
+            response["active"] = None
+        return response
+
+    @app.get("/api/battery")
+    async def get_battery_status() -> dict[str, object | None]:
+        reading = battery_monitor.read()
+        return reading.to_dict()
+
+    def _battery_settings_payload() -> dict[str, float | int]:
+        limits = config_manager.get_battery_limits()
+        capacity = config_manager.get_battery_capacity()
+        payload: dict[str, float | int] = limits.to_dict()
+        payload["capacity_mah"] = capacity
+        return payload
+
+    @app.get("/api/battery/limits")
+    async def get_battery_limits() -> dict[str, float | int]:
+        return _battery_settings_payload()
+
+    @app.post("/api/battery/limits")
+    async def update_battery_limits(payload: BatteryLimitsPayload) -> dict[str, float | int]:
+        try:
+            config_manager.set_battery_limits(payload.model_dump())
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return _battery_settings_payload()
+
+    @app.post("/api/battery/capacity")
+    async def update_battery_capacity(payload: BatteryCapacityPayload) -> dict[str, float | int]:
+        try:
+            capacity = config_manager.set_battery_capacity(payload.capacity_mah)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        battery_monitor.capacity_mah = capacity
+        return _battery_settings_payload()
+
+    @app.get("/api/distance")
+    async def get_distance_status() -> dict[str, object | None]:
+        reading = distance_monitor.read()
+        zones = config_manager.get_distance_zones()
+        calibration = config_manager.get_distance_calibration()
+        overlay_enabled = config_manager.get_distance_overlay_enabled()
+        mounting = config_manager.get_distance_mounting()
+        use_projected = config_manager.get_distance_use_projected()
+        return _distance_payload(
+            reading,
+            zones=zones,
+            calibration=calibration,
+            overlay_enabled=overlay_enabled,
+            mounting=mounting,
+            use_projected=use_projected,
+        )
+
+    @app.get("/api/distance/zones")
+    async def get_distance_zones() -> dict[str, object]:
+        zones = config_manager.get_distance_zones()
+        return {"zones": zones.to_dict()}
+
+    @app.post("/api/distance/zones")
+    async def update_distance_zones(payload: DistanceZonesPayload) -> dict[str, object | None]:
+        try:
+            zones = config_manager.set_distance_zones(payload.model_dump())
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        reading = distance_monitor.read()
+        calibration = config_manager.get_distance_calibration()
+        overlay_enabled = config_manager.get_distance_overlay_enabled()
+        mounting = config_manager.get_distance_mounting()
+        use_projected = config_manager.get_distance_use_projected()
+        return _distance_payload(
+            reading,
+            zones=zones,
+            calibration=calibration,
+            overlay_enabled=overlay_enabled,
+            mounting=mounting,
+            use_projected=use_projected,
+        )
+
+    @app.get("/api/distance/calibration")
+    async def get_distance_calibration_settings() -> dict[str, object]:
+        calibration = config_manager.get_distance_calibration()
+        return {"calibration": calibration.to_dict()}
+
+    @app.post("/api/distance/calibration")
+    async def update_distance_calibration(
+        payload: DistanceCalibrationPayload,
+    ) -> dict[str, object | None]:
+        calibration = _build_distance_calibration(payload.offset_m, payload.scale)
+        try:
+            config_manager.set_distance_calibration(calibration)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        distance_monitor.set_calibration(calibration=calibration)
+        zones = config_manager.get_distance_zones()
+        reading = distance_monitor.read()
+        overlay_enabled = config_manager.get_distance_overlay_enabled()
+        mounting = config_manager.get_distance_mounting()
+        use_projected = config_manager.get_distance_use_projected()
+        return _distance_payload(
+            reading,
+            zones=zones,
+            calibration=calibration,
+            overlay_enabled=overlay_enabled,
+            mounting=mounting,
+            use_projected=use_projected,
+        )
+
+    @app.get("/api/distance/geometry")
+    async def get_distance_geometry() -> dict[str, object | None]:
+        mounting = config_manager.get_distance_mounting()
+        return {
+            "geometry": mounting.to_dict(),
+            "projected_distance_m": _project_ground_distance(mounting),
+            "use_projected_distance": config_manager.get_distance_use_projected(),
+        }
+
+    @app.post("/api/distance/geometry")
+    async def update_distance_geometry(
+        payload: DistanceGeometryPayload,
+    ) -> dict[str, object | None]:
+        try:
+            mounting = config_manager.set_distance_mounting(payload.model_dump())
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        zones = config_manager.get_distance_zones()
+        reading = distance_monitor.read()
+        calibration = config_manager.get_distance_calibration()
+        overlay_enabled = config_manager.get_distance_overlay_enabled()
+        use_projected = config_manager.get_distance_use_projected()
+        return _distance_payload(
+            reading,
+            zones=zones,
+            calibration=calibration,
+            overlay_enabled=overlay_enabled,
+            mounting=mounting,
+            use_projected=use_projected,
+        )
+
+    @app.post("/api/distance/calibration/zero")
+    async def zero_distance_calibration() -> dict[str, object | None]:
+        reading = distance_monitor.read()
+        if not (reading.available and reading.raw_distance_m is not None):
+            raise HTTPException(
+                status_code=503,
+                detail="Distance reading unavailable for calibration",
+            )
+        current = distance_monitor.get_calibration()
+        calibration = _build_distance_calibration(
+            -current.scale * reading.raw_distance_m,
+            current.scale,
+        )
+        try:
+            config_manager.set_distance_calibration(calibration)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        distance_monitor.set_calibration(calibration=calibration)
+        zones = config_manager.get_distance_zones()
+        refreshed = distance_monitor.read()
+        overlay_enabled = config_manager.get_distance_overlay_enabled()
+        mounting = config_manager.get_distance_mounting()
+        use_projected = config_manager.get_distance_use_projected()
+        return _distance_payload(
+            refreshed,
+            zones=zones,
+            calibration=calibration,
+            overlay_enabled=overlay_enabled,
+            mounting=mounting,
+            use_projected=use_projected,
+        )
+
+    @app.post("/api/distance/display")
+    async def update_distance_display_mode(
+        payload: DistanceDisplayModePayload,
+    ) -> dict[str, object | None]:
+        try:
+            use_projected = config_manager.set_distance_use_projected(
+                payload.use_projected_distance
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        zones = config_manager.get_distance_zones()
+        calibration = config_manager.get_distance_calibration()
+        overlay_enabled = config_manager.get_distance_overlay_enabled()
+        mounting = config_manager.get_distance_mounting()
+        reading = distance_monitor.read()
+        return _distance_payload(
+            reading,
+            zones=zones,
+            calibration=calibration,
+            overlay_enabled=overlay_enabled,
+            mounting=mounting,
+            use_projected=use_projected,
+        )
+
+    @app.post("/api/distance/overlay")
+    async def update_distance_overlay(payload: DistanceOverlayPayload) -> dict[str, bool]:
+        try:
+            enabled = config_manager.set_distance_overlay_enabled(payload.enabled)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"overlay_enabled": enabled}
+
+    @app.get("/api/overlays")
+    def get_overlay_settings() -> dict[str, bool]:
+        return {
+            "master_enabled": config_manager.get_overlay_master_enabled(),
+            "battery_enabled": config_manager.get_battery_overlay_enabled(),
+            "wifi_enabled": config_manager.get_wifi_overlay_enabled(),
+            "distance_enabled": config_manager.get_distance_overlay_enabled(),
+            "reversing_aids_enabled": config_manager.get_reversing_overlay_enabled(),
+        }
+
+    @app.post("/api/overlays")
+    def update_overlay_settings(payload: OverlaySettingsPayload) -> dict[str, bool]:
+        try:
+            if payload.master_enabled is not None:
+                config_manager.set_overlay_master_enabled(payload.master_enabled)
+            if payload.battery_enabled is not None:
+                config_manager.set_battery_overlay_enabled(payload.battery_enabled)
+            if payload.wifi_enabled is not None:
+                config_manager.set_wifi_overlay_enabled(payload.wifi_enabled)
+            if payload.distance_enabled is not None:
+                config_manager.set_distance_overlay_enabled(payload.distance_enabled)
+            if payload.reversing_aids_enabled is not None:
+                config_manager.set_reversing_overlay_enabled(payload.reversing_aids_enabled)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return get_overlay_settings()
+
+    @app.get("/api/reversing-aids")
+    def get_reversing_aids() -> dict[str, object]:
+        config = config_manager.get_reversing_aids()
+        return config.to_dict()
+
+    @app.post("/api/reversing-aids")
+    def update_reversing_aids(payload: ReversingAidsPayload) -> dict[str, object]:
+        try:
+            config = config_manager.set_reversing_aids(payload.dict(exclude_none=True))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return config.to_dict()
+
+    @app.get("/api/wifi/status")
+    async def get_wifi_status() -> dict[str, object | None]:
+        try:
+            status = await run_in_threadpool(wifi_manager.get_status)
+        except WiFiError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
-        response = StreamingResponse(manager.stream(), media_type=manager.media_type)
+        return status.to_dict()
+
+    @app.get("/api/logs")
+    async def get_system_log_entries(
+        limit: int = 100, category: str | None = None
+    ) -> dict[str, object]:
+        try:
+            entries = await run_in_threadpool(
+                shared_system_log.tail, limit, category=category
+            )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.warning("Unable to load system log: %s", exc)
+            raise HTTPException(status_code=503, detail="Unable to load system log") from exc
+        ordered = list(reversed(entries))
+        return {"entries": [entry.to_dict() for entry in ordered]}
+
+    @app.get("/api/wifi/log")
+    async def get_wifi_log(limit: int = 50) -> dict[str, object]:
+        try:
+            entries = await run_in_threadpool(wifi_manager.get_connection_log, limit)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.warning("Unable to load Wi-Fi log: %s", exc)
+            raise HTTPException(status_code=503, detail="Unable to load Wi-Fi log") from exc
+        return {"entries": entries}
+
+    @app.get("/api/wifi/networks")
+    async def list_wifi_networks() -> dict[str, object]:
+        try:
+            networks = await run_in_threadpool(wifi_manager.scan_networks)
+        except WiFiError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        return {"networks": [network.to_dict() for network in networks]}
+
+    @app.post("/api/wifi/connect")
+    async def connect_wifi(payload: WiFiConnectPayload) -> dict[str, object | None]:
+        try:
+            status = await run_in_threadpool(
+                wifi_manager.connect,
+                payload.ssid,
+                payload.password,
+                development_mode=payload.development_mode,
+                rollback_timeout=payload.rollback_seconds,
+            )
+        except WiFiError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return status.to_dict()
+
+    @app.post("/api/wifi/hotspot")
+    async def configure_wifi_hotspot(payload: WiFiHotspotPayload) -> dict[str, object | None]:
+        if payload.enabled:
+            try:
+                status = await run_in_threadpool(
+                    wifi_manager.enable_hotspot,
+                    payload.ssid,
+                    payload.password,
+                    development_mode=payload.development_mode,
+                    rollback_timeout=payload.rollback_seconds,
+                )
+            except WiFiError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+        else:
+            try:
+                status = await run_in_threadpool(wifi_manager.disable_hotspot)
+            except WiFiError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return status.to_dict()
+
+    @app.post("/api/wifi/forget")
+    async def forget_wifi_network(payload: WiFiForgetPayload) -> dict[str, object | None]:
+        try:
+            status = await run_in_threadpool(
+                wifi_manager.forget_network,
+                payload.identifier,
+            )
+        except WiFiError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return status.to_dict()
+
+    @app.post("/api/camera")
+    async def update_camera(payload: CameraPayload) -> dict[str, object]:
+        nonlocal camera, active_camera_choice, streamer, webrtc_manager
+        nonlocal active_resolution, stream_error, webrtc_error
+        selection = payload.source.strip().lower()
+        if selection not in CAMERA_SOURCES:
+            raise HTTPException(status_code=400, detail="Unknown camera source")
+        try:
+            requested_resolution = config_manager.parse_resolution(payload.resolution)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        current_selection = config_manager.get_camera()
+        current_resolution = config_manager.get_resolution()
+        if (
+            camera is not None
+            and selection == current_selection
+            and requested_resolution == current_resolution
+        ):
+            stream_info = _build_stream_info()
+            await _set_ready_pattern()
+            return {
+                "selected": selection,
+                "active": active_camera_choice,
+                "version": APP_VERSION,
+                "stream": stream_info,
+                "resolution": {
+                    "selected": current_resolution.key(),
+                    "active": active_resolution.key(),
+                },
+            }
+
+        await led_ring.set_pattern("boot")
+        old_selection = current_selection
+        old_resolution = current_resolution
+        old_camera = camera
+        camera = None
+        if old_camera is not None:
+            try:
+                await old_camera.close()
+            except Exception:  # pragma: no cover - defensive logging only
+                logger.exception("Failed to close previous camera instance")
+
+        try:
+            new_camera, active_camera_choice = _build_camera(
+                selection,
+                requested_resolution,
+                fallback_to_synthetic=(selection == "auto"),
+            )
+        except CameraError as exc:
+            # Attempt to restore the previous camera configuration on failure.
+            try:
+                restored_camera, restored_active = _build_camera(
+                    old_selection,
+                    old_resolution,
+                    fallback_to_synthetic=True,
+                )
+            except Exception:  # pragma: no cover - best-effort recovery
+                camera = None
+                active_camera_choice = "unknown"
+            else:
+                camera = restored_camera
+                active_camera_choice = restored_active
+                active_resolution = old_resolution
+                try:
+                    await _refresh_video_services()
+                except Exception:  # pragma: no cover - defensive logging
+                    logger.exception("Failed to restore video services after camera error")
+            await _set_ready_pattern()
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        camera = new_camera
+        active_resolution = requested_resolution
+        config_manager.set_camera(selection)
+        config_manager.set_resolution(requested_resolution)
+        try:
+            await _refresh_video_services()
+        except Exception as exc:
+            await _set_ready_pattern()
+            raise HTTPException(status_code=500, detail="Unable to configure video pipeline") from exc
+        await _set_ready_pattern()
+        stream_info = _build_stream_info()
+        return {
+            "selected": selection,
+            "active": active_camera_choice,
+            "version": APP_VERSION,
+            "stream": stream_info,
+            "resolution": {
+                "selected": requested_resolution.key(),
+                "active": active_resolution.key(),
+            },
+        }
+
+    @app.get("/api/camera/snapshot")
+    async def get_camera_snapshot() -> Response:
+        return await _snapshot_response()
+
+    @app.get("/snapshot.jpg")
+    async def legacy_snapshot() -> Response:
+        return await _snapshot_response()
+
+    @app.get("/stream/mjpeg")
+    async def stream_mjpeg():
+        if streamer is None:
+            raise HTTPException(
+                status_code=503,
+                detail=stream_error or "Streaming service unavailable",
+            )
+        response = StreamingResponse(streamer.stream(), media_type=streamer.media_type)
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
         response.headers["Pragma"] = "no-cache"
         return response
 
-    @app.get("/api/surveillance/status")
-    async def surveillance_status() -> dict[str, object]:
-        return await _serialise_surveillance_status()
-
-    @app.get("/api/surveillance/settings")
-    async def get_surveillance_settings() -> dict[str, object]:
-        settings = config_manager.get_surveillance_settings()
-        presets = [
-            {"name": name, "fps": fps, "jpeg_quality": quality}
-            for name, (fps, quality) in SURVEILLANCE_STANDARD_PRESETS.items()
-        ]
-        return {"settings": settings.serialise(), "presets": presets}
-
-    @app.post("/api/surveillance/settings")
-    async def update_surveillance_settings(
-        payload: SurveillanceSettingsPayload,
-    ) -> dict[str, object]:
-        raw = payload.model_dump(exclude_none=True)
-        if "fps" in raw and "expert_fps" not in raw:
-            raw["expert_fps"] = raw.pop("fps")
-        if "jpeg_quality" in raw and "expert_jpeg_quality" not in raw:
-            raw["expert_jpeg_quality"] = raw.pop("jpeg_quality")
+    @app.post("/stream/webrtc")
+    async def stream_webrtc(payload: WebRTCOfferPayload) -> dict[str, str]:
+        if webrtc_manager is None:
+            detail = webrtc_error or stream_error or "WebRTC streaming unavailable"
+            raise HTTPException(status_code=503, detail=detail)
         try:
-            settings = config_manager.set_surveillance_settings(raw)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        if recording_manager is not None:
-            try:
-                await recording_manager.apply_settings(
-                    fps=settings.resolved_fps,
-                    jpeg_quality=settings.resolved_jpeg_quality,
-                    chunk_duration_seconds=settings.chunk_duration_seconds,
-                    chunk_mp4_enabled=settings.chunk_mp4_enabled,
-                    storage_threshold_percent=settings.storage_threshold_percent,
-                    motion_detection_enabled=settings.motion_detection_enabled,
-                    motion_sensitivity=settings.motion_sensitivity,
-                    motion_frame_decimation=settings.motion_frame_decimation,
-                    motion_post_event_seconds=settings.motion_post_event_seconds,
-                )
-            except Exception as exc:  # pragma: no cover - defensive logging
-                logger.exception("Failed to apply surveillance recording settings")
-                raise HTTPException(
-                    status_code=500,
-                    detail="Unable to apply surveillance settings",
-                ) from exc
-        return {"settings": settings.serialise()}
-
-    @app.post("/api/surveillance/mode")
-    async def set_surveillance_mode(payload: SurveillanceModePayload) -> dict[str, object]:
-        target = StreamMode(payload.mode)
-        if target is current_mode:
-            return await _serialise_surveillance_status()
-        if target is StreamMode.SURVEILLANCE:
-            try:
-                await _activate_surveillance_mode()
-            except RuntimeError as exc:
-                raise HTTPException(status_code=503, detail=str(exc)) from exc
-        else:
-            await _activate_revcam_mode()
-        return await _serialise_surveillance_status()
-
-    @app.post("/api/surveillance/recordings/start")
-    async def start_surveillance_recording() -> dict[str, object]:
-        if current_mode is not StreamMode.SURVEILLANCE:
-            raise HTTPException(status_code=409, detail="Enable surveillance mode first")
-        try:
-            manager = await _ensure_recording_manager()
-        except RuntimeError as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
-        settings = config_manager.get_surveillance_settings()
-        storage_status = _build_storage_status(settings)
-        free_percent = storage_status.get("free_percent")
-        threshold = storage_status.get("threshold_percent")
-        if (
-            isinstance(free_percent, (int, float))
-            and isinstance(threshold, (int, float))
-            and threshold > 0
-            and free_percent <= threshold
-        ):
-            raise HTTPException(status_code=507, detail="Insufficient storage available")
-        try:
-            details = await asyncio.shield(manager.start_recording(motion_mode=False))
-        except asyncio.CancelledError:
-            _persist_surveillance_state(True)
-            raise
-        except RuntimeError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        _persist_surveillance_state(True)
-        return {"recording": details}
-
-    @app.post("/api/surveillance/recordings/start-motion")
-    async def start_motion_surveillance_recording() -> dict[str, object]:
-        if current_mode is not StreamMode.SURVEILLANCE:
-            raise HTTPException(status_code=409, detail="Enable surveillance mode first")
-        try:
-            manager = await _ensure_recording_manager()
-        except RuntimeError as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
-        settings = config_manager.get_surveillance_settings()
-        storage_status = _build_storage_status(settings)
-        free_percent = storage_status.get("free_percent")
-        threshold = storage_status.get("threshold_percent")
-        if (
-            isinstance(free_percent, (int, float))
-            and isinstance(threshold, (int, float))
-            and threshold > 0
-            and free_percent <= threshold
-        ):
-            raise HTTPException(status_code=507, detail="Insufficient storage available")
-        try:
-            details = await asyncio.shield(manager.start_recording(motion_mode=True))
-        except asyncio.CancelledError:
-            _persist_surveillance_state(True)
-            raise
-        except RuntimeError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        _persist_surveillance_state(True)
-        return {"recording": details}
-
-    @app.post("/api/surveillance/recordings/stop")
-    async def stop_surveillance_recording() -> dict[str, object]:
-        if current_mode is not StreamMode.SURVEILLANCE:
-            raise HTTPException(status_code=409, detail="Enable surveillance mode first")
-        if recording_manager is None:
-            raise HTTPException(status_code=409, detail="No recording in progress")
-        try:
-            details = await asyncio.shield(recording_manager.stop_recording())
-        except asyncio.CancelledError:
-            _persist_surveillance_state(False)
-            raise
-        except RuntimeError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        _persist_surveillance_state(False)
-        return {"recording": details}
-
-    @app.get("/api/surveillance/recordings")
-    async def list_surveillance_recordings() -> dict[str, object]:
-        status = await _serialise_surveillance_status()
-        return {"recordings": status.get("recordings", [])}
-
-    @app.get("/api/surveillance/recordings/{name}")
-    async def fetch_surveillance_recording(
-        name: str, include_frames: bool = Query(False)
-    ) -> dict[str, object]:
-        if recording_manager is None:
-            try:
-                return await asyncio.to_thread(
-                    load_recording_payload,
-                    RECORDINGS_DIR,
-                    name,
-                    include_frames=include_frames,
-                )
-            except FileNotFoundError as exc:
-                raise HTTPException(status_code=404, detail="Recording not found") from exc
-            except Exception as exc:  # pragma: no cover - defensive logging
-                logger.exception("Failed to load surveillance recording %s", name)
-                raise HTTPException(
-                    status_code=500, detail="Unable to load recording"
-                ) from exc
-        try:
-            return await recording_manager.get_recording(
-                name, include_frames=include_frames
-            )
-        except FileNotFoundError as exc:
-            raise HTTPException(status_code=404, detail="Recording not found") from exc
-
-    @app.get("/api/surveillance/recordings/{name}/chunks/{chunk_index}")
-    async def fetch_surveillance_recording_chunk(name: str, chunk_index: int) -> dict[str, object]:
-        if chunk_index < 1:
-            raise HTTPException(status_code=404, detail="Recording chunk not found")
-        try:
-            if recording_manager is None:
-                return await asyncio.to_thread(
-                    load_recording_chunk, RECORDINGS_DIR, name, chunk_index
-                )
-            return await recording_manager.get_recording_chunk(name, chunk_index)
-        except FileNotFoundError as exc:
-            raise HTTPException(status_code=404, detail="Recording chunk not found") from exc
+            description = await webrtc_manager.create_session(payload.sdp, payload.type)
         except Exception as exc:  # pragma: no cover - defensive logging
-            logger.exception(
-                "Failed to load surveillance chunk %s for %s", chunk_index, name
-            )
-            raise HTTPException(
-                status_code=500, detail="Unable to load recording chunk"
-            ) from exc
-
-    @app.get("/api/surveillance/recordings/{name}/download")
-    async def download_surveillance_recording(name: str) -> StreamingResponse:
-        archive = None
-        try:
-            safe_name, archive = await asyncio.to_thread(
-                build_recording_video, RECORDINGS_DIR, name
-            )
-        except FileNotFoundError as exc:
-            raise HTTPException(status_code=404, detail="Recording not found") from exc
-        except ValueError as exc:
-            logger.warning(
-                "Recording %s is not ready for download: %s", name, exc, exc_info=True
-            )
-            raise HTTPException(
-                status_code=409, detail="Recording is not ready for download"
-            ) from exc
-        except asyncio.CancelledError:
-            if archive is not None:
-                archive.close()
-            raise
-        except Exception as exc:  # pragma: no cover - defensive logging
-            logger.exception("Failed to prepare surveillance recording %s", name)
-            raise HTTPException(status_code=500, detail="Unable to download recording") from exc
-
-        filename = f"{safe_name}.mp4".replace("\"", "")
-        disposition = (
-            f'attachment; filename="{filename}"; filename*=UTF-8\'\'{urlquote(filename)}'
-        )
-
-        def _iterator():
-            try:
-                while True:
-                    chunk = archive.read(1024 * 1024)
-                    if not chunk:
-                        break
-                    yield chunk
-            finally:
-                archive.close()
-
-        return StreamingResponse(
-            _iterator(), media_type="video/mp4", headers={"Content-Disposition": disposition}
-        )
-
-    @app.delete("/api/surveillance/recordings/{name}")
-    async def delete_surveillance_recording(name: str) -> dict[str, object]:
-        try:
-            if recording_manager is not None:
-                await recording_manager.remove_recording(name)
-            else:
-                await asyncio.to_thread(remove_recording_files, RECORDINGS_DIR, name)
-        except FileNotFoundError:
-            raise HTTPException(status_code=404, detail="Recording not found")
-        except Exception:  # pragma: no cover - defensive logging
-            logger.exception("Failed to remove surveillance recording %s", name)
-            raise HTTPException(status_code=500, detail="Unable to delete recording")
-        return {"deleted": name}
+            logger.exception("Failed to negotiate WebRTC session")
+            raise HTTPException(status_code=500, detail="Failed to establish WebRTC session") from exc
+        return {"sdp": description.sdp, "type": description.type}
 
     @app.post("/api/log/webrtc-error")
     async def log_webrtc_error(payload: WebRTCErrorReportPayload) -> dict[str, str]:

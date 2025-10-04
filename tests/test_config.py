@@ -12,7 +12,6 @@ from rev_cam.config import (
     ReversingAidPoint,
     ReversingAidsConfig,
     StreamSettings,
-    SurveillanceSettings,
     generate_reversing_segments,
     DEFAULT_DISTANCE_OVERLAY_ENABLED,
     DEFAULT_WIFI_OVERLAY_ENABLED,
@@ -22,8 +21,6 @@ from rev_cam.config import (
     DEFAULT_DISTANCE_MOUNTING,
     DEFAULT_DISTANCE_USE_PROJECTED,
     DEFAULT_LEVELING_SETTINGS,
-    DEFAULT_SURVEILLANCE_SETTINGS,
-    SURVEILLANCE_STANDARD_PRESETS,
 )
 from rev_cam.distance import DistanceCalibration
 from rev_cam.trailer_leveling import LevelingSettings
@@ -204,99 +201,6 @@ def test_stream_settings_validation(tmp_path: Path) -> None:
         manager.set_stream_settings({"fps": 0})
     with pytest.raises(ValueError):
         manager.set_stream_settings({"jpeg_quality": 120})
-
-
-def test_default_surveillance_settings(tmp_path: Path) -> None:
-    manager = ConfigManager(tmp_path / "config.json")
-    settings = manager.get_surveillance_settings()
-    assert isinstance(settings, SurveillanceSettings)
-    assert settings.profile == "standard"
-    assert settings.preset == DEFAULT_SURVEILLANCE_SETTINGS.preset
-    preset_values = SURVEILLANCE_STANDARD_PRESETS[settings.preset]
-    assert settings.resolved_fps == preset_values[0]
-    assert settings.resolved_jpeg_quality == preset_values[1]
-    assert settings.chunk_duration_seconds is None
-    assert settings.overlays_enabled is True
-    assert settings.remember_recording_state is False
-    assert settings.motion_detection_enabled is False
-    assert settings.motion_sensitivity == 50
-    assert settings.motion_frame_decimation == 1
-    assert settings.motion_post_event_seconds == 2.0
-    assert settings.auto_purge_days is None
-    assert settings.storage_threshold_percent == 10.0
-
-
-def test_surveillance_settings_persistence(tmp_path: Path) -> None:
-    config_file = tmp_path / "config.json"
-    manager = ConfigManager(config_file)
-    updated = manager.set_surveillance_settings(
-        {
-            "profile": "expert",
-            "expert_fps": 12,
-            "expert_jpeg_quality": 92,
-            "chunk_duration_seconds": 600,
-            "overlays_enabled": False,
-            "remember_recording_state": True,
-            "motion_detection_enabled": True,
-            "motion_sensitivity": 72,
-            "motion_frame_decimation": 3,
-            "motion_post_event_seconds": 0.75,
-            "auto_purge_days": 5,
-            "storage_threshold_percent": 15,
-        }
-    )
-    assert isinstance(updated, SurveillanceSettings)
-    assert updated.profile == "expert"
-    assert updated.expert_fps == 12
-    assert updated.expert_jpeg_quality == 92
-    assert updated.chunk_duration_seconds == 600
-    assert updated.overlays_enabled is False
-    assert updated.remember_recording_state is True
-    assert updated.motion_detection_enabled is True
-    assert updated.motion_sensitivity == 72
-    assert updated.motion_frame_decimation == 3
-    assert updated.motion_post_event_seconds == 0.75
-    assert updated.auto_purge_days == 5
-    assert updated.storage_threshold_percent == 15
-    reloaded = ConfigManager(config_file)
-    reloaded_settings = reloaded.get_surveillance_settings()
-    assert reloaded_settings.profile == "expert"
-    assert reloaded_settings.expert_fps == 12
-    assert reloaded_settings.expert_jpeg_quality == 92
-    assert reloaded_settings.chunk_duration_seconds == 600
-    assert reloaded_settings.overlays_enabled is False
-    assert reloaded_settings.remember_recording_state is True
-    assert reloaded_settings.motion_detection_enabled is True
-    assert reloaded_settings.motion_sensitivity == 72
-    assert reloaded_settings.motion_frame_decimation == 3
-    assert reloaded_settings.motion_post_event_seconds == 0.75
-    assert reloaded_settings.auto_purge_days == 5
-    assert reloaded_settings.storage_threshold_percent == 15
-
-
-def test_surveillance_settings_validation(tmp_path: Path) -> None:
-    manager = ConfigManager(tmp_path / "config.json")
-    with pytest.raises(ValueError):
-        manager.set_surveillance_settings({"profile": "invalid"})
-    with pytest.raises(ValueError):
-        manager.set_surveillance_settings({"preset": "unknown"})
-    with pytest.raises(ValueError):
-        manager.set_surveillance_settings({"expert_fps": "fast"})
-    with pytest.raises(ValueError):
-        manager.set_surveillance_settings({"expert_jpeg_quality": "sharp"})
-
-
-def test_surveillance_state_persistence(tmp_path: Path) -> None:
-    config_file = tmp_path / "config.json"
-    manager = ConfigManager(config_file)
-    state = manager.get_surveillance_state()
-    assert state.mode == "revcam"
-    assert state.recording is False
-    manager.update_surveillance_state("surveillance", True)
-    reloaded = ConfigManager(config_file)
-    persisted = reloaded.get_surveillance_state()
-    assert persisted.mode == "surveillance"
-    assert persisted.recording is True
 
 
 def test_default_reversing_aids(tmp_path: Path) -> None:
