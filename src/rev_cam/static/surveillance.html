@@ -481,6 +481,7 @@
       let currentMode = "surveillance";
       let isRecording = false;
       let recordingMode = "idle";
+      let manualRecordingPinned = false;
       let previewUrl = null;
       let recordingTimerStartMs = null;
       let recordingTimerInterval = null;
@@ -748,11 +749,13 @@
           "motion-alert",
           "recording-active",
         );
+        if (manualRecordingActive) {
+          return;
+        }
         if (!motionSnapshot || motionSnapshot.session_active !== true) {
           return;
         }
-        const isMotionSession =
-          recordingMode === "motion" || motionSnapshot.session_override === true;
+        const isMotionSession = recordingMode === "motion";
         if (!isMotionSession) {
           return;
         }
@@ -943,6 +946,16 @@
           if (nextRecordingMode === "idle" && payload && payload.recording) {
             nextRecordingMode = "continuous";
           }
+          const serverRecording = Boolean(payload && payload.recording);
+          if (manualRecordingPinned) {
+            if (!serverRecording || nextRecordingMode === "idle") {
+              manualRecordingPinned = false;
+            } else {
+              nextRecordingMode = "continuous";
+            }
+          } else if (nextRecordingMode === "continuous" && serverRecording) {
+            manualRecordingPinned = true;
+          }
           recordingMode = nextRecordingMode;
           isRecording = recordingMode !== "idle";
           updateControlButtons();
@@ -1025,6 +1038,7 @@
             if (!response.ok) {
               throw new Error(`Recording request failed with ${response.status}`);
             }
+            manualRecordingPinned = !stopMode;
           } catch (error) {
             console.error("Recording control error", error);
             setStatus("Recording request failed", "error");
@@ -1062,6 +1076,9 @@
             });
             if (!response.ok) {
               throw new Error(`Recording request failed with ${response.status}`);
+            }
+            if (!stopMode) {
+              manualRecordingPinned = false;
             }
           } catch (error) {
             console.error("Motion recording control error", error);
