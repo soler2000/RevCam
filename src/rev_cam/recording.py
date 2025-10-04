@@ -787,8 +787,10 @@ class RecordingManager:
         task = self._finalise_task
         if task is not None:
             try:
-                return await task
-            except asyncio.CancelledError:  # pragma: no cover - propagate cancellation
+                return await asyncio.shield(task)
+            except asyncio.CancelledError:  # pragma: no cover - differentiate cancellation sources
+                if task.cancelled():
+                    return None
                 raise
             except Exception:  # pragma: no cover - defensive guard
                 return None
@@ -1312,6 +1314,12 @@ class RecordingManager:
         processing_error = False
         try:
             result = task.result()
+        except asyncio.CancelledError:
+            metadata = {
+                "name": recording_name,
+                "processing_error": "cancelled",
+            }
+            processing_error = True
         except Exception as exc:  # pragma: no cover - defensive guard
             logger.exception("Surveillance finalise task failed for %s", recording_name)
             message = str(exc).strip() or "finalise_failed"

@@ -475,3 +475,47 @@ async def test_recording_manager_streams_chunk_writes(
 
     chunk_calls = [name for name in observed if "chunk" in name]
     assert not chunk_calls
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("anyio_backend", ["asyncio"], indirect=True)
+async def test_recording_finalise_cancellation(tmp_path: Path, anyio_backend) -> None:
+    camera = _StaticCamera()
+    pipeline = _pipeline()
+    manager = RecordingManager(
+        camera=camera,
+        pipeline=pipeline,
+        directory=tmp_path,
+        fps=4,
+        chunk_duration_seconds=1,
+    )
+
+    async def _noop(self):
+        return None
+
+    manager._ensure_producer_running = types.MethodType(_noop, manager)
+
+    await manager.start_recording()
+    frame = np.zeros((32, 32, 3), dtype=np.uint8)
+    for index in range(5):
+        await manager._record_frame(f"frame{index}".encode(), index * 0.25, frame)
+
+    placeholder = await manager.stop_recording()
+    assert placeholder["processing"] is True
+
+    finalise_task = manager._finalise_task
+    assert finalise_task is not None
+    finalise_task.cancel()
+
+    await asyncio.sleep(0)
+
+    metadata = await manager.wait_for_processing()
+    assert metadata is None
+
+    await asyncio.sleep(0)
+
+    processing = await manager.get_processing_metadata()
+    assert processing is not None
+    assert processing.get("processing_error") == "cancelled"
+
+    await manager.aclose()
