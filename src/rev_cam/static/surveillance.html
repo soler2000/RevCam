@@ -493,6 +493,7 @@
       const MANUAL_CONFIRMATION_GRACE_MS = 5000;
       let statusRefreshHandle = null;
       let statusRequestSequence = 0;
+      let latestRequestedStatusSequence = 0;
       let latestAppliedStatusSequence = 0;
       let pageVisible = true;
 
@@ -1011,6 +1012,7 @@
       async function loadStatus(options = {}) {
         const { showLoading = false, suppressError = false } = options;
         const requestSequence = ++statusRequestSequence;
+        latestRequestedStatusSequence = requestSequence;
         if (showLoading) {
           setStatus("Loading surveillance status…", "busy");
         }
@@ -1019,6 +1021,10 @@
           const response = await fetch("/api/surveillance/status", { cache: "no-store" });
           if (!response.ok) {
             throw new Error(`Status request failed with ${response.status}`);
+          }
+          if (requestSequence < latestRequestedStatusSequence) {
+            scheduleStatusRefresh();
+            return;
           }
           const payload = await response.json();
           if (requestSequence < latestAppliedStatusSequence) {
