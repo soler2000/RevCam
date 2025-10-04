@@ -163,7 +163,8 @@
         border-color: rgba(255, 214, 10, 0.5);
         box-shadow: 0 20px 40px rgba(255, 214, 10, 0.16);
       }
-      .preview-card.motion-alert {
+      .preview-card.motion-alert,
+      .preview-card.recording-active {
         border-color: rgba(255, 69, 58, 0.6);
         box-shadow: 0 22px 46px rgba(255, 69, 58, 0.25);
       }
@@ -242,7 +243,8 @@
         color: var(--warning);
         box-shadow: 0 0 0 1px rgba(255, 214, 10, 0.35) inset, 0 10px 26px rgba(255, 214, 10, 0.25);
       }
-      button.action.motion-alert {
+      button.action.motion-alert,
+      button.action.recording-active {
         background: linear-gradient(135deg, rgba(255, 69, 58, 0.9), rgba(255, 105, 97, 0.95));
         color: #fff;
         box-shadow: 0 0 0 1px rgba(255, 69, 58, 0.45) inset, 0 12px 28px rgba(255, 69, 58, 0.45);
@@ -479,10 +481,18 @@
       let currentMode = "surveillance";
       let isRecording = false;
       let recordingMode = "idle";
+      let manualRecordingPinned = false;
       let previewUrl = null;
       let recordingTimerStartMs = null;
       let recordingTimerInterval = null;
       let recordingTimerSource = null;
+      let lastMotionSnapshot = null;
+      const STATUS_REFRESH_ACTIVE_MS = 2000;
+      const STATUS_REFRESH_IDLE_MS = 5000;
+      let statusRefreshHandle = null;
+      let statusRequestSequence = 0;
+      let latestAppliedStatusSequence = 0;
+      let pageVisible = true;
 
       function setStatus(message, tone = "info") {
         if (!statusMessage) {
@@ -490,6 +500,30 @@
         }
         statusMessage.textContent = message;
         statusMessage.dataset.tone = tone;
+      }
+
+      function clearScheduledStatusRefresh() {
+        if (statusRefreshHandle !== null) {
+          window.clearTimeout(statusRefreshHandle);
+          statusRefreshHandle = null;
+        }
+      }
+
+      function scheduleStatusRefresh() {
+        if (!pageVisible) {
+          return;
+        }
+        const interval =
+          isRecording && recordingMode === "motion"
+            ? STATUS_REFRESH_ACTIVE_MS
+            : STATUS_REFRESH_IDLE_MS;
+        clearScheduledStatusRefresh();
+        statusRefreshHandle = window.setTimeout(() => {
+          statusRefreshHandle = null;
+          loadStatus({ showLoading: false, suppressError: true }).catch((error) => {
+            console.error("Scheduled surveillance status refresh failed", error);
+          });
+        }, interval);
       }
 
       function renderRecordingTimer() {
@@ -608,7 +642,7 @@
           }
           currentMode = desired;
           setStatus("Surveillance mode ready", "busy");
-          await loadStatus();
+          await loadStatus({ showLoading: true });
         } catch (error) {
           console.error("Viewing mode toggle error", error);
           updateModeButtons(currentMode);
@@ -700,33 +734,43 @@
       }
 
       function updateMotionIndicators(motionSnapshot) {
+        const manualRecordingActive = isRecording && recordingMode === "continuous";
+        if (recordButton) {
+          recordButton.classList.toggle("recording-active", manualRecordingActive);
+        }
+        if (previewCard) {
+          previewCard.classList.remove("motion-monitoring", "motion-alert");
+          previewCard.classList.toggle("recording-active", manualRecordingActive);
+        }
         if (!motionRecordButton) {
           return;
         }
-        motionRecordButton.classList.remove("motion-monitoring", "motion-alert");
-        if (previewCard) {
-          previewCard.classList.remove("motion-monitoring", "motion-alert");
-        }
-        if (!motionSnapshot || motionSnapshot.session_active !== true) {
+        motionRecordButton.classList.remove(
+          "motion-monitoring",
+          "motion-alert",
+          "recording-active",
+        );
+        if (manualRecordingActive) {
           return;
         }
-        const sessionState = motionSnapshot.session_state;
-        const sessionRecording = motionSnapshot.session_recording === true;
-        const eventActive = motionSnapshot.event_active === true;
-        const isMotionSession =
-          recordingMode === "motion" || motionSnapshot.session_override === true;
+        const isMotionSession = recordingMode === "motion";
         if (!isMotionSession) {
           return;
         }
-        if (sessionRecording || sessionState === "recording" || eventActive) {
-          motionRecordButton.classList.add("motion-alert");
+        const sessionState = motionSnapshot ? motionSnapshot.session_state : null;
+        const sessionRecording = motionSnapshot && motionSnapshot.session_recording === true;
+        const eventActive = motionSnapshot && motionSnapshot.event_active === true;
+        const motionRecording = sessionRecording || sessionState === "recording" || eventActive;
+        if (motionRecording) {
+          motionRecordButton.classList.add("motion-alert", "recording-active");
           if (previewCard) {
-            previewCard.classList.add("motion-alert");
+            previewCard.classList.add("motion-alert", "recording-active");
           }
         } else {
           motionRecordButton.classList.add("motion-monitoring");
-          if (previewCard) {
+          if (previewCard && !manualRecordingActive) {
             previewCard.classList.add("motion-monitoring");
+            previewCard.classList.remove("recording-active");
           }
         }
       }
@@ -755,7 +799,7 @@
           if (!response.ok) {
             throw new Error(`Delete failed with ${response.status}`);
           }
-          await loadStatus();
+          await loadStatus({ showLoading: true });
           setStatus(`Deleted recording ${name}.`, "info");
         } catch (error) {
           console.error("Failed to delete recording", error);
@@ -864,14 +908,24 @@
         });
       }
 
-      async function loadStatus() {
-        try {
+      async function loadStatus(options = {}) {
+        const { showLoading = false, suppressError = false } = options;
+        const requestSequence = ++statusRequestSequence;
+        if (showLoading) {
           setStatus("Loading surveillance status…", "busy");
+        }
+        clearScheduledStatusRefresh();
+        try {
           const response = await fetch("/api/surveillance/status", { cache: "no-store" });
           if (!response.ok) {
             throw new Error(`Status request failed with ${response.status}`);
           }
           const payload = await response.json();
+          if (requestSequence < latestAppliedStatusSequence) {
+            scheduleStatusRefresh();
+            return;
+          }
+          latestAppliedStatusSequence = requestSequence;
           if (payload && typeof payload.mode === "string") {
             currentMode = payload.mode === "surveillance" ? "surveillance" : "revcam";
             updateModeButtons(currentMode);
@@ -890,6 +944,16 @@
           if (nextRecordingMode === "idle" && payload && payload.recording) {
             nextRecordingMode = "continuous";
           }
+          const serverRecording = Boolean(payload && payload.recording);
+          if (manualRecordingPinned) {
+            if (!serverRecording || nextRecordingMode === "idle") {
+              manualRecordingPinned = false;
+            } else {
+              nextRecordingMode = "continuous";
+            }
+          } else if (nextRecordingMode === "continuous" && serverRecording) {
+            manualRecordingPinned = true;
+          }
           recordingMode = nextRecordingMode;
           isRecording = recordingMode !== "idle";
           updateControlButtons();
@@ -898,6 +962,7 @@
           const storage = payload ? payload.storage : null;
           updateStorage(storage);
           const motionSnapshot = payload ? payload.motion : null;
+          lastMotionSnapshot = motionSnapshot;
           updateMotionIndicators(motionSnapshot);
           const startedAtIso =
             payload && typeof payload.recording_started_at === "string"
@@ -938,9 +1003,19 @@
           ) {
             setStatus("Low storage — recordings will pause automatically", "error");
           }
+          scheduleStatusRefresh();
         } catch (error) {
+          if (error && error.name === "AbortError") {
+            return;
+          }
           console.error("Failed to load surveillance status", error);
-          setStatus("Unable to load surveillance status", "error");
+          if (requestSequence >= latestAppliedStatusSequence) {
+            setStatus("Unable to load surveillance status", "error");
+            scheduleStatusRefresh();
+          }
+          if (!suppressError) {
+            throw error;
+          }
         }
       }
 
@@ -962,14 +1037,33 @@
             if (!response.ok) {
               throw new Error(`Recording request failed with ${response.status}`);
             }
-            await loadStatus();
+            if (stopMode) {
+              manualRecordingPinned = false;
+              recordingMode = "idle";
+              isRecording = false;
+              stopRecordingTimer();
+            } else {
+              manualRecordingPinned = true;
+              recordingMode = "continuous";
+              isRecording = true;
+              startRecordingTimer(new Date().toISOString());
+            }
+            updateControlButtons();
+            updateMotionIndicators(lastMotionSnapshot);
           } catch (error) {
             console.error("Recording control error", error);
             setStatus("Recording request failed", "error");
-          } finally {
             buttons.forEach((button) => {
               button.disabled = false;
             });
+            return;
+          }
+          try {
+            await loadStatus({ showLoading: true });
+          } catch (error) {
+            console.error("Recording status refresh error", error);
+          } finally {
+            updateControlButtons();
           }
         });
       }
@@ -992,21 +1086,30 @@
             if (!response.ok) {
               throw new Error(`Recording request failed with ${response.status}`);
             }
-            await loadStatus();
+            if (!stopMode) {
+              manualRecordingPinned = false;
+            }
           } catch (error) {
             console.error("Motion recording control error", error);
             setStatus("Recording request failed", "error");
-          } finally {
             buttons.forEach((button) => {
               button.disabled = false;
             });
+            return;
+          }
+          try {
+            await loadStatus({ showLoading: true });
+          } catch (error) {
+            console.error("Motion recording status refresh error", error);
+          } finally {
+            updateControlButtons();
           }
         });
       }
 
       if (refreshButton) {
         refreshButton.addEventListener("click", () => {
-          loadStatus();
+          loadStatus({ showLoading: true, suppressError: true });
         });
       }
 
@@ -1020,10 +1123,36 @@
       });
 
       window.addEventListener("pagehide", () => {
+        pageVisible = false;
+        clearScheduledStatusRefresh();
         stopRecordingTimer();
       });
 
-      loadStatus();
+      window.addEventListener("pageshow", () => {
+        const wasHidden = !pageVisible;
+        pageVisible = true;
+        if (wasHidden) {
+          loadStatus({ showLoading: false, suppressError: true }).catch((error) => {
+            console.error("Surveillance status refresh on pageshow failed", error);
+          });
+        }
+      });
+
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "hidden") {
+          pageVisible = false;
+          clearScheduledStatusRefresh();
+        } else if (document.visibilityState === "visible") {
+          pageVisible = true;
+          loadStatus({ showLoading: false, suppressError: true }).catch((error) => {
+            console.error("Surveillance status refresh on visibility change failed", error);
+          });
+        }
+      });
+
+      loadStatus({ showLoading: true }).catch((error) => {
+        console.error("Initial surveillance status load failed", error);
+      });
     </script>
   </body>
 </html>
