@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import SpooledTemporaryFile
-from typing import AsyncGenerator, Awaitable, Callable, Iterable, Mapping
+from typing import AsyncGenerator, Awaitable, Callable, Iterable, Mapping, Sequence
 
 import av
 import simplejpeg
@@ -89,6 +89,82 @@ def _dump_chunk_frames_to_path(
     else:
         with path.open("w", encoding="utf-8") as handle:
             _write_frames(handle)
+    return path.stat().st_size
+
+
+def _dump_chunk_video_to_path(
+    path: Path, frames: Sequence[Mapping[str, object]], fps: float
+) -> int:
+    frame_rate = 1.0 if fps <= 0 else float(fps)
+    frame_rate_fraction = Fraction(str(frame_rate)).limit_denominator(1000)
+    time_base = Fraction(frame_rate_fraction.denominator, frame_rate_fraction.numerator)
+
+    first_array = None
+    first_index = -1
+    for index, frame in enumerate(frames):
+        jpeg_data = frame.get("jpeg") if isinstance(frame, Mapping) else None
+        if not isinstance(jpeg_data, str) or not jpeg_data:
+            continue
+        try:
+            decoded = base64.b64decode(jpeg_data)
+            array = simplejpeg.decode_jpeg(decoded, colorspace="BGR")
+        except Exception:  # pragma: no cover - skip invalid frames
+            continue
+        if array.ndim != 3 or array.shape[2] != 3:
+            continue
+        first_array = array
+        first_index = index
+        break
+
+    if first_array is None:
+        if path.exists():
+            try:
+                path.unlink()
+            except OSError:  # pragma: no cover - best effort cleanup
+                pass
+        return 0
+
+    height, width = first_array.shape[:2]
+    with av.open(str(path), mode="w", format="mp4") as container:
+        stream = container.add_stream("h264", rate=frame_rate_fraction)
+        stream.width = int(width)
+        stream.height = int(height)
+        stream.pix_fmt = "yuv420p"
+        stream.time_base = time_base
+        stream.options = {"movflags": "+faststart"}
+
+        def _encode(array_data: "_np.ndarray", position: int) -> None:
+            frame_obj = av.VideoFrame.from_ndarray(array_data, format="bgr24")
+            frame_obj.pts = position
+            frame_obj.time_base = time_base
+            for packet in stream.encode(frame_obj):
+                container.mux(packet)
+
+        position = 0
+        _encode(first_array, position)
+        position += 1
+
+        for index, frame in enumerate(frames):
+            if index <= first_index:
+                continue
+            jpeg_data = frame.get("jpeg") if isinstance(frame, Mapping) else None
+            if not isinstance(jpeg_data, str) or not jpeg_data:
+                continue
+            try:
+                decoded = base64.b64decode(jpeg_data)
+                array = simplejpeg.decode_jpeg(decoded, colorspace="BGR")
+            except Exception:  # pragma: no cover - skip invalid frames
+                continue
+            if array.ndim != 3 or array.shape[2] != 3:
+                continue
+            if array.shape[0] != height or array.shape[1] != width:
+                continue
+            _encode(array, position)
+            position += 1
+
+        for packet in stream.encode():
+            container.mux(packet)
+
     return path.stat().st_size
 
 
@@ -717,6 +793,7 @@ class RecordingManager:
     max_frames: int | None = None
     chunk_duration_seconds: int | None = None
     chunk_data_limit_bytes: int | None = 32 * 1024 * 1024
+    chunk_mp4_enabled: bool = False
     storage_threshold_percent: float = 10.0
     motion_detection_enabled: bool = False
     motion_sensitivity: int = 50
@@ -731,7 +808,9 @@ class RecordingManager:
     _frame_interval: float = field(init=False)
     _recording_active: bool = field(init=False, default=False)
     _active_chunk_frames: list[dict[str, object]] = field(init=False, default_factory=list)
-    _chunk_write_tasks: list[tuple[dict[str, object], asyncio.Task[int]]] = field(
+    _chunk_write_tasks: list[
+        tuple[dict[str, object], asyncio.Task[int], asyncio.Task[int] | None]
+    ] = field(
         init=False, default_factory=list
     )
     _chunk_index: int = field(init=False, default=0)
@@ -803,6 +882,7 @@ class RecordingManager:
             0 if self.chunk_data_limit_bytes is None else int(self.chunk_data_limit_bytes)
         )
         self._chunk_frame_limit = self._calculate_chunk_frame_limit()
+        self.chunk_mp4_enabled = bool(self.chunk_mp4_enabled)
 
     @property
     def media_type(self) -> str:
@@ -982,7 +1062,9 @@ class RecordingManager:
         *,
         name: str,
         base_metadata: dict[str, object],
-        chunk_tasks: list[tuple[dict[str, object], asyncio.Task[int]]],
+        chunk_tasks: list[
+            tuple[dict[str, object], asyncio.Task[int], asyncio.Task[int] | None]
+        ],
         invoke_callback: bool = True,
     ) -> dict[str, object]:
         metadata = dict(base_metadata)
@@ -990,8 +1072,9 @@ class RecordingManager:
         total_size = 0
         processing_error: str | None = None
 
-        for entry, task in chunk_tasks:
+        for entry, task, video_task in chunk_tasks:
             size = 0
+            video_size: int | None = None
             try:
                 size = await task
             except asyncio.CancelledError:  # pragma: no cover - propagate cancellation
@@ -1001,10 +1084,26 @@ class RecordingManager:
                     "Failed to flush surveillance chunk %s for %s", entry.get("file"), name
                 )
                 processing_error = str(exc)
+            if video_task is not None:
+                try:
+                    video_size = await video_task
+                except asyncio.CancelledError:  # pragma: no cover - propagate cancellation
+                    raise
+                except Exception as exc:  # pragma: no cover - defensive logging
+                    logger.exception(
+                        "Failed to render surveillance chunk video %s for %s",
+                        entry.get("video_file"),
+                        name,
+                    )
+                    processing_error = str(exc)
             frame_entry = dict(entry)
             frame_entry["size_bytes"] = int(size)
+            if video_size is not None:
+                frame_entry["video_size_bytes"] = int(video_size)
             chunk_entries.append(frame_entry)
             total_size += int(size)
+            if video_size is not None:
+                total_size += int(video_size)
 
         if not chunk_entries:
             filename = f"{name}.chunk001.json.gz"
@@ -1080,6 +1179,7 @@ class RecordingManager:
         fps: int | None = None,
         jpeg_quality: int | None = None,
         chunk_duration_seconds: int | None = None,
+        chunk_mp4_enabled: bool | None = None,
         storage_threshold_percent: float | int | None = None,
         motion_detection_enabled: bool | None = None,
         motion_sensitivity: int | float | None = None,
@@ -1106,6 +1206,8 @@ class RecordingManager:
                 if new_duration != self.chunk_duration_seconds:
                     self.chunk_duration_seconds = new_duration
                     chunk_limit_needs_update = True
+            if chunk_mp4_enabled is not None:
+                self.chunk_mp4_enabled = bool(chunk_mp4_enabled)
             if storage_threshold_percent is not None:
                 self.storage_threshold_percent = self._normalise_storage_threshold(storage_threshold_percent)
             detector_updates: dict[str, object] = {}
@@ -1172,7 +1274,9 @@ class RecordingManager:
                 ):
                     flush_request = self._pop_active_chunk_locked()
 
-        persisted_chunk: tuple[dict[str, object], asyncio.Task[int]] | None = None
+        persisted_chunk: tuple[
+            dict[str, object], asyncio.Task[int], asyncio.Task[int] | None
+        ] | None = None
         if flush_request is not None:
             persisted_chunk = await self._persist_chunk(*flush_request)
         if finalise_context is not None:
@@ -1416,7 +1520,9 @@ class RecordingManager:
             storage_status = self._compute_storage_status()
         if storage_limit_reached:
             self._schedule_auto_stop("storage_low")
-        persisted_chunk: tuple[dict[str, object], asyncio.Task[int]] | None = None
+        persisted_chunk: tuple[
+            dict[str, object], asyncio.Task[int], asyncio.Task[int] | None
+        ] | None = None
         if flush_request is not None:
             persisted_chunk = await self._persist_chunk(*flush_request)
         if finalise_context is not None:
@@ -1706,6 +1812,9 @@ class RecordingManager:
     def _chunk_filename(self, name: str, index: int) -> str:
         return f"{name}.chunk{index:03d}.json.gz"
 
+    def _chunk_video_filename(self, name: str, index: int) -> str:
+        return f"{name}.chunk{index:03d}.mp4"
+
     def _pop_active_chunk_locked(
         self,
     ) -> tuple[str, int, list[dict[str, object]]] | None:
@@ -1724,8 +1833,11 @@ class RecordingManager:
         index: int,
         frames: list[dict[str, object]],
         *,
-        task_list: list[tuple[dict[str, object], asyncio.Task[int]]] | None = None,
-    ) -> tuple[dict[str, object], asyncio.Task[int]] | None:
+        task_list: list[
+            tuple[dict[str, object], asyncio.Task[int], asyncio.Task[int] | None]
+        ]
+        | None = None,
+    ) -> tuple[dict[str, object], asyncio.Task[int], asyncio.Task[int] | None] | None:
         if not frames:
             return None
         filename = self._chunk_filename(name, index)
@@ -1735,15 +1847,30 @@ class RecordingManager:
             "compression": "gzip",
         }
         task = asyncio.create_task(self._write_chunk_payload(filename, frames))
+        video_task: asyncio.Task[int] | None = None
+        if self.chunk_mp4_enabled:
+            video_filename = self._chunk_video_filename(name, index)
+            entry["video_file"] = video_filename
+            video_task = asyncio.create_task(
+                self._write_chunk_video(video_filename, frames)
+            )
         target_list = task_list if task_list is not None else self._chunk_write_tasks
-        target_list.append((entry, task))
-        return (entry, task)
+        target_list.append((entry, task, video_task))
+        return (entry, task, video_task)
 
     async def _write_chunk_payload(
         self, filename: str, frames: list[dict[str, object]]
     ) -> int:
         path = self.directory / filename
         return await asyncio.to_thread(_dump_chunk_frames_to_path, path, frames)
+
+    async def _write_chunk_video(
+        self, filename: str, frames: list[dict[str, object]]
+    ) -> int:
+        path = self.directory / filename
+        return await asyncio.to_thread(
+            _dump_chunk_video_to_path, path, frames, float(self.fps)
+        )
 
     def _normalise_chunk_duration(self, value: int | float | None) -> int | None:
         if value in (None, "", 0):
@@ -1859,7 +1986,9 @@ class _FinaliseContext:
     total_frames: int
     thumbnail: str | None
     stop_reason: str | None
-    chunk_tasks: list[tuple[dict[str, object], asyncio.Task[int]]]
+    chunk_tasks: list[
+        tuple[dict[str, object], asyncio.Task[int], asyncio.Task[int] | None]
+    ]
     chunk_duration_seconds: int | None
     storage_status: dict[str, float | int] | None
     motion_snapshot: dict[str, object]
