@@ -27,6 +27,7 @@
         --accent-shadow: rgba(10, 132, 255, 0.35);
         --success: #34c759;
         --danger: #ff453a;
+        --warning: #ffd60a;
         --radius-md: 0.85rem;
         --radius-lg: 1.2rem;
         --radius-pill: 999px;
@@ -133,6 +134,14 @@
       .status-message[data-tone="error"] {
         color: var(--danger);
       }
+      .status-message[data-tone="monitor"] {
+        color: var(--warning);
+        text-shadow: 0 0 12px rgba(255, 214, 10, 0.35);
+      }
+      .status-message[data-tone="alert"] {
+        color: var(--danger);
+        text-shadow: 0 0 16px rgba(255, 69, 58, 0.45);
+      }
       main {
         padding: var(--space-xl);
         display: grid;
@@ -148,6 +157,15 @@
         display: flex;
         flex-direction: column;
         gap: var(--space-md);
+        transition: border-color var(--transition), box-shadow var(--transition);
+      }
+      .preview-card.motion-monitoring {
+        border-color: rgba(255, 214, 10, 0.5);
+        box-shadow: 0 20px 40px rgba(255, 214, 10, 0.16);
+      }
+      .preview-card.motion-alert {
+        border-color: rgba(255, 69, 58, 0.6);
+        box-shadow: 0 22px 46px rgba(255, 69, 58, 0.25);
       }
       .preview-card img {
         width: 100%;
@@ -161,6 +179,34 @@
         align-items: center;
         gap: var(--space-sm);
         flex-wrap: wrap;
+      }
+      .recording-timer {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.45rem;
+        padding: 0.4rem 1rem;
+        border-radius: var(--radius-pill);
+        background: rgba(10, 132, 255, 0.12);
+        border: 1px solid rgba(10, 132, 255, 0.35);
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+        color: var(--accent);
+        box-shadow: 0 10px 28px rgba(10, 132, 255, 0.18);
+      }
+      .recording-timer .recording-timer-icon {
+        font-size: 0.95rem;
+      }
+      .recording-timer .recording-timer-label {
+        text-transform: uppercase;
+        font-size: 0.7rem;
+        letter-spacing: 0.08em;
+        color: var(--text-muted);
+      }
+      .recording-timer .recording-timer-value {
+        color: var(--text-primary);
+        font-size: 0.95rem;
+        min-width: 3.5ch;
+        text-align: right;
       }
       button.action {
         background: linear-gradient(135deg, var(--accent), var(--accent-hover));
@@ -176,6 +222,31 @@
         background: linear-gradient(135deg, var(--accent-hover), var(--accent-active));
         transform: translateY(-1px);
         box-shadow: 0 12px 24px var(--accent-shadow);
+      }
+      @keyframes motionAlertPulse {
+        0% {
+          box-shadow: 0 0 0 0 rgba(255, 69, 58, 0.35);
+          transform: translateY(0);
+        }
+        50% {
+          box-shadow: 0 0 0 12px rgba(255, 69, 58, 0);
+          transform: translateY(-1px);
+        }
+        100% {
+          box-shadow: 0 0 0 0 rgba(255, 69, 58, 0.35);
+          transform: translateY(0);
+        }
+      }
+      button.action.motion-monitoring {
+        background: linear-gradient(135deg, rgba(255, 214, 10, 0.1), rgba(255, 214, 10, 0.45));
+        color: var(--warning);
+        box-shadow: 0 0 0 1px rgba(255, 214, 10, 0.35) inset, 0 10px 26px rgba(255, 214, 10, 0.25);
+      }
+      button.action.motion-alert {
+        background: linear-gradient(135deg, rgba(255, 69, 58, 0.9), rgba(255, 105, 97, 0.95));
+        color: #fff;
+        box-shadow: 0 0 0 1px rgba(255, 69, 58, 0.45) inset, 0 12px 28px rgba(255, 69, 58, 0.45);
+        animation: motionAlertPulse 1.4s ease-in-out infinite;
       }
       button.action:disabled {
         opacity: 0.6;
@@ -198,6 +269,12 @@
         align-items: baseline;
         justify-content: space-between;
         gap: var(--space-sm);
+      }
+      .recordings-actions {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--space-sm);
+        flex-wrap: wrap;
       }
       .recordings-list {
         list-style: none;
@@ -230,6 +307,16 @@
         color: var(--text-muted);
         font-size: 0.85rem;
       }
+      .recording-chunks {
+        font-size: 0.78rem;
+        color: var(--text-muted);
+        margin-top: 0.2rem;
+      }
+      .recording-actions {
+        display: flex;
+        align-items: center;
+        gap: var(--space-sm);
+      }
       .open-recording {
         background: transparent;
         border: 1px solid var(--border-muted);
@@ -238,12 +325,39 @@
         padding: 0.35rem 1rem;
         cursor: pointer;
         transition: border-color var(--transition), color var(--transition);
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        text-decoration: none;
       }
       .open-recording:hover,
       .open-recording:focus-visible {
         border-color: var(--accent);
         color: var(--accent);
         outline: none;
+      }
+      .delete-recording {
+        background: transparent;
+        border: 1px solid rgba(255, 69, 58, 0.5);
+        color: var(--danger);
+        border-radius: var(--radius-pill);
+        padding: 0.35rem 0.9rem;
+        cursor: pointer;
+        transition: border-color var(--transition), color var(--transition);
+      }
+      .delete-recording:hover,
+      .delete-recording:focus-visible {
+        border-color: var(--danger);
+        color: #ff6b61;
+        outline: none;
+      }
+      .storage-status {
+        margin: 0;
+        font-size: 0.9rem;
+      }
+      .storage-status.is-low {
+        color: var(--danger);
+        font-weight: 600;
       }
       .muted {
         color: var(--text-muted);
@@ -278,6 +392,13 @@
         main {
           padding: var(--space-lg);
         }
+        .controls {
+          justify-content: center;
+        }
+        .recording-timer {
+          width: 100%;
+          justify-content: center;
+        }
       }
     </style>
   </head>
@@ -305,35 +426,63 @@
           <button class="action" type="button" id="record-button" aria-pressed="false">
             Start recording
           </button>
+          <button class="action" type="button" id="motion-record-button" aria-pressed="false">
+            Start motion recording
+          </button>
+          <div class="recording-timer" id="recording-timer" aria-live="polite" hidden>
+            <span class="recording-timer-icon" aria-hidden="true">⏱</span>
+            <span class="recording-timer-label">Elapsed</span>
+            <span class="recording-timer-value" data-timer-value>00:00</span>
+          </div>
         </div>
+        <p class="muted storage-status" id="storage-status">Storage: —</p>
       </section>
       <section class="recordings-card">
         <div class="recordings-header">
           <h2>Recordings</h2>
-          <button class="open-recording" type="button" id="refresh-recordings">Refresh</button>
+          <div class="recordings-actions">
+            <a class="open-recording" href="/surveillance/timeline" role="button"
+              >Timeline view</a
+            >
+            <button class="open-recording" type="button" id="refresh-recordings">
+              Refresh
+            </button>
+          </div>
         </div>
         <p class="muted" id="recordings-empty">No recordings available yet.</p>
         <ul class="recordings-list" id="recordings-list" aria-live="polite"></ul>
       </section>
     </main>
     <footer>
+      <a class="link" href="/surveillance/settings">Surveillance settings</a>
       <a class="link" href="/">Back to live view</a>
     </footer>
     <script>
       const statusMessage = document.getElementById("status-message");
+      const previewCard = document.querySelector(".preview-card");
       const previewImage = document.getElementById("surveillance-preview");
       const previewMessage = document.getElementById("preview-message");
       const recordButton = document.getElementById("record-button");
+      const motionRecordButton = document.getElementById("motion-record-button");
+      const recordingTimer = document.getElementById("recording-timer");
+      const recordingTimerValue = recordingTimer
+        ? recordingTimer.querySelector("[data-timer-value]")
+        : null;
       const recordingsList = document.getElementById("recordings-list");
       const recordingsEmpty = document.getElementById("recordings-empty");
       const refreshButton = document.getElementById("refresh-recordings");
+      const storageStatus = document.getElementById("storage-status");
       const modeToggle = document.querySelector("[data-mode-toggle]");
       const modeButtons = modeToggle
         ? Array.from(modeToggle.querySelectorAll(".mode-toggle-button"))
         : [];
       let currentMode = "surveillance";
       let isRecording = false;
+      let recordingMode = "idle";
       let previewUrl = null;
+      let recordingTimerStartMs = null;
+      let recordingTimerInterval = null;
+      let recordingTimerSource = null;
 
       function setStatus(message, tone = "info") {
         if (!statusMessage) {
@@ -341,6 +490,88 @@
         }
         statusMessage.textContent = message;
         statusMessage.dataset.tone = tone;
+      }
+
+      function renderRecordingTimer() {
+        if (!recordingTimer || !recordingTimerValue) {
+          return;
+        }
+        if (recordingTimerStartMs === null) {
+          recordingTimerValue.textContent = "00:00";
+          recordingTimer.hidden = true;
+          return;
+        }
+        const elapsedSeconds = Math.max(0, Math.floor((Date.now() - recordingTimerStartMs) / 1000));
+        const hours = Math.floor(elapsedSeconds / 3600);
+        const minutes = Math.floor((elapsedSeconds % 3600) / 60);
+        const seconds = elapsedSeconds % 60;
+        const minutesPart = hours > 0 ? String(minutes).padStart(2, "0") : String(minutes);
+        const secondsPart = String(seconds).padStart(2, "0");
+        const prefix = hours > 0 ? `${hours}:${minutesPart}` : minutesPart.padStart(2, "0");
+        const display = `${prefix}:${secondsPart}`;
+        recordingTimerValue.textContent = display;
+        recordingTimer.hidden = false;
+      }
+
+      function stopRecordingTimer() {
+        if (recordingTimerInterval !== null) {
+          window.clearInterval(recordingTimerInterval);
+          recordingTimerInterval = null;
+        }
+        recordingTimerStartMs = null;
+        recordingTimerSource = null;
+        if (recordingTimerValue) {
+          recordingTimerValue.textContent = "00:00";
+        }
+        if (recordingTimer) {
+          recordingTimer.hidden = true;
+        }
+      }
+
+      function startRecordingTimer(startIso) {
+        if (!recordingTimer || !recordingTimerValue) {
+          return;
+        }
+        if (typeof startIso !== "string" || startIso.length === 0) {
+          return;
+        }
+        const parsed = Date.parse(startIso);
+        if (Number.isNaN(parsed)) {
+          return;
+        }
+        if (recordingTimerInterval !== null) {
+          window.clearInterval(recordingTimerInterval);
+          recordingTimerInterval = null;
+        }
+        recordingTimerStartMs = parsed;
+        recordingTimerSource = startIso;
+        renderRecordingTimer();
+        recordingTimerInterval = window.setInterval(renderRecordingTimer, 1000);
+      }
+
+      function syncRecordingTimer(startIso, motionSnapshot) {
+        if (!recordingTimer) {
+          return;
+        }
+        const hasStart = typeof startIso === "string" && startIso.length > 0;
+        const isContinuousRecording = isRecording && recordingMode === "continuous";
+        let isMotionRecording = false;
+        if (recordingMode === "motion" && motionSnapshot && motionSnapshot.session_active) {
+          const sessionRecording = motionSnapshot.session_recording === true;
+          const sessionState = motionSnapshot.session_state;
+          const eventActive = motionSnapshot.event_active === true;
+          isMotionRecording = sessionRecording || eventActive || sessionState === "recording";
+        }
+        const shouldRun = hasStart && (isContinuousRecording || isMotionRecording);
+        if (!shouldRun) {
+          stopRecordingTimer();
+          return;
+        }
+        if (recordingTimerSource === startIso && recordingTimerStartMs !== null) {
+          renderRecordingTimer();
+          return;
+        }
+        startRecordingTimer(startIso);
       }
 
       function updateModeButtons(mode) {
@@ -408,12 +639,128 @@
         previewMessage.textContent = "Live surveillance preview.";
       }
 
-      function updateRecordButton() {
-        if (!recordButton) {
+      function updateControlButtons() {
+        const isContinuous = recordingMode === "continuous";
+        const isMotion = recordingMode === "motion";
+        if (recordButton) {
+          recordButton.textContent = isContinuous ? "Stop recording" : "Start recording";
+          recordButton.setAttribute("aria-pressed", String(isContinuous));
+          recordButton.disabled = isMotion;
+        }
+        if (motionRecordButton) {
+          motionRecordButton.textContent = isMotion
+            ? "Stop motion recording"
+            : "Start motion recording";
+          motionRecordButton.setAttribute("aria-pressed", String(isMotion));
+          motionRecordButton.disabled = isContinuous;
+        }
+      }
+
+      function formatBytes(bytes) {
+        if (typeof bytes !== "number" || !Number.isFinite(bytes) || bytes < 0) {
+          return null;
+        }
+        if (bytes === 0) {
+          return "0 B";
+        }
+        const units = ["B", "KB", "MB", "GB", "TB"];
+        const exponent = Math.min(
+          units.length - 1,
+          Math.floor(Math.log(bytes) / Math.log(1024)),
+        );
+        const value = bytes / 1024 ** exponent;
+        return `${value.toFixed(value >= 10 ? 1 : 2)} ${units[exponent]}`;
+      }
+
+      function updateStorage(storage) {
+        if (!storageStatus) {
           return;
         }
-        recordButton.textContent = isRecording ? "Stop recording" : "Start recording";
-        recordButton.setAttribute("aria-pressed", String(isRecording));
+        storageStatus.classList.remove("is-low");
+        if (!storage || typeof storage.free_percent !== "number") {
+          storageStatus.textContent = "Storage: —";
+          return;
+        }
+        const freePercent = Number(storage.free_percent) || 0;
+        const freeText = formatBytes(storage.free_bytes);
+        const totalText = formatBytes(storage.total_bytes);
+        const parts = [];
+        if (freeText) {
+          parts.push(`${freeText} free`);
+        }
+        parts.push(`(${freePercent.toFixed(1)}%)`);
+        if (totalText) {
+          parts.push(`of ${totalText}`);
+        }
+        storageStatus.textContent = `Storage: ${parts.join(" ")}`;
+        const threshold = Number(storage.threshold_percent ?? 0);
+        if (Number.isFinite(threshold) && threshold > 0 && freePercent <= threshold) {
+          storageStatus.classList.add("is-low");
+        }
+      }
+
+      function updateMotionIndicators(motionSnapshot) {
+        if (!motionRecordButton) {
+          return;
+        }
+        motionRecordButton.classList.remove("motion-monitoring", "motion-alert");
+        if (previewCard) {
+          previewCard.classList.remove("motion-monitoring", "motion-alert");
+        }
+        if (!motionSnapshot || motionSnapshot.session_active !== true) {
+          return;
+        }
+        const sessionState = motionSnapshot.session_state;
+        const sessionRecording = motionSnapshot.session_recording === true;
+        const eventActive = motionSnapshot.event_active === true;
+        const isMotionSession =
+          recordingMode === "motion" || motionSnapshot.session_override === true;
+        if (!isMotionSession) {
+          return;
+        }
+        if (sessionRecording || sessionState === "recording" || eventActive) {
+          motionRecordButton.classList.add("motion-alert");
+          if (previewCard) {
+            previewCard.classList.add("motion-alert");
+          }
+        } else {
+          motionRecordButton.classList.add("motion-monitoring");
+          if (previewCard) {
+            previewCard.classList.add("motion-monitoring");
+          }
+        }
+      }
+
+      function createActionButton(label, className) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = className;
+        button.textContent = label;
+        return button;
+      }
+
+      async function deleteRecording(name) {
+        if (!name) {
+          return;
+        }
+        const confirmed = window.confirm(`Delete recording ${name}?`);
+        if (!confirmed) {
+          return;
+        }
+        try {
+          const response = await fetch(`/api/surveillance/recordings/${encodeURIComponent(name)}`, {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+          });
+          if (!response.ok) {
+            throw new Error(`Delete failed with ${response.status}`);
+          }
+          await loadStatus();
+          setStatus(`Deleted recording ${name}.`, "info");
+        } catch (error) {
+          console.error("Failed to delete recording", error);
+          setStatus("Unable to delete recording", "error");
+        }
       }
 
       function renderRecordings(records) {
@@ -434,24 +781,85 @@
           const details = document.createElement("span");
           details.className = "recording-details";
           const started = record.started_at ? new Date(record.started_at) : null;
-          const durationSeconds = typeof record.duration_seconds === "number" ? record.duration_seconds : null;
-          const formatted = [
-            started ? started.toLocaleString() : null,
-            durationSeconds != null ? `${durationSeconds.toFixed(1)}s` : null,
-          ].filter(Boolean);
-          details.textContent = formatted.join(" • ") || "Pending metadata";
+          const durationSeconds =
+            typeof record.duration_seconds === "number" ? record.duration_seconds : null;
+          const sizeBytes = typeof record.size_bytes === "number" ? record.size_bytes : null;
+          const chunkCount = typeof record.chunk_count === "number" ? record.chunk_count : null;
+          const isProcessingRecord = Boolean(record.processing);
+          const processingError =
+            typeof record.processing_error === "string" && record.processing_error.length > 0;
+          let summaryText;
+          if (isProcessingRecord) {
+            summaryText = "Processing clip…";
+          } else if (processingError) {
+            summaryText = "Processing failed";
+            details.title = record.processing_error;
+          } else {
+            const formatted = [
+              started ? started.toLocaleString() : null,
+              durationSeconds != null ? `${durationSeconds.toFixed(1)}s` : null,
+              sizeBytes != null ? formatBytes(sizeBytes) : null,
+              chunkCount && chunkCount > 1 ? `${chunkCount} chunks` : null,
+              record.stop_reason === "storage_low"
+                ? "Stopped due to low storage"
+                : typeof record.stop_reason === "string"
+                ? `Stopped: ${record.stop_reason}`
+                : null,
+            ].filter(Boolean);
+            summaryText = formatted.join(" • ") || "Pending metadata";
+          }
+          details.textContent = summaryText;
           meta.appendChild(name);
           meta.appendChild(details);
-          const open = document.createElement("button");
-          open.type = "button";
-          open.className = "open-recording";
-          open.textContent = "Open";
+          if (Array.isArray(record.chunks) && record.chunks.length > 0) {
+            const chunkSummaries = record.chunks
+              .map((chunk, idx) => {
+                if (!chunk || typeof chunk !== "object") {
+                  return null;
+                }
+                const label = idx + 1;
+                const chunkSize =
+                  typeof chunk.size_bytes === "number" && Number.isFinite(chunk.size_bytes)
+                    ? formatBytes(chunk.size_bytes)
+                    : null;
+                if (!chunkSize) {
+                  return null;
+                }
+                return `Chunk ${label} (${chunkSize})`;
+              })
+              .filter(Boolean);
+            if (chunkSummaries.length) {
+              const chunkLine = document.createElement("div");
+              chunkLine.className = "recording-chunks";
+              chunkLine.textContent = chunkSummaries.join(", ");
+              meta.appendChild(chunkLine);
+            }
+          }
+          const actions = document.createElement("div");
+          actions.className = "recording-actions";
+          const open = createActionButton("Open", "open-recording");
+          if (isProcessingRecord) {
+            open.disabled = true;
+            open.title = "Processing clip…";
+          }
           open.addEventListener("click", () => {
             const href = `/surveillance/player?name=${encodeURIComponent(record.name)}`;
-            window.open(href, "_blank", "noopener");
+            window.location.href = href;
           });
+          actions.appendChild(open);
+          const removeButton = createActionButton("Delete", "delete-recording");
+          if (isProcessingRecord) {
+            removeButton.disabled = true;
+            removeButton.title = "Processing clip…";
+          }
+          removeButton.addEventListener("click", () => {
+            deleteRecording(record.name).catch((error) => {
+              console.error("Delete recording error", error);
+            });
+          });
+          actions.appendChild(removeButton);
           item.appendChild(meta);
-          item.appendChild(open);
+          item.appendChild(actions);
           recordingsList.appendChild(item);
         });
       }
@@ -472,11 +880,64 @@
               return;
             }
           }
-          isRecording = Boolean(payload && payload.recording);
-          updateRecordButton();
+          let nextRecordingMode = "idle";
+          if (payload && typeof payload.recording_mode === "string") {
+            const candidate = payload.recording_mode;
+            if (candidate === "motion" || candidate === "continuous") {
+              nextRecordingMode = candidate;
+            }
+          }
+          if (nextRecordingMode === "idle" && payload && payload.recording) {
+            nextRecordingMode = "continuous";
+          }
+          recordingMode = nextRecordingMode;
+          isRecording = recordingMode !== "idle";
+          updateControlButtons();
           updatePreview(payload ? payload.preview : null);
           renderRecordings(payload && Array.isArray(payload.recordings) ? payload.recordings : []);
-          setStatus(isRecording ? "Recording" : "Surveillance ready", isRecording ? "busy" : "info");
+          const storage = payload ? payload.storage : null;
+          updateStorage(storage);
+          const motionSnapshot = payload ? payload.motion : null;
+          updateMotionIndicators(motionSnapshot);
+          const startedAtIso =
+            payload && typeof payload.recording_started_at === "string"
+              ? payload.recording_started_at
+              : null;
+          syncRecordingTimer(startedAtIso, motionSnapshot);
+          const processingRecord = payload ? payload.processing_recording : null;
+          const isProcessing = Boolean(payload && payload.processing);
+          const processingError =
+            processingRecord &&
+            typeof processingRecord.processing_error === "string" &&
+            processingRecord.processing_error.length > 0;
+          if (isRecording) {
+            if (recordingMode === "motion" && motionSnapshot && motionSnapshot.session_active) {
+              const sessionState = motionSnapshot.session_state;
+              const sessionRecording = motionSnapshot.session_recording === true;
+              if (sessionRecording || sessionState === "recording") {
+                setStatus("Motion recording", "alert");
+              } else {
+                setStatus("Monitoring for motion", "monitor");
+              }
+            } else {
+              setStatus("Recording", "busy");
+            }
+          } else if (isProcessing) {
+            setStatus("Processing video clip…", "busy");
+          } else if (processingError) {
+            setStatus("Recording processing failed", "error");
+          } else {
+            setStatus("Surveillance ready", "info");
+          }
+          if (
+            storage &&
+            typeof storage.free_percent === "number" &&
+            typeof storage.threshold_percent === "number" &&
+            storage.threshold_percent > 0 &&
+            storage.free_percent <= storage.threshold_percent
+          ) {
+            setStatus("Low storage — recordings will pause automatically", "error");
+          }
         } catch (error) {
           console.error("Failed to load surveillance status", error);
           setStatus("Unable to load surveillance status", "error");
@@ -485,9 +946,13 @@
 
       if (recordButton) {
         recordButton.addEventListener("click", async () => {
-          recordButton.disabled = true;
+          const buttons = [recordButton, motionRecordButton].filter(Boolean);
+          buttons.forEach((button) => {
+            button.disabled = true;
+          });
           try {
-            const endpoint = isRecording
+            const stopMode = recordingMode === "continuous";
+            const endpoint = stopMode
               ? "/api/surveillance/recordings/stop"
               : "/api/surveillance/recordings/start";
             const response = await fetch(endpoint, {
@@ -502,7 +967,39 @@
             console.error("Recording control error", error);
             setStatus("Recording request failed", "error");
           } finally {
-            recordButton.disabled = false;
+            buttons.forEach((button) => {
+              button.disabled = false;
+            });
+          }
+        });
+      }
+
+      if (motionRecordButton) {
+        motionRecordButton.addEventListener("click", async () => {
+          const buttons = [recordButton, motionRecordButton].filter(Boolean);
+          buttons.forEach((button) => {
+            button.disabled = true;
+          });
+          try {
+            const stopMode = recordingMode === "motion";
+            const endpoint = stopMode
+              ? "/api/surveillance/recordings/stop"
+              : "/api/surveillance/recordings/start-motion";
+            const response = await fetch(endpoint, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+            });
+            if (!response.ok) {
+              throw new Error(`Recording request failed with ${response.status}`);
+            }
+            await loadStatus();
+          } catch (error) {
+            console.error("Motion recording control error", error);
+            setStatus("Recording request failed", "error");
+          } finally {
+            buttons.forEach((button) => {
+              button.disabled = false;
+            });
           }
         });
       }
@@ -520,6 +1017,10 @@
             console.error("Viewing mode change failure", error),
           );
         });
+      });
+
+      window.addEventListener("pagehide", () => {
+        stopRecordingTimer();
       });
 
       loadStatus();

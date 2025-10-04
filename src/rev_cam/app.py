@@ -5,10 +5,13 @@ import asyncio
 import logging
 import math
 import os
+import shutil
 import string
 from enum import Enum
 from pathlib import Path
 from typing import Literal
+
+from datetime import datetime, timedelta, timezone
 
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.concurrency import run_in_threadpool
@@ -28,6 +31,7 @@ from .config import (
     Resolution,
     RESOLUTION_PRESETS,
     StreamSettings,
+    SURVEILLANCE_STANDARD_PRESETS,
 )
 from .diagnostics import collect_diagnostics
 from .distance import DistanceCalibration, DistanceMonitor, create_distance_overlay
@@ -39,6 +43,8 @@ from .recording import (
     RecordingManager,
     load_recording_metadata,
     load_recording_payload,
+    purge_recordings,
+    remove_recording_files,
 )
 from .streaming import MJPEGStreamer, WebRTCManager, encode_frame_to_jpeg
 from .system_log import SystemLog
@@ -157,6 +163,24 @@ class BatteryCapacityPayload(BaseModel):
 class StreamSettingsPayload(BaseModel):
     fps: int | None = None
     jpeg_quality: int | None = None
+
+
+class SurveillanceSettingsPayload(BaseModel):
+    profile: Literal["standard", "expert"] | None = None
+    preset: str | None = None
+    fps: int | None = None
+    jpeg_quality: int | None = None
+    expert_fps: int | None = None
+    expert_jpeg_quality: int | None = None
+    chunk_duration_seconds: int | None = None
+    overlays_enabled: bool | None = None
+    remember_recording_state: bool | None = None
+    motion_detection_enabled: bool | None = None
+    motion_sensitivity: int | None = None
+    motion_frame_decimation: int | None = None
+    motion_post_event_seconds: float | None = None
+    auto_purge_days: int | None = None
+    storage_threshold_percent: float | None = None
 
 
 class WebRTCOfferPayload(BaseModel):
@@ -318,9 +342,24 @@ def create_app(
         system_log=shared_system_log,
     )
 
+    current_mode: StreamMode = StreamMode.REVCAM
+
+    def _overlays_enabled() -> bool:
+        master_enabled = config_manager.get_overlay_master_enabled()
+        if not master_enabled:
+            return False
+        if current_mode is StreamMode.SURVEILLANCE:
+            try:
+                surveillance = config_manager.get_surveillance_settings()
+            except Exception:  # pragma: no cover - defensive fallback
+                return master_enabled
+            if not surveillance.overlays_enabled:
+                return False
+        return True
+
     pipeline = FramePipeline(
         lambda: config_manager.get_orientation(),
-        overlay_enabled_provider=config_manager.get_overlay_master_enabled,
+        overlay_enabled_provider=_overlays_enabled,
     )
     pipeline.add_overlay(
         create_wifi_overlay(
@@ -360,7 +399,70 @@ def create_app(
     active_camera_choice: str = "unknown"
     active_resolution: Resolution = config_manager.get_resolution()
     camera_errors: dict[str, str] = {}
-    current_mode: StreamMode = StreamMode.REVCAM
+    def _persist_surveillance_state(recording: bool | None = None) -> None:
+        try:
+            settings = config_manager.get_surveillance_settings()
+        except Exception:  # pragma: no cover - defensive guard
+            return
+        if not settings.remember_recording_state:
+            return
+        if recording is None:
+            recording = recording_manager.is_recording if recording_manager else False
+        try:
+            config_manager.update_surveillance_state(current_mode.value, bool(recording))
+        except Exception:  # pragma: no cover - defensive guard
+            logger.exception("Failed to persist surveillance runtime state")
+
+    async def _handle_recording_stopped(metadata: dict[str, object]) -> None:
+        _persist_surveillance_state(False)
+
+    async def _apply_auto_purge(settings) -> None:
+        days = getattr(settings, "auto_purge_days", None)
+        if days in (None, 0):
+            return
+        try:
+            days_value = float(days)
+        except (TypeError, ValueError):  # pragma: no cover - defensive guard
+            return
+        if days_value <= 0:
+            return
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days_value)
+        try:
+            removed = await asyncio.to_thread(purge_recordings, RECORDINGS_DIR, cutoff)
+        except Exception:  # pragma: no cover - defensive logging
+            logger.exception("Failed to auto purge surveillance recordings")
+            return
+        if removed:
+            logger.info("Purged %d old surveillance recordings", len(removed))
+
+    def _build_storage_status(settings=None) -> dict[str, object]:
+        status: dict[str, object]
+        try:
+            if recording_manager is not None:
+                status = recording_manager.get_storage_status()
+            else:
+                usage = shutil.disk_usage(RECORDINGS_DIR)
+                total = int(getattr(usage, "total", 0))
+                free = int(getattr(usage, "free", 0))
+                used = int(getattr(usage, "used", total - free))
+                free_percent = 100.0 if total <= 0 else max(0.0, min(100.0, (free / total) * 100.0))
+                status = {
+                    "total_bytes": total,
+                    "free_bytes": free,
+                    "used_bytes": used,
+                    "free_percent": round(free_percent, 3),
+                }
+        except Exception:  # pragma: no cover - defensive logging
+            logger.exception("Failed to compute storage status")
+            status = {}
+        if settings is None:
+            try:
+                settings = config_manager.get_surveillance_settings()
+            except Exception:  # pragma: no cover - defensive guard
+                settings = None
+        if settings is not None:
+            status.setdefault("threshold_percent", float(settings.storage_threshold_percent))
+        return status
 
     def _distance_payload(
         reading,
@@ -440,12 +542,20 @@ def create_app(
 
     async def _serialise_surveillance_status() -> dict[str, object]:
         recordings: list[dict[str, object]] = []
+        processing_record: dict[str, object] | None = None
+        processing_active = False
         if recording_manager is not None:
             try:
                 recordings = await recording_manager.list_recordings()
             except Exception:  # pragma: no cover - defensive logging
                 logger.exception("Failed to list surveillance recordings")
                 recordings = []
+            try:
+                processing_record = await recording_manager.get_processing_metadata()
+            except Exception:  # pragma: no cover - defensive logging
+                logger.exception("Failed to read in-flight surveillance metadata")
+                processing_record = None
+            processing_active = recording_manager.is_processing
         else:
             try:
                 recordings = await asyncio.to_thread(
@@ -460,31 +570,71 @@ def create_app(
                 "endpoint": "/surveillance/preview.mjpeg",
                 "content_type": recording_manager.media_type,
             }
+        settings_obj = config_manager.get_surveillance_settings()
+        await _apply_auto_purge(settings_obj)
+        surveillance_settings = settings_obj.serialise()
+        storage_status = _build_storage_status(settings_obj)
+        motion_state = (
+            recording_manager.get_motion_status() if recording_manager is not None else None
+        )
+        recording_mode = (
+            recording_manager.recording_mode if recording_manager is not None else "idle"
+        )
+        started_at_iso: str | None = None
+        if recording_manager is not None:
+            started_at_value = recording_manager.recording_started_at
+            if started_at_value is not None:
+                started_at_iso = started_at_value.isoformat()
+        is_recording_flag = recording_manager.is_recording if recording_manager else False
+        state = config_manager.get_surveillance_state().to_dict()
         return {
             "mode": current_mode.value,
-            "recording": recording_manager.is_recording if recording_manager else False,
+            "recording": is_recording_flag,
+            "recording_mode": recording_mode,
+            "recording_started_at": started_at_iso,
             "recordings": recordings,
             "preview": preview,
+            "settings": surveillance_settings,
+            "storage": storage_status,
+            "motion": motion_state,
+            "resume_state": state,
+            "processing": processing_active,
+            "processing_recording": processing_record,
         }
 
     async def _ensure_recording_manager() -> RecordingManager:
         nonlocal recording_manager
         if camera is None:
             raise RuntimeError("Camera unavailable for surveillance mode")
-        settings = config_manager.get_stream_settings()
+        surveillance_settings = config_manager.get_surveillance_settings()
+        fps = surveillance_settings.resolved_fps
+        jpeg_quality = surveillance_settings.resolved_jpeg_quality
         if recording_manager is None:
             recording_manager = RecordingManager(
                 camera=camera,
                 pipeline=pipeline,
-                fps=settings.fps,
-                jpeg_quality=settings.jpeg_quality,
+                fps=fps,
+                jpeg_quality=jpeg_quality,
                 directory=RECORDINGS_DIR,
+                chunk_duration_seconds=surveillance_settings.chunk_duration_seconds,
+                storage_threshold_percent=surveillance_settings.storage_threshold_percent,
+                motion_detection_enabled=surveillance_settings.motion_detection_enabled,
+                motion_sensitivity=surveillance_settings.motion_sensitivity,
+                motion_frame_decimation=surveillance_settings.motion_frame_decimation,
+                motion_post_event_seconds=surveillance_settings.motion_post_event_seconds,
+                on_stop=_handle_recording_stopped,
             )
         else:
             recording_manager.camera = camera
             await recording_manager.apply_settings(
-                fps=settings.fps,
-                jpeg_quality=settings.jpeg_quality,
+                fps=fps,
+                jpeg_quality=jpeg_quality,
+                chunk_duration_seconds=surveillance_settings.chunk_duration_seconds,
+                storage_threshold_percent=surveillance_settings.storage_threshold_percent,
+                motion_detection_enabled=surveillance_settings.motion_detection_enabled,
+                motion_sensitivity=surveillance_settings.motion_sensitivity,
+                motion_frame_decimation=surveillance_settings.motion_frame_decimation,
+                motion_post_event_seconds=surveillance_settings.motion_post_event_seconds,
             )
         return recording_manager
 
@@ -503,6 +653,7 @@ def create_app(
         webrtc_error = None
         manager = await _ensure_recording_manager()
         current_mode = StreamMode.SURVEILLANCE
+        _persist_surveillance_state()
         await _set_ready_pattern()
         return manager
 
@@ -518,6 +669,7 @@ def create_app(
             await recording_manager.aclose()
             recording_manager = None
         current_mode = StreamMode.REVCAM
+        _persist_surveillance_state(False)
         await _refresh_video_services()
         await _set_ready_pattern()
 
@@ -858,6 +1010,24 @@ def create_app(
                 "RevCam startup sequence completed.",
                 metadata={k: v for k, v in startup_metadata.items() if v is not None},
             )
+        try:
+            surveillance_settings = config_manager.get_surveillance_settings()
+            runtime_state = config_manager.get_surveillance_state()
+        except Exception:  # pragma: no cover - defensive guard
+            surveillance_settings = None
+            runtime_state = None
+        if (
+            surveillance_settings is not None
+            and runtime_state is not None
+            and surveillance_settings.remember_recording_state
+            and runtime_state.mode == "surveillance"
+        ):
+            try:
+                manager = await _activate_surveillance_mode()
+                if runtime_state.recording:
+                    await manager.start_recording()
+            except Exception:  # pragma: no cover - defensive logging
+                logger.exception("Failed to resume surveillance recording state")
 
     @app.on_event("shutdown")
     async def shutdown() -> None:  # pragma: no cover - framework hook
@@ -878,6 +1048,7 @@ def create_app(
         if recording_manager is not None:
             await recording_manager.aclose()
             recording_manager = None
+        _persist_surveillance_state(False)
         if camera:
             await camera.close()
         await battery_supervisor.aclose()
@@ -913,6 +1084,14 @@ def create_app(
     @app.get("/surveillance/player", response_class=HTMLResponse)
     async def surveillance_player_page() -> str:
         return _load_static("surveillance_player.html")
+
+    @app.get("/surveillance/settings", response_class=HTMLResponse)
+    async def surveillance_settings_page() -> str:
+        return _load_static("surveillance_settings.html")
+
+    @app.get("/surveillance/timeline", response_class=HTMLResponse)
+    async def surveillance_timeline_page() -> str:
+        return _load_static("surveillance_timeline.html")
 
     @app.get("/images/{asset}")
     async def get_image(asset: str):
@@ -1128,9 +1307,10 @@ def create_app(
                 raise HTTPException(status_code=500, detail="Unable to apply streaming settings") from exc
         if recording_manager is not None:
             try:
+                surveillance_settings = config_manager.get_surveillance_settings()
                 await recording_manager.apply_settings(
-                    fps=settings.fps,
-                    jpeg_quality=settings.jpeg_quality,
+                    fps=surveillance_settings.resolved_fps,
+                    jpeg_quality=surveillance_settings.resolved_jpeg_quality,
                 )
             except Exception as exc:  # pragma: no cover - defensive logging
                 logger.exception("Failed to apply surveillance recording settings")
@@ -1613,6 +1793,48 @@ def create_app(
     async def surveillance_status() -> dict[str, object]:
         return await _serialise_surveillance_status()
 
+    @app.get("/api/surveillance/settings")
+    async def get_surveillance_settings() -> dict[str, object]:
+        settings = config_manager.get_surveillance_settings()
+        presets = [
+            {"name": name, "fps": fps, "jpeg_quality": quality}
+            for name, (fps, quality) in SURVEILLANCE_STANDARD_PRESETS.items()
+        ]
+        return {"settings": settings.serialise(), "presets": presets}
+
+    @app.post("/api/surveillance/settings")
+    async def update_surveillance_settings(
+        payload: SurveillanceSettingsPayload,
+    ) -> dict[str, object]:
+        raw = payload.model_dump(exclude_none=True)
+        if "fps" in raw and "expert_fps" not in raw:
+            raw["expert_fps"] = raw.pop("fps")
+        if "jpeg_quality" in raw and "expert_jpeg_quality" not in raw:
+            raw["expert_jpeg_quality"] = raw.pop("jpeg_quality")
+        try:
+            settings = config_manager.set_surveillance_settings(raw)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if recording_manager is not None:
+            try:
+                await recording_manager.apply_settings(
+                    fps=settings.resolved_fps,
+                    jpeg_quality=settings.resolved_jpeg_quality,
+                    chunk_duration_seconds=settings.chunk_duration_seconds,
+                    storage_threshold_percent=settings.storage_threshold_percent,
+                    motion_detection_enabled=settings.motion_detection_enabled,
+                    motion_sensitivity=settings.motion_sensitivity,
+                    motion_frame_decimation=settings.motion_frame_decimation,
+                    motion_post_event_seconds=settings.motion_post_event_seconds,
+                )
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.exception("Failed to apply surveillance recording settings")
+                raise HTTPException(
+                    status_code=500,
+                    detail="Unable to apply surveillance settings",
+                ) from exc
+        return {"settings": settings.serialise()}
+
     @app.post("/api/surveillance/mode")
     async def set_surveillance_mode(payload: SurveillanceModePayload) -> dict[str, object]:
         target = StreamMode(payload.mode)
@@ -1635,10 +1857,54 @@ def create_app(
             manager = await _ensure_recording_manager()
         except RuntimeError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
+        settings = config_manager.get_surveillance_settings()
+        storage_status = _build_storage_status(settings)
+        free_percent = storage_status.get("free_percent")
+        threshold = storage_status.get("threshold_percent")
+        if (
+            isinstance(free_percent, (int, float))
+            and isinstance(threshold, (int, float))
+            and threshold > 0
+            and free_percent <= threshold
+        ):
+            raise HTTPException(status_code=507, detail="Insufficient storage available")
         try:
-            details = await manager.start_recording()
+            details = await asyncio.shield(manager.start_recording(motion_mode=False))
+        except asyncio.CancelledError:
+            _persist_surveillance_state(True)
+            raise
         except RuntimeError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        _persist_surveillance_state(True)
+        return {"recording": details}
+
+    @app.post("/api/surveillance/recordings/start-motion")
+    async def start_motion_surveillance_recording() -> dict[str, object]:
+        if current_mode is not StreamMode.SURVEILLANCE:
+            raise HTTPException(status_code=409, detail="Enable surveillance mode first")
+        try:
+            manager = await _ensure_recording_manager()
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        settings = config_manager.get_surveillance_settings()
+        storage_status = _build_storage_status(settings)
+        free_percent = storage_status.get("free_percent")
+        threshold = storage_status.get("threshold_percent")
+        if (
+            isinstance(free_percent, (int, float))
+            and isinstance(threshold, (int, float))
+            and threshold > 0
+            and free_percent <= threshold
+        ):
+            raise HTTPException(status_code=507, detail="Insufficient storage available")
+        try:
+            details = await asyncio.shield(manager.start_recording(motion_mode=True))
+        except asyncio.CancelledError:
+            _persist_surveillance_state(True)
+            raise
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        _persist_surveillance_state(True)
         return {"recording": details}
 
     @app.post("/api/surveillance/recordings/stop")
@@ -1648,9 +1914,13 @@ def create_app(
         if recording_manager is None:
             raise HTTPException(status_code=409, detail="No recording in progress")
         try:
-            details = await recording_manager.stop_recording()
+            details = await asyncio.shield(recording_manager.stop_recording())
+        except asyncio.CancelledError:
+            _persist_surveillance_state(False)
+            raise
         except RuntimeError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        _persist_surveillance_state(False)
         return {"recording": details}
 
     @app.get("/api/surveillance/recordings")
@@ -1676,6 +1946,20 @@ def create_app(
             return await recording_manager.get_recording(name)
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Recording not found") from exc
+
+    @app.delete("/api/surveillance/recordings/{name}")
+    async def delete_surveillance_recording(name: str) -> dict[str, object]:
+        try:
+            if recording_manager is not None:
+                await recording_manager.remove_recording(name)
+            else:
+                await asyncio.to_thread(remove_recording_files, RECORDINGS_DIR, name)
+        except FileNotFoundError:
+            raise HTTPException(status_code=404, detail="Recording not found")
+        except Exception:  # pragma: no cover - defensive logging
+            logger.exception("Failed to remove surveillance recording %s", name)
+            raise HTTPException(status_code=500, detail="Unable to delete recording")
+        return {"deleted": name}
 
     @app.post("/api/log/webrtc-error")
     async def log_webrtc_error(payload: WebRTCErrorReportPayload) -> dict[str, str]:

@@ -1,0 +1,861 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Surveillance Recording Timeline</title>
+    <link rel="icon" type="image/svg+xml" href="images/favicon.svg" />
+    <style>
+      :root {
+        color-scheme: dark;
+        --font-family: "Inter", "Manrope", "Segoe UI", system-ui, -apple-system,
+          BlinkMacSystemFont, sans-serif;
+        --surface-0: rgba(14, 16, 22, 0.9);
+        --surface-1: rgba(26, 28, 36, 0.88);
+        --surface-soft: rgba(255, 255, 255, 0.05);
+        --border-subtle: rgba(255, 255, 255, 0.12);
+        --border-strong: rgba(255, 255, 255, 0.2);
+        --text-primary: #f5f7fb;
+        --text-muted: rgba(245, 247, 250, 0.7);
+        --accent: #0a84ff;
+        --accent-soft: rgba(10, 132, 255, 0.15);
+        --accent-hover: #2f95ff;
+        --accent-shadow: rgba(10, 132, 255, 0.35);
+        --danger: #ff453a;
+        --success: #34c759;
+        --radius-md: 0.9rem;
+        --radius-lg: 1.25rem;
+        --radius-pill: 999px;
+        --space-xs: 0.35rem;
+        --space-sm: 0.6rem;
+        --space-md: 1rem;
+        --space-lg: 1.6rem;
+        --space-xl: 2.2rem;
+        --page-gradient: radial-gradient(120% 140% at top, #1b1e26 0%, #0b0d13 60%,
+            #050609 100%);
+        --timeline-line: rgba(255, 255, 255, 0.15);
+        --timeline-marker-manual: var(--accent);
+        --timeline-marker-motion: #ffa031;
+        --chip-bg: rgba(255, 255, 255, 0.08);
+        --chip-motion-bg: rgba(255, 160, 49, 0.18);
+      }
+
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: var(--page-gradient);
+        font-family: var(--font-family);
+        color: var(--text-primary);
+        display: flex;
+        flex-direction: column;
+      }
+
+      header.page-header {
+        padding: var(--space-md) var(--space-xl);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-lg);
+        background: var(--surface-0);
+        border-bottom: 1px solid var(--border-subtle);
+        backdrop-filter: blur(18px) saturate(140%);
+        -webkit-backdrop-filter: blur(18px) saturate(140%);
+        box-shadow: 0 24px 48px rgba(0, 0, 0, 0.35);
+      }
+
+      .brand-group {
+        display: flex;
+        flex-direction: column;
+        gap: 0.15rem;
+      }
+
+      .brand-group strong {
+        font-size: 1.25rem;
+        letter-spacing: 0.05em;
+        color: var(--success);
+      }
+
+      .brand-group span {
+        color: var(--text-muted);
+        font-size: 0.95rem;
+      }
+
+      .header-actions {
+        display: inline-flex;
+        gap: var(--space-sm);
+        align-items: center;
+        flex-wrap: wrap;
+      }
+
+      .header-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        padding: 0.45rem 1.1rem;
+        border-radius: var(--radius-pill);
+        border: 1px solid var(--border-subtle);
+        background: transparent;
+        color: var(--text-primary);
+        text-decoration: none;
+        font-weight: 600;
+        transition: color 200ms ease, border-color 200ms ease,
+          background 200ms ease, box-shadow 200ms ease;
+      }
+
+      .header-link:hover,
+      .header-link:focus-visible {
+        color: var(--accent);
+        border-color: var(--accent);
+        box-shadow: 0 0 0 1px rgba(10, 132, 255, 0.35);
+        outline: none;
+      }
+
+      main {
+        flex: 1;
+        width: min(1100px, 100%);
+        margin: 0 auto;
+        padding: var(--space-xl) var(--space-md) var(--space-xl);
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-lg);
+      }
+
+      .timeline-controls {
+        background: var(--surface-1);
+        border-radius: var(--radius-lg);
+        border: 1px solid var(--border-subtle);
+        padding: var(--space-lg);
+        box-shadow: 0 24px 48px rgba(0, 0, 0, 0.35);
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-md);
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .timeline-controls h1 {
+        margin: 0;
+        font-size: 1.6rem;
+      }
+
+      .timeline-status {
+        margin: 0;
+        color: var(--text-muted);
+        font-size: 0.95rem;
+      }
+
+      .timeline-status[data-tone="busy"] {
+        color: var(--accent);
+      }
+
+      .timeline-status[data-tone="error"] {
+        color: var(--danger);
+        font-weight: 600;
+      }
+
+      .filter-group {
+        display: inline-flex;
+        flex-wrap: wrap;
+        gap: var(--space-sm);
+        align-items: center;
+      }
+
+      .filter-button {
+        appearance: none;
+        border: 1px solid var(--border-subtle);
+        background: transparent;
+        color: var(--text-muted);
+        font-weight: 600;
+        padding: 0.45rem 1.2rem;
+        border-radius: var(--radius-pill);
+        cursor: pointer;
+        transition: background 200ms ease, color 200ms ease, border-color 200ms ease,
+          box-shadow 200ms ease;
+      }
+
+      .filter-button[aria-pressed="true"] {
+        background: var(--accent-soft);
+        border-color: rgba(10, 132, 255, 0.6);
+        color: var(--accent);
+        box-shadow: 0 10px 24px var(--accent-shadow);
+      }
+
+      .filter-button:not([aria-pressed="true"]):hover,
+      .filter-button:not([aria-pressed="true"]):focus-visible {
+        color: var(--text-primary);
+        border-color: rgba(10, 132, 255, 0.5);
+        background: rgba(10, 132, 255, 0.08);
+        outline: none;
+      }
+
+      .refresh-button {
+        appearance: none;
+        border: 1px solid var(--border-subtle);
+        background: transparent;
+        color: var(--text-primary);
+        font-weight: 600;
+        padding: 0.45rem 1.2rem;
+        border-radius: var(--radius-pill);
+        cursor: pointer;
+        transition: border-color 200ms ease, color 200ms ease,
+          background 200ms ease;
+      }
+
+      .refresh-button:hover,
+      .refresh-button:focus-visible {
+        border-color: var(--accent);
+        color: var(--accent);
+        outline: none;
+      }
+
+      .refresh-button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      .timeline {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-lg);
+        padding-left: 2.6rem;
+      }
+
+      .timeline::before {
+        content: "";
+        position: absolute;
+        inset: 0 auto 0 1.2rem;
+        width: 2px;
+        background: var(--timeline-line);
+      }
+
+      .timeline-item {
+        position: relative;
+        background: var(--surface-1);
+        border-radius: var(--radius-lg);
+        border: 1px solid var(--border-subtle);
+        padding: var(--space-lg);
+        display: grid;
+        grid-template-columns: minmax(180px, 240px) minmax(0, 1fr);
+        gap: var(--space-lg);
+        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.35);
+      }
+
+      .timeline-item::before {
+        content: "";
+        position: absolute;
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        border: 2px solid var(--surface-1);
+        top: calc(50% - 8px);
+        left: -2.05rem;
+        background: var(--timeline-marker-manual);
+        box-shadow: 0 0 0 4px var(--surface-0);
+      }
+
+      .timeline-item[data-type="motion"]::before {
+        background: var(--timeline-marker-motion);
+        box-shadow: 0 0 0 4px rgba(255, 160, 49, 0.1);
+      }
+
+      .thumbnail-wrapper {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(0, 0, 0, 0.35);
+        border-radius: var(--radius-md);
+        border: 1px solid var(--border-subtle);
+        overflow: hidden;
+        min-height: 150px;
+      }
+
+      .timeline-thumbnail {
+        width: 100%;
+        height: 100%;
+        display: block;
+        object-fit: cover;
+        aspect-ratio: 16 / 9;
+      }
+
+      .thumbnail-placeholder {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+        height: 100%;
+        padding: var(--space-md);
+        text-align: center;
+        color: var(--text-muted);
+        font-size: 0.9rem;
+      }
+
+      .timeline-content {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-sm);
+      }
+
+      .timeline-title {
+        display: flex;
+        align-items: baseline;
+        gap: var(--space-sm);
+        flex-wrap: wrap;
+        margin: 0;
+      }
+
+      .timeline-title strong {
+        font-size: 1.15rem;
+      }
+
+      .timeline-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        padding: 0.2rem 0.75rem;
+        border-radius: var(--radius-pill);
+        background: var(--chip-bg);
+        color: var(--text-muted);
+        font-size: 0.85rem;
+        font-weight: 600;
+      }
+
+      .timeline-item[data-type="motion"] .timeline-chip {
+        background: var(--chip-motion-bg);
+        color: #ffba66;
+      }
+
+      .timeline-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.6rem;
+        color: var(--text-muted);
+        font-size: 0.9rem;
+      }
+
+      .timeline-meta span {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+      }
+
+      .timeline-status-line {
+        margin: 0;
+        font-size: 0.9rem;
+        color: var(--text-muted);
+      }
+
+      .timeline-status-line[data-tone="error"] {
+        color: var(--danger);
+        font-weight: 600;
+      }
+
+      .timeline-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-sm);
+        margin-top: var(--space-sm);
+      }
+
+      .timeline-actions .view-button {
+        appearance: none;
+        border: none;
+        border-radius: var(--radius-pill);
+        background: linear-gradient(135deg, var(--accent), var(--accent-hover));
+        color: #fff;
+        font-weight: 600;
+        padding: 0.55rem 1.35rem;
+        cursor: pointer;
+        transition: transform 150ms ease, box-shadow 150ms ease, filter 150ms ease;
+      }
+
+      .timeline-actions .view-button:hover,
+      .timeline-actions .view-button:focus-visible {
+        transform: translateY(-1px);
+        box-shadow: 0 16px 32px var(--accent-shadow);
+        outline: none;
+      }
+
+      .timeline-actions .view-button:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+        box-shadow: none;
+      }
+
+      .timeline-empty {
+        background: var(--surface-soft);
+        border-radius: var(--radius-lg);
+        border: 1px dashed var(--border-subtle);
+        padding: var(--space-lg);
+        text-align: center;
+        color: var(--text-muted);
+        font-size: 0.95rem;
+      }
+
+      @media (max-width: 960px) {
+        header.page-header {
+          flex-direction: column;
+          align-items: flex-start;
+        }
+
+        .timeline-controls {
+          flex-direction: column;
+          align-items: flex-start;
+        }
+
+        .timeline-item {
+          grid-template-columns: 1fr;
+        }
+
+        .timeline::before {
+          left: 0.6rem;
+        }
+
+        .timeline-item::before {
+          left: -1.45rem;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="page-header">
+      <div class="brand-group">
+        <strong>RevCam</strong>
+        <span>Surveillance recording timeline</span>
+      </div>
+      <div class="header-actions">
+        <a class="header-link" href="/surveillance">← Back to dashboard</a>
+      </div>
+    </header>
+    <main>
+      <section class="timeline-controls" aria-label="Timeline controls">
+        <div>
+          <h1>Recording timeline</h1>
+          <p class="timeline-status" id="timeline-status" data-tone="busy">
+            Loading timeline…
+          </p>
+        </div>
+        <div class="filter-group" role="group" aria-label="Filter recordings">
+          <button
+            class="filter-button"
+            type="button"
+            data-filter="all"
+            aria-pressed="true"
+          >
+            All recordings
+          </button>
+          <button
+            class="filter-button"
+            type="button"
+            data-filter="manual"
+            aria-pressed="false"
+          >
+            Manual recordings
+          </button>
+          <button
+            class="filter-button"
+            type="button"
+            data-filter="motion"
+            aria-pressed="false"
+          >
+            Motion events
+          </button>
+        </div>
+        <button class="refresh-button" type="button" id="refresh-button">
+          Refresh
+        </button>
+      </section>
+      <section class="timeline" id="timeline" aria-live="polite"></section>
+    </main>
+    <script>
+      const timelineElement = document.getElementById("timeline");
+      const statusElement = document.getElementById("timeline-status");
+      const refreshButton = document.getElementById("refresh-button");
+      const filterButtons = Array.from(
+        document.querySelectorAll(".filter-button[data-filter]")
+      );
+
+      let recordings = [];
+      let activeFilter = "all";
+      let loading = false;
+
+      function setStatus(message, tone = "info") {
+        if (!statusElement) {
+          return;
+        }
+        statusElement.textContent = message;
+        statusElement.dataset.tone = tone;
+      }
+
+      function parseDate(value) {
+        if (typeof value !== "string" || !value) {
+          return null;
+        }
+        const date = new Date(value);
+        return Number.isNaN(date.getTime()) ? null : date;
+      }
+
+      function parseNameTimestamp(name) {
+        if (typeof name !== "string") {
+          return null;
+        }
+        const match = name.match(/^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})/);
+        if (!match) {
+          return null;
+        }
+        const [, year, month, day, hour, minute, second] = match.map(Number);
+        const date = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
+        return Number.isNaN(date.getTime()) ? null : date;
+      }
+
+      function getSortTime(record) {
+        if (!record || typeof record !== "object") {
+          return 0;
+        }
+        const started = parseDate(record.started_at);
+        if (started) {
+          return started.getTime();
+        }
+        const ended = parseDate(record.ended_at);
+        if (ended) {
+          return ended.getTime();
+        }
+        const fallback = parseNameTimestamp(record.name);
+        return fallback ? fallback.getTime() : 0;
+      }
+
+      function formatBytes(bytes) {
+        if (typeof bytes !== "number" || !Number.isFinite(bytes) || bytes <= 0) {
+          return null;
+        }
+        const units = ["B", "KB", "MB", "GB", "TB"];
+        let value = bytes;
+        let unitIndex = 0;
+        while (value >= 1024 && unitIndex < units.length - 1) {
+          value /= 1024;
+          unitIndex += 1;
+        }
+        const precision = value >= 10 || unitIndex === 0 ? 0 : 1;
+        return `${value.toFixed(precision).replace(/\.0$/, "")} ${units[unitIndex]}`;
+      }
+
+      function formatDuration(seconds) {
+        if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds <= 0) {
+          return null;
+        }
+        if (seconds < 90) {
+          const precision = seconds >= 10 ? 0 : 1;
+          return `${seconds.toFixed(precision).replace(/\.0$/, "")} s`;
+        }
+        const wholeSeconds = Math.round(seconds);
+        const minutes = Math.floor(wholeSeconds / 60);
+        const remainingSeconds = wholeSeconds % 60;
+        if (minutes >= 60) {
+          const hours = Math.floor(minutes / 60);
+          const remainingMinutes = minutes % 60;
+          const parts = [`${hours} h`];
+          if (remainingMinutes > 0) {
+            parts.push(`${remainingMinutes} min`);
+          }
+          if (remainingSeconds > 0) {
+            parts.push(`${remainingSeconds} s`);
+          }
+          return parts.join(" ");
+        }
+        if (remainingSeconds === 0) {
+          return `${minutes} min`;
+        }
+        return `${minutes} min ${remainingSeconds} s`;
+      }
+
+      function isMotionRecording(record) {
+        if (!record || typeof record !== "object") {
+          return false;
+        }
+        if (typeof record.motion_event_index === "number") {
+          return true;
+        }
+        if (record.motion_detection && typeof record.motion_detection === "object") {
+          const eventIndex = record.motion_detection.event_index;
+          if (typeof eventIndex === "number") {
+            return true;
+          }
+        }
+        if (typeof record.name === "string" && record.name.includes(".motion")) {
+          return true;
+        }
+        if (typeof record.motion_events === "number" && record.motion_events > 0) {
+          return true;
+        }
+        return false;
+      }
+
+      function normaliseRecords(items) {
+        if (!Array.isArray(items)) {
+          return [];
+        }
+        const map = new Map();
+        items.forEach((entry) => {
+          if (!entry || typeof entry !== "object") {
+            return;
+          }
+          const name = typeof entry.name === "string" ? entry.name : null;
+          if (!name) {
+            return;
+          }
+          const existing = map.get(name);
+          if (!existing) {
+            map.set(name, entry);
+            return;
+          }
+          const existingEnded = Boolean(existing.ended_at);
+          const candidateEnded = Boolean(entry.ended_at);
+          if (!existingEnded && candidateEnded) {
+            map.set(name, entry);
+            return;
+          }
+          if (existing.processing && !entry.processing) {
+            map.set(name, entry);
+            return;
+          }
+          if (
+            (existing.size_bytes == null || existing.size_bytes === 0) &&
+            typeof entry.size_bytes === "number"
+          ) {
+            map.set(name, entry);
+          }
+        });
+        return Array.from(map.values());
+      }
+
+      function describeType(type) {
+        return type === "motion" ? "Motion event" : "Manual recording";
+      }
+
+      function buildTimelineItem(record) {
+        const type = isMotionRecording(record) ? "motion" : "manual";
+        const item = document.createElement("article");
+        item.className = "timeline-item";
+        item.dataset.type = type;
+
+        const thumbnailWrapper = document.createElement("div");
+        thumbnailWrapper.className = "thumbnail-wrapper";
+        const thumbnail = document.createElement("img");
+        thumbnail.className = "timeline-thumbnail";
+        if (typeof record.thumbnail === "string" && record.thumbnail.length > 0) {
+          thumbnail.src = `data:image/jpeg;base64,${record.thumbnail}`;
+          thumbnail.alt = `Recording ${record.name} thumbnail`;
+          thumbnailWrapper.appendChild(thumbnail);
+        } else {
+          const placeholder = document.createElement("div");
+          placeholder.className = "thumbnail-placeholder";
+          placeholder.textContent = "No preview available";
+          thumbnailWrapper.appendChild(placeholder);
+        }
+        item.appendChild(thumbnailWrapper);
+
+        const content = document.createElement("div");
+        content.className = "timeline-content";
+
+        const title = document.createElement("div");
+        title.className = "timeline-title";
+        const nameElement = document.createElement("strong");
+        nameElement.textContent = typeof record.name === "string" ? record.name : "Recording";
+        const chip = document.createElement("span");
+        chip.className = "timeline-chip";
+        chip.textContent = describeType(type);
+        title.appendChild(nameElement);
+        title.appendChild(chip);
+        content.appendChild(title);
+
+        const meta = document.createElement("div");
+        meta.className = "timeline-meta";
+        const startedAt = parseDate(record.started_at) || parseNameTimestamp(record.name);
+        if (startedAt) {
+          const span = document.createElement("span");
+          span.textContent = `Started ${startedAt.toLocaleString()}`;
+          meta.appendChild(span);
+        }
+        if (typeof record.duration_seconds === "number") {
+          const label = formatDuration(record.duration_seconds);
+          if (label) {
+            const span = document.createElement("span");
+            span.textContent = `Duration ${label}`;
+            meta.appendChild(span);
+          }
+        }
+        if (typeof record.frame_count === "number") {
+          const span = document.createElement("span");
+          span.textContent = `${record.frame_count} frame${record.frame_count === 1 ? "" : "s"}`;
+          meta.appendChild(span);
+        }
+        if (typeof record.size_bytes === "number") {
+          const label = formatBytes(record.size_bytes);
+          if (label) {
+            const span = document.createElement("span");
+            span.textContent = `Size ${label}`;
+            meta.appendChild(span);
+          }
+        }
+        if (type === "motion") {
+          if (typeof record.motion_event_index === "number") {
+            const span = document.createElement("span");
+            span.textContent = `Motion clip #${record.motion_event_index}`;
+            meta.appendChild(span);
+          }
+          if (
+            typeof record.motion_events === "number" &&
+            record.motion_events > 1 &&
+            !meta.textContent.includes("clip #")
+          ) {
+            const span = document.createElement("span");
+            span.textContent = `${record.motion_events} motion events`;
+            meta.appendChild(span);
+          }
+        }
+        if (meta.childElementCount > 0) {
+          content.appendChild(meta);
+        }
+
+        const statusLine = document.createElement("p");
+        statusLine.className = "timeline-status-line";
+        if (record.processing_error) {
+          statusLine.dataset.tone = "error";
+          statusLine.textContent = `Processing failed: ${record.processing_error}`;
+        } else if (record.processing) {
+          statusLine.textContent = "Processing video clip…";
+        } else if (typeof record.stop_reason === "string") {
+          statusLine.textContent = `Finished (${record.stop_reason.replace(/_/g, " ")})`;
+        } else {
+          statusLine.textContent = "Ready to play";
+        }
+        content.appendChild(statusLine);
+
+        const actions = document.createElement("div");
+        actions.className = "timeline-actions";
+        const viewButton = document.createElement("button");
+        viewButton.type = "button";
+        viewButton.className = "view-button";
+        viewButton.textContent = record.processing ? "Processing…" : "View recording";
+        viewButton.disabled = Boolean(record.processing);
+        viewButton.addEventListener("click", () => {
+          if (typeof record.name === "string" && record.name) {
+            const href = `/surveillance/player?name=${encodeURIComponent(record.name)}`;
+            window.location.href = href;
+          }
+        });
+        actions.appendChild(viewButton);
+        content.appendChild(actions);
+
+        item.appendChild(content);
+        return item;
+      }
+
+      function applyFilter(items, filter) {
+        if (filter === "motion") {
+          return items.filter((item) => isMotionRecording(item));
+        }
+        if (filter === "manual") {
+          return items.filter((item) => !isMotionRecording(item));
+        }
+        return items.slice();
+      }
+
+      function renderTimeline() {
+        if (!timelineElement) {
+          return;
+        }
+        timelineElement.innerHTML = "";
+        const filtered = applyFilter(recordings, activeFilter)
+          .slice()
+          .sort((a, b) => getSortTime(a) - getSortTime(b));
+        if (!filtered.length) {
+          const empty = document.createElement("div");
+          empty.className = "timeline-empty";
+          empty.textContent =
+            activeFilter === "all"
+              ? "No recordings available yet."
+              : "No recordings match the selected filter.";
+          timelineElement.appendChild(empty);
+          setStatus(empty.textContent, "info");
+          return;
+        }
+        filtered.forEach((record) => {
+          timelineElement.appendChild(buildTimelineItem(record));
+        });
+        const count = filtered.length;
+        const label =
+          count === 1
+            ? "Displaying 1 recording."
+            : `Displaying ${count} recordings.`;
+        setStatus(label, "info");
+      }
+
+      async function loadRecordings() {
+        if (loading) {
+          return;
+        }
+        loading = true;
+        if (refreshButton) {
+          refreshButton.disabled = true;
+        }
+        setStatus("Loading timeline…", "busy");
+        try {
+          const response = await fetch("/api/surveillance/recordings", {
+            cache: "no-store",
+          });
+          if (!response.ok) {
+            throw new Error(`Request failed with ${response.status}`);
+          }
+          const payload = await response.json();
+          recordings = normaliseRecords(payload && payload.recordings);
+          renderTimeline();
+        } catch (error) {
+          console.error("Failed to load surveillance recordings", error);
+          setStatus("Unable to load recordings", "error");
+          if (timelineElement && !timelineElement.childElementCount) {
+            const empty = document.createElement("div");
+            empty.className = "timeline-empty";
+            empty.textContent = "Unable to load recordings.";
+            timelineElement.appendChild(empty);
+          }
+        } finally {
+          loading = false;
+          if (refreshButton) {
+            refreshButton.disabled = false;
+          }
+        }
+      }
+
+      function setActiveFilter(filter) {
+        activeFilter = filter;
+        filterButtons.forEach((button) => {
+          const isActive = button.dataset.filter === filter;
+          button.setAttribute("aria-pressed", String(isActive));
+        });
+        renderTimeline();
+      }
+
+      filterButtons.forEach((button) => {
+        button.addEventListener("click", () => {
+          const target = button.dataset.filter || "all";
+          setActiveFilter(target);
+        });
+      });
+
+      if (refreshButton) {
+        refreshButton.addEventListener("click", () => {
+          loadRecordings();
+        });
+      }
+
+      loadRecordings();
+    </script>
+  </body>
+</html>
