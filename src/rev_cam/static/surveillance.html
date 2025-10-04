@@ -1248,8 +1248,10 @@
           buttons.forEach((button) => {
             button.disabled = true;
           });
+          let stoppingManual = false;
           try {
-            await executeManualToggle({ resumePreviousMotion: true });
+            const result = await executeManualToggle({ resumePreviousMotion: true });
+            stoppingManual = Boolean(result && result.stoppingManual);
           } catch (error) {
             console.error("Manual recording control error", error);
             const message =
@@ -1262,17 +1264,17 @@
             });
             return;
           }
-          try {
-            await loadStatus({ showLoading: true });
-          } catch (error) {
+          buttons.forEach((button) => {
+            button.disabled = false;
+          });
+          const expectedSession = stoppingManual ? "idle" : sessionState;
+          applySessionVisuals(expectedSession);
+          const statusPromise = loadStatus({ showLoading: true });
+          statusPromise.catch((error) => {
             console.error("Recording status refresh error", error);
             applySessionVisuals(sessionState);
             scheduleStatusRefresh();
-          } finally {
-            buttons.forEach((button) => {
-              button.disabled = false;
-            });
-          }
+          });
         });
       }
 
@@ -1282,9 +1284,9 @@
           buttons.forEach((button) => {
             button.disabled = true;
           });
+          const motionActive =
+            sessionState === "motion-monitoring" || sessionState === "motion-recording";
           try {
-            const motionActive =
-              sessionState === "motion-monitoring" || sessionState === "motion-recording";
             if (motionActive) {
               await postRecordingCommand("/api/surveillance/recordings/stop", {
                 allowConflict: true,
@@ -1305,17 +1307,17 @@
             });
             return;
           }
-          try {
-            await loadStatus({ showLoading: true });
-          } catch (error) {
+          buttons.forEach((button) => {
+            button.disabled = false;
+          });
+          const nextSession = motionActive ? "idle" : "motion-monitoring";
+          applySessionVisuals(nextSession);
+          const statusPromise = loadStatus({ showLoading: true });
+          statusPromise.catch((error) => {
             console.error("Motion detection status refresh error", error);
             applySessionVisuals(sessionState);
             scheduleStatusRefresh();
-          } finally {
-            buttons.forEach((button) => {
-              button.disabled = false;
-            });
-          }
+          });
         });
       }
 
