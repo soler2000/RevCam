@@ -73,7 +73,7 @@
       .playback-controls {
         display: flex;
         flex-direction: column;
-        gap: 0.35rem;
+        gap: 0.75rem;
         padding-inline: 0.4rem;
       }
       .playback-controls[hidden] {
@@ -97,6 +97,88 @@
       input[type="range"]:disabled {
         cursor: not-allowed;
         opacity: 0.5;
+      }
+      .transport {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+      }
+      .transport-buttons {
+        display: flex;
+        gap: 0.5rem;
+        align-items: center;
+        justify-content: center;
+        flex-wrap: wrap;
+      }
+      .transport-buttons button {
+        min-width: 3rem;
+      }
+      .playback-options {
+        display: flex;
+        gap: 0.75rem;
+        justify-content: center;
+        flex-wrap: wrap;
+        align-items: center;
+        color: var(--text-muted);
+        font-size: 0.85rem;
+      }
+      .playback-options label {
+        display: flex;
+        gap: 0.35rem;
+        align-items: center;
+      }
+      button,
+      select {
+        font: inherit;
+      }
+      button {
+        border: 1px solid var(--border-subtle);
+        background: rgba(255, 255, 255, 0.04);
+        color: var(--text-primary);
+        padding: 0.45rem 0.8rem;
+        border-radius: 999px;
+        cursor: pointer;
+        transition: background 0.15s ease, border-color 0.15s ease;
+      }
+      button:hover,
+      button:focus-visible {
+        background: rgba(10, 132, 255, 0.18);
+        border-color: rgba(10, 132, 255, 0.55);
+        outline: none;
+      }
+      button:disabled {
+        cursor: not-allowed;
+        opacity: 0.5;
+      }
+      select {
+        border-radius: 999px;
+        border: 1px solid var(--border-subtle);
+        background: rgba(255, 255, 255, 0.03);
+        color: var(--text-primary);
+        padding: 0.35rem 0.75rem;
+      }
+      select:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+      }
+      .play-pause-button[aria-pressed="true"] {
+        background: rgba(10, 132, 255, 0.25);
+        border-color: rgba(10, 132, 255, 0.7);
+      }
+      .loop-button[aria-pressed="true"] {
+        background: rgba(10, 132, 255, 0.2);
+        border-color: rgba(10, 132, 255, 0.6);
       }
       .error {
         color: var(--danger);
@@ -135,6 +217,53 @@
           step="1"
           aria-label="Scrub through recording"
         />
+        <div class="transport" role="group" aria-label="Playback controls">
+          <div class="transport-buttons">
+            <button type="button" id="jump-start" aria-label="Go to start">
+              ⏮
+            </button>
+            <button type="button" id="frame-back" aria-label="Step back one frame">
+              ⏪
+            </button>
+            <button
+              type="button"
+              id="play-pause"
+              class="play-pause-button"
+              aria-pressed="false"
+              aria-label="Play or pause recording"
+            >
+              Play
+            </button>
+            <button type="button" id="frame-forward" aria-label="Step forward one frame">
+              ⏩
+            </button>
+            <button type="button" id="jump-end" aria-label="Go to end">
+              ⏭
+            </button>
+          </div>
+          <div class="playback-options">
+            <label for="playback-rate">
+              Speed
+              <select id="playback-rate" aria-label="Playback speed">
+                <option value="0.25">0.25×</option>
+                <option value="0.5">0.5×</option>
+                <option value="0.75">0.75×</option>
+                <option value="1" selected>1×</option>
+                <option value="1.5">1.5×</option>
+                <option value="2">2×</option>
+              </select>
+            </label>
+            <button
+              type="button"
+              id="loop-toggle"
+              class="loop-button"
+              aria-pressed="false"
+              aria-label="Toggle looping playback"
+            >
+              Loop off
+            </button>
+          </div>
+        </div>
       </div>
       <p class="muted">
         <a class="link" href="/surveillance">Back to surveillance</a>
@@ -152,6 +281,13 @@
       const playbackSlider = document.getElementById("playback-slider");
       const currentTimeLabel = document.getElementById("current-time");
       const totalTimeLabel = document.getElementById("total-time");
+      const playPauseButton = document.getElementById("play-pause");
+      const frameBackButton = document.getElementById("frame-back");
+      const frameForwardButton = document.getElementById("frame-forward");
+      const jumpStartButton = document.getElementById("jump-start");
+      const jumpEndButton = document.getElementById("jump-end");
+      const loopToggleButton = document.getElementById("loop-toggle");
+      const playbackRateSelect = document.getElementById("playback-rate");
 
       const playbackState = {
         frames: [],
@@ -162,6 +298,9 @@
         timer: null,
         isScrubbing: false,
         totalDuration: 0,
+        isPlaying: false,
+        isLooping: false,
+        playbackRate: 1,
       };
 
       function setStatus(message, tone = "info") {
@@ -220,6 +359,53 @@
         }
       }
 
+      function updateTransportState() {
+        const { frames, index, isPlaying, isLooping } = playbackState;
+        const multiFrame = frames.length > 1;
+        const lastIndex = Math.max(0, frames.length - 1);
+
+        if (playPauseButton) {
+          playPauseButton.disabled = !multiFrame;
+          playPauseButton.textContent = isPlaying ? "Pause" : "Play";
+          playPauseButton.setAttribute("aria-pressed", isPlaying ? "true" : "false");
+          playPauseButton.setAttribute(
+            "aria-label",
+            isPlaying ? "Pause recording" : "Play recording",
+          );
+        }
+        if (frameBackButton) {
+          frameBackButton.disabled = !multiFrame || index <= 0;
+        }
+        if (frameForwardButton) {
+          frameForwardButton.disabled = !multiFrame || index >= lastIndex;
+        }
+        if (jumpStartButton) {
+          jumpStartButton.disabled = !multiFrame || index <= 0;
+        }
+        if (jumpEndButton) {
+          jumpEndButton.disabled = !multiFrame || index >= lastIndex;
+        }
+        if (loopToggleButton) {
+          loopToggleButton.disabled = !multiFrame;
+          loopToggleButton.textContent = isLooping ? "Loop on" : "Loop off";
+          loopToggleButton.setAttribute("aria-pressed", isLooping ? "true" : "false");
+        }
+        if (playbackRateSelect) {
+          playbackRateSelect.disabled = !multiFrame;
+        }
+      }
+
+      function getFrameDelay(index) {
+        const baseInterval = playbackState.intervals[index] ?? playbackState.fallbackInterval;
+        const rate = playbackState.playbackRate > 0 ? playbackState.playbackRate : 1;
+        const scaled = baseInterval / rate;
+        const minimum = 16;
+        if (!Number.isFinite(scaled) || scaled <= 0) {
+          return Math.max(minimum, playbackState.fallbackInterval);
+        }
+        return Math.max(minimum, Math.round(scaled));
+      }
+
       function showFrame(index, { updateSlider = true } = {}) {
         if (!playbackFrame || !playbackState.frames.length) {
           return;
@@ -240,24 +426,134 @@
           playbackSlider.value = String(normalizedIndex);
         }
         updateTimeDisplay(normalizedIndex);
+        updateTransportState();
       }
 
       function scheduleNextFrame() {
         stopPlaybackTimer();
-        if (playbackState.isScrubbing || playbackState.frames.length <= 1) {
+        if (
+          !playbackState.isPlaying ||
+          playbackState.isScrubbing ||
+          playbackState.frames.length <= 1
+        ) {
           return;
         }
         const currentIndex = playbackState.index;
-        const delay = playbackState.intervals[currentIndex] ?? playbackState.fallbackInterval;
+        const delay = getFrameDelay(currentIndex);
         playbackState.timer = window.setTimeout(() => {
-          if (playbackState.isScrubbing || !playbackState.frames.length) {
-            scheduleNextFrame();
+          playbackState.timer = null;
+          if (
+            !playbackState.isPlaying ||
+            playbackState.isScrubbing ||
+            !playbackState.frames.length
+          ) {
             return;
           }
-          const nextIndex = (playbackState.index + 1) % playbackState.frames.length;
+          let nextIndex = playbackState.index + 1;
+          if (nextIndex >= playbackState.frames.length) {
+            if (playbackState.isLooping && playbackState.frames.length) {
+              nextIndex = 0;
+              showFrame(nextIndex);
+              scheduleNextFrame();
+            } else {
+              playbackState.isPlaying = false;
+              updateTransportState();
+            }
+            return;
+          }
           showFrame(nextIndex);
           scheduleNextFrame();
         }, delay);
+      }
+
+      function pausePlayback() {
+        if (!playbackState.frames.length) {
+          return;
+        }
+        playbackState.isPlaying = false;
+        stopPlaybackTimer();
+        updateTransportState();
+      }
+
+      function startPlayback({ restart = false } = {}) {
+        if (!playbackState.frames.length) {
+          return;
+        }
+        if (playbackState.frames.length <= 1) {
+          playbackState.isPlaying = false;
+          updateTransportState();
+          return;
+        }
+        if (
+          restart ||
+          (playbackState.index >= playbackState.frames.length - 1 && !playbackState.isLooping)
+        ) {
+          showFrame(0);
+        }
+        playbackState.isPlaying = true;
+        updateTransportState();
+        scheduleNextFrame();
+      }
+
+      function togglePlayback() {
+        if (playbackState.isPlaying) {
+          pausePlayback();
+        } else {
+          startPlayback();
+        }
+      }
+
+      function stepFrame(step) {
+        if (!playbackState.frames.length || !Number.isFinite(step)) {
+          return;
+        }
+        const target = Math.max(
+          0,
+          Math.min(playbackState.index + Math.trunc(step), playbackState.frames.length - 1),
+        );
+        pausePlayback();
+        showFrame(target);
+      }
+
+      function jumpToStart() {
+        if (!playbackState.frames.length) {
+          return;
+        }
+        showFrame(0);
+        if (playbackState.isPlaying) {
+          scheduleNextFrame();
+        }
+      }
+
+      function jumpToEnd() {
+        if (!playbackState.frames.length) {
+          return;
+        }
+        const lastIndex = playbackState.frames.length - 1;
+        showFrame(lastIndex);
+        pausePlayback();
+      }
+
+      function toggleLooping() {
+        if (!playbackState.frames.length) {
+          return;
+        }
+        playbackState.isLooping = !playbackState.isLooping;
+        updateTransportState();
+        if (playbackState.isPlaying) {
+          scheduleNextFrame();
+        }
+      }
+
+      function setPlaybackRate(rate) {
+        if (!Number.isFinite(rate) || rate <= 0) {
+          return;
+        }
+        playbackState.playbackRate = rate;
+        updateTransportState();
+        if (playbackState.isPlaying) {
+          scheduleNextFrame();
+        }
       }
 
       function prepareControls(playable, frameTimes, intervals, fallbackInterval, cycleDurationMs) {
@@ -277,6 +573,9 @@
         playbackState.totalDuration = derivedTotal > 0 ? derivedTotal : cycleSeconds;
         playbackState.index = 0;
         playbackState.isScrubbing = false;
+        playbackState.isPlaying = false;
+        playbackState.isLooping = false;
+        playbackState.playbackRate = 1;
         stopPlaybackTimer();
 
         if (playbackControls) {
@@ -287,7 +586,15 @@
           playbackSlider.value = "0";
           playbackSlider.disabled = playable.length <= 1;
         }
+        if (playbackRateSelect) {
+          playbackRateSelect.value = "1";
+        }
+        if (loopToggleButton) {
+          loopToggleButton.setAttribute("aria-pressed", "false");
+          loopToggleButton.textContent = "Loop off";
+        }
         updateTimeDisplay(0);
+        updateTransportState();
       }
 
       function setupSliderEvents() {
@@ -303,10 +610,16 @@
         };
         const endScrub = () => {
           if (!playbackState.frames.length) {
+            playbackState.isScrubbing = false;
+            updateTransportState();
             return;
           }
           playbackState.isScrubbing = false;
-          scheduleNextFrame();
+          if (playbackState.isPlaying) {
+            scheduleNextFrame();
+          } else {
+            updateTransportState();
+          }
         };
         playbackSlider.addEventListener("input", (event) => {
           if (!playbackState.frames.length) {
@@ -333,6 +646,47 @@
         });
         playbackSlider.dataset.enhanced = "true";
       }
+
+      if (playPauseButton) {
+        playPauseButton.addEventListener("click", () => {
+          togglePlayback();
+        });
+      }
+      if (frameBackButton) {
+        frameBackButton.addEventListener("click", () => {
+          stepFrame(-1);
+        });
+      }
+      if (frameForwardButton) {
+        frameForwardButton.addEventListener("click", () => {
+          stepFrame(1);
+        });
+      }
+      if (jumpStartButton) {
+        jumpStartButton.addEventListener("click", () => {
+          jumpToStart();
+        });
+      }
+      if (jumpEndButton) {
+        jumpEndButton.addEventListener("click", () => {
+          jumpToEnd();
+        });
+      }
+      if (loopToggleButton) {
+        loopToggleButton.addEventListener("click", () => {
+          toggleLooping();
+        });
+      }
+      if (playbackRateSelect) {
+        playbackRateSelect.addEventListener("change", (event) => {
+          const value = Number(event.target && event.target.value);
+          if (Number.isFinite(value) && value > 0) {
+            setPlaybackRate(value);
+          }
+        });
+      }
+
+      updateTransportState();
 
       function renderMeta(data) {
         metaList.innerHTML = "";
@@ -495,7 +849,7 @@
         setupSliderEvents();
         prepareControls(playable, frameTimes, intervals, fallbackInterval, cycleDurationMs);
         showFrame(0);
-        scheduleNextFrame();
+        startPlayback();
       }
 
       async function loadRecording() {
