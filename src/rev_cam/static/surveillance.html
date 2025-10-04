@@ -486,6 +486,7 @@
       let recordingTimerStartMs = null;
       let recordingTimerInterval = null;
       let recordingTimerSource = null;
+      let lastMotionSnapshot = null;
       const STATUS_REFRESH_ACTIVE_MS = 2000;
       const STATUS_REFRESH_IDLE_MS = 5000;
       let statusRefreshHandle = null;
@@ -964,6 +965,7 @@
           const storage = payload ? payload.storage : null;
           updateStorage(storage);
           const motionSnapshot = payload ? payload.motion : null;
+          lastMotionSnapshot = motionSnapshot;
           updateMotionIndicators(motionSnapshot);
           const startedAtIso =
             payload && typeof payload.recording_started_at === "string"
@@ -1038,7 +1040,19 @@
             if (!response.ok) {
               throw new Error(`Recording request failed with ${response.status}`);
             }
-            manualRecordingPinned = !stopMode;
+            if (stopMode) {
+              manualRecordingPinned = false;
+              recordingMode = "idle";
+              isRecording = false;
+              stopRecordingTimer();
+            } else {
+              manualRecordingPinned = true;
+              recordingMode = "continuous";
+              isRecording = true;
+              startRecordingTimer(new Date().toISOString());
+            }
+            updateControlButtons();
+            updateMotionIndicators(lastMotionSnapshot);
           } catch (error) {
             console.error("Recording control error", error);
             setStatus("Recording request failed", "error");
@@ -1052,9 +1066,7 @@
           } catch (error) {
             console.error("Recording status refresh error", error);
           } finally {
-            buttons.forEach((button) => {
-              button.disabled = false;
-            });
+            updateControlButtons();
           }
         });
       }
@@ -1093,9 +1105,7 @@
           } catch (error) {
             console.error("Motion recording status refresh error", error);
           } finally {
-            buttons.forEach((button) => {
-              button.disabled = false;
-            });
+            updateControlButtons();
           }
         });
       }
