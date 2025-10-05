@@ -274,7 +274,7 @@ async def test_chunk_codec_fallback(tmp_path: Path, monkeypatch, anyio_backend) 
     original_add_frame = recording._ActiveChunkWriter.add_frame
 
     def _failing_add_frame(self, array, timestamp):
-        if self.codec == "h264":
+        if self.codec in {"h264", "mjpeg"}:
             failure_flag["raised"] = True
             raise av.FFmpegError(-541478725, "codec not found")
         return original_add_frame(self, array, timestamp)
@@ -297,9 +297,12 @@ async def test_chunk_codec_fallback(tmp_path: Path, monkeypatch, anyio_backend) 
     chunks = metadata.get("chunks") or []
     assert chunks
     assert failure_flag["raised"] is True
-    assert all(entry.get("codec") == "mjpeg" for entry in chunks)
-    assert all(entry.get("media_type") == "video/x-motion-jpeg" for entry in chunks)
-    assert all(entry.get("file", "").endswith(".avi") for entry in chunks)
+    assert all(entry.get("codec") == "jpeg-fallback" for entry in chunks)
+    assert all(
+        str(entry.get("media_type", "")).startswith("multipart/x-mixed-replace")
+        for entry in chunks
+    )
+    assert all(entry.get("file", "").endswith(".mjpeg") for entry in chunks)
 
     await manager.aclose()
 

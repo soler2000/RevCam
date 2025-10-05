@@ -15,7 +15,15 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import SpooledTemporaryFile
-from typing import AsyncGenerator, Awaitable, Callable, Iterable, Mapping
+from typing import (
+    IO,
+    AsyncGenerator,
+    Awaitable,
+    Callable,
+    Iterable,
+    Mapping,
+    Protocol,
+)
 
 import av
 import simplejpeg
@@ -71,6 +79,43 @@ def _codec_profile(codec: str) -> Mapping[str, str]:
         "pixel_format": "yuv420p",
         "media_type": "video/mp4",
     }
+
+
+def _extract_multipart_boundary(media_type: str) -> str | None:
+    if not isinstance(media_type, str):
+        return None
+    parts = [segment.strip() for segment in media_type.split(";")]
+    if not parts or not parts[0].lower().startswith("multipart/x-mixed-replace"):
+        return None
+    for segment in parts[1:]:
+        if not segment.lower().startswith("boundary="):
+            continue
+        boundary = segment.split("=", 1)[1].strip().strip('"')
+        if boundary:
+            return boundary
+    return None
+
+
+def _iter_mjpeg_frames(path: Path, boundary: str) -> Iterable[bytes]:
+    marker = f"--{boundary}".encode("ascii", errors="ignore")
+    try:
+        data = path.read_bytes()
+    except OSError:  # pragma: no cover - best-effort read
+        return []
+    if not marker or marker not in data:
+        return []
+    payloads: list[bytes] = []
+    for part in data.split(marker):
+        part = part.strip()
+        if not part or part == b"--":
+            continue
+        header, _, body = part.partition(b"\r\n\r\n")
+        if not _:
+            continue
+        payload = body.rstrip(b"\r\n")
+        if payload:
+            payloads.append(payload)
+    return payloads
 
 
 def _utcnow() -> datetime:
@@ -257,6 +302,19 @@ def iter_recording_frames(
         for entry, chunk_path in chunk_sources:
             if not chunk_path.exists() or not chunk_path.is_file():
                 continue
+            boundary = None
+            if isinstance(entry, Mapping):
+                media_type = entry.get("media_type")
+                if isinstance(media_type, str):
+                    boundary = _extract_multipart_boundary(media_type)
+            if boundary:
+                for payload in _iter_mjpeg_frames(chunk_path, boundary):
+                    try:
+                        array = simplejpeg.decode_jpeg(payload, colorspace="BGR")
+                    except Exception:  # pragma: no cover - skip invalid frames
+                        continue
+                    yield {"array": array, "chunk": dict(entry)}
+                continue
             try:
                 container = av.open(str(chunk_path), mode="r")
             except Exception:  # pragma: no cover - defensive open
@@ -418,6 +476,8 @@ def remove_recording_files(directory: Path, name: str) -> None:
 
     for pattern in (
         f"{safe_name}.chunk*.mp4",
+        f"{safe_name}.chunk*.avi",
+        f"{safe_name}.chunk*.mjpeg",
         f"{safe_name}.chunk*.json",
         f"{safe_name}.chunk*.json.gz",
     ):
@@ -679,9 +739,31 @@ class MotionDetector:
         return numeric
 
 
+class _ChunkWriter(Protocol):
+    """Protocol implemented by active chunk writers."""
+
+    name: str
+    index: int
+    path: Path
+    fps: float
+    codec: str
+    media_type: str
+    frame_count: int
+    bytes_written: int
+
+    def add_frame(self, array: "_np.ndarray", timestamp: float) -> None:
+        ...
+
+    def finalise(self) -> dict[str, object]:
+        ...
+
+    def abort(self) -> None:
+        ...
+
+
 @dataclass
 class _ActiveChunkWriter:
-    """Active MP4 chunk that receives frames incrementally."""
+    """Active FFmpeg-backed chunk that receives frames incrementally."""
 
     name: str
     index: int
@@ -767,6 +849,100 @@ class _ActiveChunkWriter:
 
 
 @dataclass
+class _JpegChunkWriter:
+    """Fallback chunk writer that stores frames as a multipart MJPEG stream."""
+
+    name: str
+    index: int
+    path: Path
+    fps: float
+    jpeg_quality: int
+    boundary: str
+    codec: str = field(init=False, default="jpeg-fallback")
+    media_type: str = field(init=False)
+    frame_count: int = field(init=False, default=0)
+    first_timestamp: float | None = field(init=False, default=None)
+    last_timestamp: float | None = field(init=False, default=None)
+    bytes_written: int = field(init=False, default=0)
+    _handle: IO[bytes] | None = field(init=False, default=None)
+
+    def __post_init__(self) -> None:
+        self.media_type = f"multipart/x-mixed-replace; boundary={self.boundary}"
+        self._handle = self.path.open("wb")
+
+    def _write(self, payload: bytes) -> None:
+        handle = self._handle
+        if handle is None:
+            raise RuntimeError("Chunk writer is closed")
+        handle.write(payload)
+        self.bytes_written += len(payload)
+
+    def add_frame(self, array: "_np.ndarray", timestamp: float) -> None:
+        if self._handle is None:
+            raise RuntimeError("Chunk writer is closed")
+        if self.first_timestamp is None:
+            self.first_timestamp = float(timestamp)
+        self.last_timestamp = float(timestamp)
+        jpeg = simplejpeg.encode_jpeg(
+            array,
+            quality=max(1, min(100, int(self.jpeg_quality))),
+            colorspace="BGR",
+        )
+        marker = f"--{self.boundary}\r\n".encode("ascii")
+        header = (
+            b"Content-Type: image/jpeg\r\n"
+            + f"Content-Length: {len(jpeg)}\r\n\r\n".encode("ascii")
+        )
+        self._write(marker + header + jpeg + b"\r\n")
+        self.frame_count += 1
+
+    def finalise(self) -> dict[str, object]:
+        handle = self._handle
+        if handle is None:
+            raise RuntimeError("Chunk writer is closed")
+        trailer = f"--{self.boundary}--\r\n".encode("ascii")
+        self._write(trailer)
+        handle.flush()
+        handle.close()
+        self._handle = None
+        try:
+            size = max(self.bytes_written, self.path.stat().st_size)
+        except OSError:  # pragma: no cover - best-effort stat
+            size = self.bytes_written
+        self.bytes_written = int(size)
+        duration = 0.0
+        if self.frame_count and self.fps > 0:
+            duration = float(self.frame_count) / float(self.fps)
+        entry: dict[str, object] = {
+            "file": self.path.name,
+            "frame_count": int(self.frame_count),
+            "size_bytes": int(self.bytes_written),
+            "duration_seconds": round(duration, 3),
+            "media_type": self.media_type,
+            "codec": self.codec,
+        }
+        if self.first_timestamp is not None:
+            entry["start_offset_seconds"] = round(float(self.first_timestamp), 3)
+        return entry
+
+    def abort(self) -> None:
+        handle = self._handle
+        if handle is not None:
+            try:
+                handle.close()
+            except Exception:  # pragma: no cover - best-effort cleanup
+                pass
+            self._handle = None
+        try:
+            if self.path.exists():
+                self.path.unlink()
+        except OSError:  # pragma: no cover - best-effort cleanup
+            pass
+        self.bytes_written = 0
+        self.frame_count = 0
+
+
+@dataclass
 class RecordingManager:
     """Capture frames for surveillance recordings with MJPEG preview support."""
 
@@ -792,7 +968,7 @@ class RecordingManager:
     _state_lock: asyncio.Lock = field(init=False, default_factory=asyncio.Lock)
     _frame_interval: float = field(init=False)
     _recording_active: bool = field(init=False, default=False)
-    _active_chunk: _ActiveChunkWriter | None = field(init=False, default=None)
+    _active_chunk: _ChunkWriter | None = field(init=False, default=None)
     _chunk_entries: list[dict[str, object]] = field(init=False, default_factory=list)
     _chunk_index: int = field(init=False, default=0)
     _chunk_frame_limit: int = field(init=False, default=0)
@@ -832,6 +1008,7 @@ class RecordingManager:
     _preferred_video_codec: str | None = field(init=False, default=None)
     _codec_failures: set[str] = field(init=False, default_factory=set)
     _video_encoding_disabled: bool = field(init=False, default=False)
+    _use_fallback_encoder: bool = field(init=False, default=False)
 
     def __post_init__(self) -> None:
         if self.fps <= 0:
@@ -1123,7 +1300,7 @@ class RecordingManager:
         motion_frame_decimation: int | float | None = None,
         motion_post_event_seconds: float | int | None = None,
     ) -> None:
-        flush_request: _ActiveChunkWriter | None = None
+        flush_request: _ChunkWriter | None = None
         finalise_context: _FinaliseContext | None = None
         async with self._state_lock:
             chunk_limit_needs_update = False
@@ -1324,7 +1501,7 @@ class RecordingManager:
         storage_limit_reached = False
         storage_status: dict[str, float | int] | None = None
         should_record = False
-        flush_request: _ActiveChunkWriter | None = None
+        flush_request: _ChunkWriter | None = None
         finalise_context: _FinaliseContext | None = None
         async with self._state_lock:
             if not self._recording_active:
@@ -1426,7 +1603,7 @@ class RecordingManager:
                 self._total_frame_count += 1
                 self._motion_detector.notify_recorded()
                 chunk_frame_count = 0
-                chunk_writer: _ActiveChunkWriter | None = None
+                chunk_writer: _ChunkWriter | None = None
                 if _np is not None:
                     chunk_writer = self._append_frame_to_chunk_locked(frame, timestamp)
                 if chunk_writer is not None:
@@ -1782,7 +1959,7 @@ class RecordingManager:
         if self._preferred_video_codec == codec:
             self._preferred_video_codec = None
 
-    def _handle_chunk_failure(self, chunk: _ActiveChunkWriter) -> None:
+    def _handle_chunk_failure(self, chunk: _ChunkWriter) -> None:
         try:
             chunk.abort()
         finally:
@@ -1792,7 +1969,7 @@ class RecordingManager:
 
     def _get_or_create_chunk(
         self, array: "_np.ndarray"
-    ) -> _ActiveChunkWriter | None:
+    ) -> _ChunkWriter | None:
         chunk = self._active_chunk
         if chunk is not None:
             return chunk
@@ -1809,8 +1986,8 @@ class RecordingManager:
 
     def _create_chunk_writer(
         self, name: str, index: int, array: "_np.ndarray"
-    ) -> _ActiveChunkWriter | None:
-        if self._video_encoding_disabled:
+    ) -> _ChunkWriter | None:
+        if self._video_encoding_disabled and not self._use_fallback_encoder:
             return None
         frame_rate = 1.0 if self.fps <= 0 else float(self.fps)
         frame_rate_fraction = Fraction(str(frame_rate)).limit_denominator(1000)
@@ -1826,6 +2003,16 @@ class RecordingManager:
                 path.unlink()
             except OSError:  # pragma: no cover - defensive cleanup
                 pass
+        if self._use_fallback_encoder:
+            fallback = self._create_fallback_chunk_writer(
+                name,
+                index,
+                frame_rate,
+            )
+            if fallback is not None:
+                return fallback
+            self._video_encoding_disabled = True
+            return None
         while True:
             codec_name = self._select_video_codec()
             if codec_name is None:
@@ -1833,6 +2020,15 @@ class RecordingManager:
                     logger.error(
                         "Disabling surveillance chunk recording: %s", last_error
                     )
+                fallback = self._create_fallback_chunk_writer(
+                    name,
+                    index,
+                    frame_rate,
+                )
+                if fallback is not None:
+                    self._use_fallback_encoder = True
+                    self._preferred_video_codec = None
+                    return fallback
                 self._video_encoding_disabled = True
                 return None
             try:
@@ -1883,9 +2079,42 @@ class RecordingManager:
                 media_type=codec_profile.get("media_type", "video/mp4"),
             )
 
+    def _create_fallback_chunk_writer(
+        self, name: str, index: int, frame_rate: float
+    ) -> _ChunkWriter | None:
+        filename = self._chunk_filename(name, index, "mjpeg")
+        path = self.directory / filename
+        if path.exists():
+            try:
+                path.unlink()
+            except OSError:  # pragma: no cover - defensive cleanup
+                pass
+        boundary = f"chunk{index:03d}"
+        try:
+            writer = _JpegChunkWriter(
+                name=name,
+                index=index,
+                path=path,
+                fps=frame_rate,
+                jpeg_quality=self.jpeg_quality,
+                boundary=boundary,
+            )
+        except Exception as exc:  # pragma: no cover - best-effort logging
+            logger.error(
+                "Failed to create MJPEG fallback chunk %s for %s: %s",
+                index,
+                name,
+                exc,
+            )
+            return None
+        logger.warning(
+            "Falling back to MJPEG chunk recording for %s chunk %s", name, index
+        )
+        return writer
+
     def _append_frame_to_chunk_locked(
         self, frame_array: "_np.ndarray", timestamp: float
-    ) -> _ActiveChunkWriter | None:
+    ) -> _ChunkWriter | None:
         if _np is None:
             return None
         array = _np.asarray(frame_array)
@@ -1898,11 +2127,12 @@ class RecordingManager:
             chunk = self._get_or_create_chunk(array)
             if chunk is None:
                 return None
-            if (
-                chunk.stream.width != int(array.shape[1])
-                or chunk.stream.height != int(array.shape[0])
-            ):
-                return None
+            stream = getattr(chunk, "stream", None)
+            if stream is not None:
+                if stream.width != int(array.shape[1]) or stream.height != int(
+                    array.shape[0]
+                ):
+                    return None
             try:
                 chunk.add_frame(array, timestamp)
             except av.FFmpegError as exc:  # pragma: no cover - codec failure path
@@ -1913,7 +2143,8 @@ class RecordingManager:
                     chunk.name,
                     exc,
                 )
-                self._mark_codec_failed(chunk.codec)
+                if isinstance(chunk, _ActiveChunkWriter):
+                    self._mark_codec_failed(chunk.codec)
                 self._handle_chunk_failure(chunk)
                 attempts += 1
                 continue
@@ -1923,11 +2154,15 @@ class RecordingManager:
                     chunk.name,
                     chunk.index,
                 )
+                if isinstance(chunk, _ActiveChunkWriter):
+                    self._mark_codec_failed(chunk.codec)
+                else:
+                    self._use_fallback_encoder = True
                 self._handle_chunk_failure(chunk)
                 return None
             return chunk
         return None
-    def _pop_active_chunk_locked(self) -> _ActiveChunkWriter | None:
+    def _pop_active_chunk_locked(self) -> _ChunkWriter | None:
         chunk = self._active_chunk
         if chunk is None or chunk.frame_count <= 0:
             return None
@@ -1937,7 +2172,7 @@ class RecordingManager:
 
     async def _persist_chunk(
         self,
-        chunk: _ActiveChunkWriter,
+        chunk: _ChunkWriter,
         *,
         task_list: list[dict[str, object]] | None = None,
     ) -> dict[str, object] | None:
@@ -2077,5 +2312,5 @@ class _FinaliseContext:
     motion_snapshot: dict[str, object]
     motion_event_index: int | None
     notify_stop_callback: bool
-    pending_flush: _ActiveChunkWriter | None = None
+    pending_flush: _ChunkWriter | None = None
 

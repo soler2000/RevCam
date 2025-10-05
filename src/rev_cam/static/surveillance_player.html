@@ -178,6 +178,12 @@
         <source id="playback-source" />
         <p>Your browser does not support HTML5 video playback.</p>
       </video>
+      <img
+        id="playback-image"
+        class="playback-frame"
+        alt="Surveillance recording chunk"
+        hidden
+      />
       <div class="video-actions" id="video-actions" hidden>
         <div class="chunk-navigation">
           <button type="button" id="prev-chunk" aria-label="Previous chunk">⏮</button>
@@ -200,6 +206,7 @@
       const statusText = document.getElementById("status-text");
       const video = document.getElementById("playback-video");
       const source = document.getElementById("playback-source");
+      const image = document.getElementById("playback-image");
       const actions = document.getElementById("video-actions");
       const prevChunkButton = document.getElementById("prev-chunk");
       const nextChunkButton = document.getElementById("next-chunk");
@@ -325,6 +332,22 @@
         return `/api/surveillance/recordings/${encodedName}/chunks/${chunkNumber}`;
       }
 
+      function resetMediaElements() {
+        if (video) {
+          video.pause();
+          video.hidden = true;
+          video.removeAttribute("src");
+          if (source) {
+            source.src = "";
+            source.type = "";
+          }
+        }
+        if (image) {
+          image.hidden = true;
+          image.src = "";
+        }
+      }
+
       function loadChunk(index, autoplay = false) {
         if (index < 0 || index >= chunks.length) {
           return;
@@ -336,24 +359,37 @@
           typeof chunk.media_type === "string" && chunk.media_type.trim()
             ? chunk.media_type
             : "video/mp4";
-        if (source) {
-          source.src = chunkUrl;
-          source.type = mediaType;
+        resetMediaElements();
+        const isMultipart = mediaType
+          .toLowerCase()
+          .startsWith("multipart/x-mixed-replace");
+        if (isMultipart && image) {
+          const cacheBuster = `${chunkUrl}?v=${Date.now()}`;
+          image.src = cacheBuster;
+          image.hidden = false;
+          video.dataset.mediaType = mediaType;
+          video.dataset.chunkIndex = String(index + 1);
         } else {
-          video.src = chunkUrl;
-        }
-        video.load();
-        video.dataset.mediaType = mediaType;
-        video.dataset.chunkIndex = String(index + 1);
-        updateChunkUI();
-        if (autoplay) {
-          const playPromise = video.play();
-          if (playPromise && typeof playPromise.catch === "function") {
-            playPromise.catch(() => {
-              /* autoplay prevented */
-            });
+          if (source) {
+            source.src = chunkUrl;
+            source.type = mediaType;
+          } else if (video) {
+            video.src = chunkUrl;
+          }
+          video.hidden = false;
+          video.dataset.mediaType = mediaType;
+          video.dataset.chunkIndex = String(index + 1);
+          video.load();
+          if (autoplay) {
+            const playPromise = video.play();
+            if (playPromise && typeof playPromise.catch === "function") {
+              playPromise.catch(() => {
+                /* autoplay prevented */
+              });
+            }
           }
         }
+        updateChunkUI();
       }
 
       async function initialise() {
@@ -392,7 +428,14 @@
             return;
           }
           setStatus(`Loaded ${chunks.length} chunk${chunks.length === 1 ? "" : "s"}.`);
-          video.hidden = false;
+          if (!chunks.some((chunk) => {
+              return (
+                typeof chunk.media_type === "string" &&
+                chunk.media_type.toLowerCase().startsWith("multipart/x-mixed-replace")
+              );
+            })) {
+            video.hidden = false;
+          }
           loadChunk(0, false);
         } catch (error) {
           console.error(error);

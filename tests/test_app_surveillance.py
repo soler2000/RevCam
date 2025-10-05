@@ -220,7 +220,7 @@ def test_fetch_surveillance_recording_metadata_and_chunk(client: TestClient) -> 
 def test_fetch_surveillance_recording_chunk_mjpeg(client: TestClient) -> None:
     recordings_dir: Path = client.recordings_dir
     name = "20230102-020203"
-    chunk_file = recordings_dir / f"{name}.chunk001.avi"
+    chunk_file = recordings_dir / f"{name}.chunk001.mjpeg"
     chunk_payload = b"fake-avi-data"
     chunk_file.write_bytes(chunk_payload)
     meta = recordings_dir / f"{name}.meta.json"
@@ -235,8 +235,8 @@ def test_fetch_surveillance_recording_chunk_mjpeg(client: TestClient) -> None:
                         "frame_count": 10,
                         "size_bytes": chunk_file.stat().st_size,
                         "duration_seconds": 2.5,
-                        "media_type": "video/x-motion-jpeg",
-                        "codec": "mjpeg",
+                        "media_type": "multipart/x-mixed-replace; boundary=chunk001",
+                        "codec": "jpeg-fallback",
                     }
                 ],
             }
@@ -249,12 +249,14 @@ def test_fetch_surveillance_recording_chunk_mjpeg(client: TestClient) -> None:
     )
     assert response.status_code == 200
     payload = response.json()
-    assert payload["chunks"][0]["media_type"] == "video/x-motion-jpeg"
+    assert payload["chunks"][0]["media_type"].startswith(
+        "multipart/x-mixed-replace"
+    )
 
     chunk_response = client.get(f"/api/surveillance/recordings/{name}/chunks/1")
     assert chunk_response.status_code == 200
-    assert (
-        chunk_response.headers["content-type"].startswith("video/x-motion-jpeg")
+    assert chunk_response.headers["content-type"].startswith(
+        "multipart/x-mixed-replace"
     )
     assert chunk_response.content == chunk_payload
 
