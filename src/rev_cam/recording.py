@@ -40,7 +40,37 @@ _VIDEO_CODEC_CANDIDATES: tuple[str, ...] = (
     "h264_omx",
     "mpeg4",
     "libxvid",
+    "mjpeg",
+    "jpeg",
 )
+
+
+_CODEC_PROFILES: Mapping[str, Mapping[str, str]] = {
+    "mjpeg": {
+        "format": "avi",
+        "extension": ".avi",
+        "pixel_format": "yuvj422p",
+        "media_type": "video/x-motion-jpeg",
+    },
+    "jpeg": {
+        "format": "avi",
+        "extension": ".avi",
+        "pixel_format": "yuvj422p",
+        "media_type": "video/x-motion-jpeg",
+    },
+}
+
+
+def _codec_profile(codec: str) -> Mapping[str, str]:
+    profile = _CODEC_PROFILES.get(codec)
+    if profile:
+        return profile
+    return {
+        "format": "mp4",
+        "extension": ".mp4",
+        "pixel_format": "yuv420p",
+        "media_type": "video/mp4",
+    }
 
 
 def _utcnow() -> datetime:
@@ -139,7 +169,6 @@ def load_recording_payload(
                 else:
                     chunk_entry["size_bytes"] = int(size)
                     total_size += int(size)
-            chunk_entry.setdefault("media_type", "video/mp4")
             normalised_chunks.append(chunk_entry)
         payload["chunks"] = normalised_chunks
         payload["chunk_count"] = len(normalised_chunks)
@@ -661,6 +690,7 @@ class _ActiveChunkWriter:
     stream: av.video.stream.VideoStream
     fps: float
     codec: str
+    media_type: str
     frame_count: int = 0
     first_timestamp: float | None = None
     last_timestamp: float | None = None
@@ -709,7 +739,7 @@ class _ActiveChunkWriter:
             "frame_count": int(self.frame_count),
             "size_bytes": int(self.bytes_written),
             "duration_seconds": round(duration, 3),
-            "media_type": "video/mp4",
+            "media_type": self.media_type,
             "codec": self.codec,
         }
         if self.first_timestamp is not None:
@@ -1711,8 +1741,10 @@ class RecordingManager:
             frame_limit = max(1, min(frame_limit, int(self.max_frames)))
         return frame_limit
 
-    def _chunk_filename(self, name: str, index: int) -> str:
-        return f"{name}.chunk{index:03d}.mp4"
+    def _chunk_filename(self, name: str, index: int, extension: str) -> str:
+        if not extension.startswith("."):
+            extension = f".{extension}"
+        return f"{name}.chunk{index:03d}{extension}"
 
     def _select_video_codec(self) -> str | None:
         if self._video_encoding_disabled:
@@ -1786,7 +1818,7 @@ class RecordingManager:
             frame_rate_fraction.denominator, frame_rate_fraction.numerator
         )
         height, width = array.shape[:2]
-        filename = self._chunk_filename(name, index)
+        filename = self._chunk_filename(name, index, "mp4")
         path = self.directory / filename
         last_error: Exception | None = None
         if path.exists():
@@ -1804,7 +1836,15 @@ class RecordingManager:
                 self._video_encoding_disabled = True
                 return None
             try:
-                container = av.open(str(path), mode="w", format="mp4")
+                codec_profile = _codec_profile(codec_name)
+                filename = self._chunk_filename(name, index, codec_profile["extension"])
+                path = self.directory / filename
+                if path.exists():
+                    try:
+                        path.unlink()
+                    except OSError:  # pragma: no cover - defensive cleanup
+                        pass
+                container = av.open(str(path), mode="w", format=codec_profile["format"])
             except Exception as exc:  # pragma: no cover - filesystem failure
                 last_error = exc
                 logger.error("Failed to open chunk container %s: %s", path, exc)
@@ -1827,7 +1867,8 @@ class RecordingManager:
                 continue
             stream.width = int(width)
             stream.height = int(height)
-            stream.pix_fmt = "yuv420p"
+            pixel_format = codec_profile.get("pixel_format")
+            stream.pix_fmt = pixel_format if pixel_format else "yuv420p"
             stream.time_base = time_base
             if codec_name.startswith("h264") or codec_name == "libx264":
                 stream.options = {"movflags": "+faststart"}
@@ -1839,6 +1880,7 @@ class RecordingManager:
                 stream=stream,
                 fps=frame_rate,
                 codec=codec_name,
+                media_type=codec_profile.get("media_type", "video/mp4"),
             )
 
     def _append_frame_to_chunk_locked(

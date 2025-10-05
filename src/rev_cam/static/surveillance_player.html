@@ -175,6 +175,7 @@
         preload="metadata"
         hidden
       >
+        <source id="playback-source" />
         <p>Your browser does not support HTML5 video playback.</p>
       </video>
       <div class="video-actions" id="video-actions" hidden>
@@ -198,6 +199,7 @@
       const metaList = document.getElementById("recording-meta");
       const statusText = document.getElementById("status-text");
       const video = document.getElementById("playback-video");
+      const source = document.getElementById("playback-source");
       const actions = document.getElementById("video-actions");
       const prevChunkButton = document.getElementById("prev-chunk");
       const nextChunkButton = document.getElementById("next-chunk");
@@ -307,6 +309,9 @@
           if (sizeDisplay) {
             parts.push(sizeDisplay);
           }
+          if (chunk.codec) {
+            parts.push(String(chunk.codec).toUpperCase());
+          }
           button.textContent = parts.join(" · ");
           button.addEventListener("click", () => loadChunk(index, true));
           chunkList.appendChild(button);
@@ -325,8 +330,20 @@
           return;
         }
         currentChunkIndex = index;
+        const chunk = chunks[index] ?? {};
         const chunkUrl = buildChunkUrl(index);
-        video.src = chunkUrl;
+        const mediaType =
+          typeof chunk.media_type === "string" && chunk.media_type.trim()
+            ? chunk.media_type
+            : "video/mp4";
+        if (source) {
+          source.src = chunkUrl;
+          source.type = mediaType;
+        } else {
+          video.src = chunkUrl;
+        }
+        video.load();
+        video.dataset.mediaType = mediaType;
         video.dataset.chunkIndex = String(index + 1);
         updateChunkUI();
         if (autoplay) {
