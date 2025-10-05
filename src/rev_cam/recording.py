@@ -53,6 +53,19 @@ _VIDEO_CODEC_CANDIDATES: tuple[str, ...] = (
 )
 
 
+_CODECS_REQUIRE_EVEN_DIMENSIONS: frozenset[str] = frozenset(
+    {
+        "h264",
+        "libx264",
+        "libopenh264",
+        "h264_v4l2m2m",
+        "h264_omx",
+        "mpeg4",
+        "libxvid",
+    }
+)
+
+
 _CODEC_PROFILES: Mapping[str, Mapping[str, str]] = {
     "mjpeg": {
         "format": "avi",
@@ -773,6 +786,8 @@ class _ActiveChunkWriter:
     fps: float
     codec: str
     media_type: str
+    target_width: int
+    target_height: int
     frame_count: int = 0
     first_timestamp: float | None = None
     last_timestamp: float | None = None
@@ -790,6 +805,12 @@ class _ActiveChunkWriter:
             self.first_timestamp = float(timestamp)
         self.last_timestamp = float(timestamp)
         frame = av.VideoFrame.from_ndarray(array, format="bgr24")
+        if (
+            self.target_width > 0
+            and self.target_height > 0
+            and (frame.width != self.target_width or frame.height != self.target_height)
+        ):
+            frame = frame.reformat(width=self.target_width, height=self.target_height)
         frame.pts = self.frame_count
         frame.time_base = self.stream.time_base
         for packet in self.stream.encode(frame):
@@ -2061,8 +2082,28 @@ class RecordingManager:
                 except OSError:  # pragma: no cover - defensive cleanup
                     pass
                 continue
-            stream.width = int(width)
-            stream.height = int(height)
+            target_width = int(width)
+            target_height = int(height)
+            if codec_name in _CODECS_REQUIRE_EVEN_DIMENSIONS:
+                if target_width % 2:
+                    target_width -= 1
+                if target_height % 2:
+                    target_height -= 1
+            if target_width <= 0 or target_height <= 0:
+                last_error = ValueError("invalid frame dimensions for video encoder")
+                self._mark_codec_failed(codec_name)
+                try:
+                    container.close()
+                except Exception:  # pragma: no cover - defensive close
+                    pass
+                try:
+                    if path.exists():
+                        path.unlink()
+                except OSError:  # pragma: no cover - defensive cleanup
+                    pass
+                continue
+            stream.width = target_width
+            stream.height = target_height
             pixel_format = codec_profile.get("pixel_format")
             stream.pix_fmt = pixel_format if pixel_format else "yuv420p"
             stream.time_base = time_base
@@ -2077,6 +2118,8 @@ class RecordingManager:
                 fps=frame_rate,
                 codec=codec_name,
                 media_type=codec_profile.get("media_type", "video/mp4"),
+                target_width=target_width,
+                target_height=target_height,
             )
 
     def _create_fallback_chunk_writer(
@@ -2128,7 +2171,7 @@ class RecordingManager:
             if chunk is None:
                 return None
             stream = getattr(chunk, "stream", None)
-            if stream is not None:
+            if stream is not None and not isinstance(chunk, _ActiveChunkWriter):
                 if stream.width != int(array.shape[1]) or stream.height != int(
                     array.shape[0]
                 ):

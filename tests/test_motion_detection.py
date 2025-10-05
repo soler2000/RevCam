@@ -217,6 +217,61 @@ async def test_chunk_mp4_generation(tmp_path: Path, anyio_backend) -> None:
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("anyio_backend", ["asyncio"], indirect=True)
+async def test_chunk_encoder_handles_odd_frame_size(
+    tmp_path: Path, monkeypatch, anyio_backend
+) -> None:
+    camera = _StaticCamera()
+    pipeline = _pipeline()
+    manager = RecordingManager(
+        camera=camera,
+        pipeline=pipeline,
+        directory=tmp_path,
+        fps=2,
+        chunk_duration_seconds=1,
+    )
+
+    async def _noop(self):
+        return None
+
+    manager._ensure_producer_running = types.MethodType(_noop, manager)
+
+    monkeypatch.setattr(recording, "_VIDEO_CODEC_CANDIDATES", ("mjpeg",))
+    monkeypatch.setattr(
+        recording,
+        "_CODECS_REQUIRE_EVEN_DIMENSIONS",
+        frozenset({"mjpeg"}),
+    )
+
+    await manager.start_recording()
+
+    frame = np.zeros((25, 37, 3), dtype=np.uint8)
+    frame[:8, :8, :] = 255
+    jpeg_payload = manager._encode_frame(frame)
+
+    await manager._record_frame(jpeg_payload, 0.0, frame)
+    await manager._record_frame(jpeg_payload, 0.6, frame)
+
+    placeholder = await manager.stop_recording()
+    assert placeholder["processing"] is True
+    metadata = await manager.wait_for_processing()
+    assert metadata is not None
+    chunks = metadata.get("chunks") or []
+    assert chunks
+    entry = chunks[0]
+    assert entry.get("codec") == "mjpeg"
+    video_path = tmp_path / str(entry["file"])
+    assert video_path.exists()
+    with av.open(str(video_path), mode="r") as container:
+        video_streams = [stream for stream in container.streams if stream.type == "video"]
+        assert video_streams
+        stream = video_streams[0]
+        assert stream.width % 2 == 0
+        assert stream.height % 2 == 0
+    await manager.aclose()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("anyio_backend", ["asyncio"], indirect=True)
 async def test_manual_recording_disables_motion_when_requested(
     tmp_path: Path, anyio_backend
 ) -> None:
