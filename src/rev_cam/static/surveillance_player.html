@@ -219,6 +219,9 @@
       let recordingMetadata = null;
       let currentObjectUrl = null;
       let activeChunkRequest = 0;
+      let lastChunkUrl = null;
+      let lastChunkAutoplay = false;
+      let lastChunkMediaType = "video/mp4";
 
       function revokeObjectUrl() {
         if (currentObjectUrl) {
@@ -350,12 +353,52 @@
             source.src = "";
             source.type = "";
           }
+          delete video.dataset.loadStrategy;
+          video.dataset.mediaType = "";
+          video.dataset.chunkIndex = "";
         }
         if (image) {
           image.hidden = true;
           image.src = "";
         }
         revokeObjectUrl();
+      }
+
+      function useVideoSource(url, mediaType, autoplay, strategy) {
+        if (!video) {
+          return;
+        }
+        if (strategy === "direct") {
+          revokeObjectUrl();
+          currentObjectUrl = null;
+        }
+        if (source) {
+          source.src = url;
+          source.type = mediaType;
+        }
+        video.src = url;
+        video.hidden = false;
+        video.dataset.mediaType = mediaType;
+        video.dataset.chunkIndex = String(currentChunkIndex + 1);
+        video.dataset.loadStrategy = strategy;
+        video.load();
+        if (autoplay) {
+          const playPromise = video.play();
+          if (playPromise && typeof playPromise.catch === "function") {
+            playPromise.catch(() => {
+              /* autoplay prevented */
+            });
+          }
+        }
+      }
+
+      function attemptDirectFallback(index, url, mediaType, autoplay) {
+        if (!url) {
+          return false;
+        }
+        useVideoSource(url, mediaType, autoplay, "direct");
+        setStatus(`Retrying chunk ${index + 1} via direct stream…`);
+        return true;
       }
 
       async function loadChunk(index, autoplay = false) {
@@ -373,6 +416,9 @@
         resetMediaElements();
         const requestId = ++activeChunkRequest;
         const cacheBustedUrl = `${chunkUrl}?v=${Date.now()}`;
+        lastChunkUrl = cacheBustedUrl;
+        lastChunkAutoplay = Boolean(autoplay);
+        lastChunkMediaType = mediaType;
         setStatus(`Loading chunk ${index + 1} of ${chunks.length}…`);
         const isMultipart = mediaType
           .toLowerCase()
@@ -406,28 +452,20 @@
             }
             revokeObjectUrl();
             currentObjectUrl = URL.createObjectURL(blob);
-            if (source) {
-              source.src = currentObjectUrl;
-              source.type = mediaType;
-            }
-            video.src = currentObjectUrl;
-            video.hidden = false;
-            video.dataset.mediaType = mediaType;
-            video.dataset.chunkIndex = String(index + 1);
-            video.load();
-            if (autoplay) {
-              const playPromise = video.play();
-              if (playPromise && typeof playPromise.catch === "function") {
-                playPromise.catch(() => {
-                  /* autoplay prevented */
-                });
-              }
-            }
+            useVideoSource(currentObjectUrl, mediaType, autoplay, "blob");
             setStatus(`Ready: chunk ${index + 1} of ${chunks.length}`);
           } catch (error) {
             console.error(error);
             if (requestId === activeChunkRequest) {
-              setStatus("Unable to load video chunk", "error");
+              const retried = attemptDirectFallback(
+                index,
+                cacheBustedUrl,
+                mediaType,
+                autoplay
+              );
+              if (!retried) {
+                setStatus("Unable to load video chunk", "error");
+              }
             }
           }
         }
@@ -504,7 +542,20 @@
       });
       video.addEventListener("error", () => {
         const datasetIndex = Number(video.dataset.chunkIndex || "0");
+        const strategy = video.dataset.loadStrategy || "";
         if (datasetIndex === currentChunkIndex + 1) {
+          if (
+            strategy === "blob" &&
+            lastChunkUrl &&
+            attemptDirectFallback(
+              currentChunkIndex,
+              lastChunkUrl,
+              lastChunkMediaType,
+              lastChunkAutoplay
+            )
+          ) {
+            return;
+          }
           setStatus("Unable to load video chunk", "error");
         }
       });
