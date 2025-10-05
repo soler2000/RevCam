@@ -211,6 +211,7 @@ async def test_chunk_mp4_generation(tmp_path: Path, anyio_backend) -> None:
             assert video_streams
             first_frame = next(container.decode(video=0), None)
             assert first_frame is not None
+        assert entry.get("codec")
     await manager.aclose()
 
 
@@ -246,6 +247,56 @@ async def test_manual_recording_disables_motion_when_requested(
     placeholder = await manager.stop_recording()
     assert placeholder["processing"] is True
     await manager.wait_for_processing()
+    await manager.aclose()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("anyio_backend", ["asyncio"], indirect=True)
+async def test_chunk_codec_fallback(tmp_path: Path, monkeypatch, anyio_backend) -> None:
+    camera = _StaticCamera()
+    pipeline = _pipeline()
+    manager = RecordingManager(
+        camera=camera,
+        pipeline=pipeline,
+        directory=tmp_path,
+        fps=2,
+        chunk_duration_seconds=1,
+    )
+
+    async def _noop(self):
+        return None
+
+    manager._ensure_producer_running = types.MethodType(_noop, manager)
+
+    failure_flag = {"raised": False}
+    original_add_frame = recording._ActiveChunkWriter.add_frame
+
+    def _failing_add_frame(self, array, timestamp):
+        if not failure_flag["raised"] and self.codec == "h264":
+            failure_flag["raised"] = True
+            raise av.FFmpegError(-541478725, "codec not found")
+        return original_add_frame(self, array, timestamp)
+
+    monkeypatch.setattr(recording._ActiveChunkWriter, "add_frame", _failing_add_frame)
+
+    await manager.start_recording()
+
+    frame = np.zeros((24, 24, 3), dtype=np.uint8)
+    frame[:8, :8, :] = 255
+    jpeg_payload = manager._encode_frame(frame)
+
+    await manager._record_frame(jpeg_payload, 0.0, frame)
+    await manager._record_frame(jpeg_payload, 0.5, frame)
+
+    placeholder = await manager.stop_recording()
+    assert placeholder["processing"] is True
+    metadata = await manager.wait_for_processing()
+    assert metadata is not None
+    chunks = metadata.get("chunks") or []
+    assert chunks
+    assert failure_flag["raised"] is True
+    assert all(entry.get("codec") in {"libx264", "libopenh264"} for entry in chunks)
+
     await manager.aclose()
 
 

@@ -32,6 +32,17 @@ from .pipeline import FramePipeline
 logger = logging.getLogger(__name__)
 
 
+_VIDEO_CODEC_CANDIDATES: tuple[str, ...] = (
+    "h264",
+    "libx264",
+    "libopenh264",
+    "h264_v4l2m2m",
+    "h264_omx",
+    "mpeg4",
+    "libxvid",
+)
+
+
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -191,6 +202,7 @@ def load_recording_chunk(
         "size_bytes": int(size_bytes) if isinstance(size_bytes, (int, float)) else None,
         "media_type": media_type,
         "file_path": str(chunk_path),
+        "codec": entry.get("codec") if isinstance(entry, Mapping) else None,
         "fps": payload.get("fps") if isinstance(payload, Mapping) else None,
     }
 
@@ -648,6 +660,7 @@ class _ActiveChunkWriter:
     container: av.container.OutputContainer
     stream: av.video.stream.VideoStream
     fps: float
+    codec: str
     frame_count: int = 0
     first_timestamp: float | None = None
     last_timestamp: float | None = None
@@ -697,10 +710,30 @@ class _ActiveChunkWriter:
             "size_bytes": int(self.bytes_written),
             "duration_seconds": round(duration, 3),
             "media_type": "video/mp4",
+            "codec": self.codec,
         }
         if self.first_timestamp is not None:
             entry["start_offset_seconds"] = round(float(self.first_timestamp), 3)
         return entry
+
+    def abort(self) -> None:
+        """Abort the writer and clean up the partially written file."""
+
+        try:
+            self.stream.encode()  # flush buffered packets to avoid PyAV warnings
+        except Exception:  # pragma: no cover - best-effort cleanup
+            pass
+        try:
+            self.container.close()
+        except Exception:  # pragma: no cover - best-effort cleanup
+            pass
+        try:
+            if self.path.exists():
+                self.path.unlink()
+        except OSError:  # pragma: no cover - best-effort cleanup
+            pass
+        self.bytes_written = 0
+        self.frame_count = 0
 
 
 @dataclass
@@ -766,6 +799,9 @@ class RecordingManager:
     _motion_event_pending_stop: float | None = field(init=False, default=None)
     _motion_state_hold_until: float | None = field(init=False, default=None)
     _active_chunk_bytes: int = field(init=False, default=0)
+    _preferred_video_codec: str | None = field(init=False, default=None)
+    _codec_failures: set[str] = field(init=False, default_factory=set)
+    _video_encoding_disabled: bool = field(init=False, default=False)
 
     def __post_init__(self) -> None:
         if self.fps <= 0:
@@ -869,6 +905,7 @@ class RecordingManager:
             self._chunk_entries.clear()
             self._chunk_index = 0
             self._total_frame_count = 0
+            self._video_encoding_disabled = False
             if motion_enabled and self._session_motion_override:
                 self._motion_event_base = name
                 self._motion_event_index = 0
@@ -1677,9 +1714,72 @@ class RecordingManager:
     def _chunk_filename(self, name: str, index: int) -> str:
         return f"{name}.chunk{index:03d}.mp4"
 
+    def _select_video_codec(self) -> str | None:
+        if self._video_encoding_disabled:
+            return None
+        codec = self._preferred_video_codec
+        if codec and codec not in self._codec_failures:
+            return codec
+        last_error: Exception | None = None
+        for candidate in _VIDEO_CODEC_CANDIDATES:
+            if candidate in self._codec_failures:
+                continue
+            try:
+                context = av.CodecContext.create(candidate, "w")
+            except av.FFmpegError as exc:  # pragma: no cover - codec probing failure
+                last_error = exc
+                self._codec_failures.add(candidate)
+                continue
+            except Exception as exc:  # pragma: no cover - defensive guard
+                last_error = exc
+                self._codec_failures.add(candidate)
+                continue
+            if not getattr(context, "is_encoder", True):
+                self._codec_failures.add(candidate)
+                continue
+            self._preferred_video_codec = candidate
+            return candidate
+        if last_error is not None:
+            logger.warning("No usable surveillance video codec available: %s", last_error)
+        return None
+
+    def _mark_codec_failed(self, codec: str) -> None:
+        if not codec:
+            return
+        self._codec_failures.add(codec)
+        if self._preferred_video_codec == codec:
+            self._preferred_video_codec = None
+
+    def _handle_chunk_failure(self, chunk: _ActiveChunkWriter) -> None:
+        try:
+            chunk.abort()
+        finally:
+            self._active_chunk = None
+            self._active_chunk_bytes = 0
+            self._chunk_index = max(0, int(chunk.index) - 1)
+
+    def _get_or_create_chunk(
+        self, array: "_np.ndarray"
+    ) -> _ActiveChunkWriter | None:
+        chunk = self._active_chunk
+        if chunk is not None:
+            return chunk
+        name = self._recording_name
+        if not name:
+            return None
+        next_index = self._chunk_index + 1
+        chunk = self._create_chunk_writer(name, next_index, array)
+        if chunk is None:
+            return None
+        self._chunk_index = next_index
+        self._active_chunk = chunk
+        return chunk
+
     def _create_chunk_writer(
         self, name: str, index: int, array: "_np.ndarray"
-    ) -> _ActiveChunkWriter:
+    ) -> _ActiveChunkWriter | None:
+        if self._video_encoding_disabled:
+            return None
         frame_rate = 1.0 if self.fps <= 0 else float(self.fps)
         frame_rate_fraction = Fraction(str(frame_rate)).limit_denominator(1000)
         time_base = Fraction(
@@ -1688,21 +1788,58 @@ class RecordingManager:
         height, width = array.shape[:2]
         filename = self._chunk_filename(name, index)
         path = self.directory / filename
-        container = av.open(str(path), mode="w", format="mp4")
-        stream = container.add_stream("h264", rate=frame_rate_fraction)
-        stream.width = int(width)
-        stream.height = int(height)
-        stream.pix_fmt = "yuv420p"
-        stream.time_base = time_base
-        stream.options = {"movflags": "+faststart"}
-        return _ActiveChunkWriter(
-            name=name,
-            index=index,
-            path=path,
-            container=container,
-            stream=stream,
-            fps=frame_rate,
-        )
+        last_error: Exception | None = None
+        if path.exists():
+            try:
+                path.unlink()
+            except OSError:  # pragma: no cover - defensive cleanup
+                pass
+        while True:
+            codec_name = self._select_video_codec()
+            if codec_name is None:
+                if last_error is not None:
+                    logger.error(
+                        "Disabling surveillance chunk recording: %s", last_error
+                    )
+                self._video_encoding_disabled = True
+                return None
+            try:
+                container = av.open(str(path), mode="w", format="mp4")
+            except Exception as exc:  # pragma: no cover - filesystem failure
+                last_error = exc
+                logger.error("Failed to open chunk container %s: %s", path, exc)
+                self._video_encoding_disabled = True
+                return None
+            try:
+                stream = container.add_stream(codec_name, rate=frame_rate_fraction)
+            except Exception as exc:  # pragma: no cover - codec failure
+                last_error = exc
+                self._mark_codec_failed(codec_name)
+                try:
+                    container.close()
+                except Exception:  # pragma: no cover - defensive close
+                    pass
+                try:
+                    if path.exists():
+                        path.unlink()
+                except OSError:  # pragma: no cover - defensive cleanup
+                    pass
+                continue
+            stream.width = int(width)
+            stream.height = int(height)
+            stream.pix_fmt = "yuv420p"
+            stream.time_base = time_base
+            if codec_name.startswith("h264") or codec_name == "libx264":
+                stream.options = {"movflags": "+faststart"}
+            return _ActiveChunkWriter(
+                name=name,
+                index=index,
+                path=path,
+                container=container,
+                stream=stream,
+                fps=frame_rate,
+                codec=codec_name,
+            )
 
     def _append_frame_to_chunk_locked(
         self, frame_array: "_np.ndarray", timestamp: float
@@ -1713,29 +1850,40 @@ class RecordingManager:
         if array.ndim != 3 or array.shape[2] != 3:
             return None
         array = _np.ascontiguousarray(array)
-        chunk = self._active_chunk
-        if chunk is None:
-            name = self._recording_name
-            if not name:
+        attempts = 0
+        while attempts < 2:
+            chunk = self._get_or_create_chunk(array)
+            if chunk is None:
                 return None
-            self._chunk_index += 1
-            chunk = self._create_chunk_writer(name, self._chunk_index, array)
-            self._active_chunk = chunk
-        if (
-            chunk.stream.width != int(array.shape[1])
-            or chunk.stream.height != int(array.shape[0])
-        ):
-            return None
-        try:
-            chunk.add_frame(array, timestamp)
-        except Exception:  # pragma: no cover - defensive logging
-            logger.exception(
-                "Failed to encode surveillance frame for %s chunk %s",
-                chunk.name,
-                chunk.index,
-            )
-            return None
-        return chunk
+            if (
+                chunk.stream.width != int(array.shape[1])
+                or chunk.stream.height != int(array.shape[0])
+            ):
+                return None
+            try:
+                chunk.add_frame(array, timestamp)
+            except av.FFmpegError as exc:  # pragma: no cover - codec failure path
+                logger.warning(
+                    "Video codec %s failed while encoding chunk %s for %s: %s",
+                    chunk.codec,
+                    chunk.index,
+                    chunk.name,
+                    exc,
+                )
+                self._mark_codec_failed(chunk.codec)
+                self._handle_chunk_failure(chunk)
+                attempts += 1
+                continue
+            except Exception:  # pragma: no cover - defensive logging
+                logger.exception(
+                    "Failed to encode surveillance frame for %s chunk %s",
+                    chunk.name,
+                    chunk.index,
+                )
+                self._handle_chunk_failure(chunk)
+                return None
+            return chunk
+        return None
     def _pop_active_chunk_locked(self) -> _ActiveChunkWriter | None:
         chunk = self._active_chunk
         if chunk is None or chunk.frame_count <= 0:
