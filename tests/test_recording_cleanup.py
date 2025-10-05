@@ -17,11 +17,16 @@ def _write(path: Path, data: bytes | str = b"data") -> None:
 
 def test_remove_recording_files_removes_known_artifacts(tmp_path: Path) -> None:
     name = "example"
-    chunk_name = f"{name}.chunk001.json.gz"
+    chunk_name = f"{name}.chunk001.mp4"
     metadata = {
         "name": name,
         "chunks": [
-            {"file": chunk_name, "frame_count": 1, "compression": "gzip"},
+            {
+                "file": chunk_name,
+                "frame_count": 1,
+                "size_bytes": 2,
+                "media_type": "video/mp4",
+            },
         ],
     }
 

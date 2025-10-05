@@ -457,15 +457,6 @@
                 <input id="chunk-duration" type="number" min="0" max="86400" step="1" />
                 <span class="muted">Set to 0 to keep each recording as a single file.</span>
               </div>
-              <label class="option inline-option">
-                <input type="checkbox" id="chunk-mp4-enabled" />
-                <div>
-                  <strong>Create MP4 chunk files</strong>
-                  <span class="helper"
-                    >Generate an .mp4 alongside each JSON chunk for quick playback.</span
-                  >
-                </div>
-              </label>
               <div>
                 <label for="storage-threshold">Stop recording below free space (%)</label>
                 <input id="storage-threshold" type="number" min="1" max="90" step="1" />
@@ -527,7 +518,6 @@
       const overlayCheckbox = document.getElementById("recording-overlays");
       const rememberCheckbox = document.getElementById("remember-recording");
       const chunkDurationInput = document.getElementById("chunk-duration");
-      const chunkMp4Checkbox = document.getElementById("chunk-mp4-enabled");
       const storageThresholdInput = document.getElementById("storage-threshold");
       const autoPurgeInput = document.getElementById("auto-purge-days");
       const motionEnabledInput = document.getElementById("motion-enabled");
@@ -721,10 +711,6 @@
         chunkDurationInput.addEventListener("input", updateSummary);
       }
 
-      if (chunkMp4Checkbox) {
-        chunkMp4Checkbox.addEventListener("change", updateSummary);
-      }
-
       function getSelectedProfile() {
         const selected = profileInputs.find((input) => input.checked);
         return selected ? selected.value : "standard";
@@ -806,9 +792,6 @@
             text += ` • Split every ${durationLabel}`;
           }
         }
-        if (chunkMp4Checkbox && chunkMp4Checkbox.checked) {
-          text += " • MP4 chunk export enabled";
-        }
         if (motionEnabledInput && motionEnabledInput.checked && effective.fps) {
           const decimation = getMotionDecimation();
           const motionFps = effective.fps / Math.max(1, decimation);
@@ -852,9 +835,6 @@
           const seconds = Number(settings.chunk_duration_seconds ?? 0);
           const normalised = Number.isFinite(seconds) && seconds > 0 ? Math.round(seconds) : 0;
           chunkDurationInput.value = normalised;
-        }
-        if (chunkMp4Checkbox) {
-          chunkMp4Checkbox.checked = settings.chunk_mp4_enabled === true;
         }
         if (storageThresholdInput) {
           const threshold = Number(settings.storage_threshold_percent ?? 10);
@@ -990,9 +970,6 @@
           } else {
             payload.chunk_duration_seconds = 0;
           }
-        }
-        if (chunkMp4Checkbox) {
-          payload.chunk_mp4_enabled = chunkMp4Checkbox.checked;
         }
         if (storageThresholdInput) {
           const thresholdValue = parseFloat(storageThresholdInput.value);

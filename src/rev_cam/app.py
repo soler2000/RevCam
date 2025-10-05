@@ -9,7 +9,7 @@ import shutil
 import string
 from enum import Enum
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Mapping
 from urllib.parse import quote as urlquote
 
 from datetime import datetime, timedelta, timezone
@@ -176,7 +176,6 @@ class SurveillanceSettingsPayload(BaseModel):
     expert_fps: int | None = None
     expert_jpeg_quality: int | None = None
     chunk_duration_seconds: int | None = None
-    chunk_mp4_enabled: bool | None = None
     overlays_enabled: bool | None = None
     remember_recording_state: bool | None = None
     motion_detection_enabled: bool | None = None
@@ -621,7 +620,6 @@ def create_app(
                 jpeg_quality=jpeg_quality,
                 directory=RECORDINGS_DIR,
                 chunk_duration_seconds=surveillance_settings.chunk_duration_seconds,
-                chunk_mp4_enabled=surveillance_settings.chunk_mp4_enabled,
                 storage_threshold_percent=surveillance_settings.storage_threshold_percent,
                 motion_detection_enabled=surveillance_settings.motion_detection_enabled,
                 motion_sensitivity=surveillance_settings.motion_sensitivity,
@@ -635,7 +633,6 @@ def create_app(
                 fps=fps,
                 jpeg_quality=jpeg_quality,
                 chunk_duration_seconds=surveillance_settings.chunk_duration_seconds,
-                chunk_mp4_enabled=surveillance_settings.chunk_mp4_enabled,
                 storage_threshold_percent=surveillance_settings.storage_threshold_percent,
                 motion_detection_enabled=surveillance_settings.motion_detection_enabled,
                 motion_sensitivity=surveillance_settings.motion_sensitivity,
@@ -1827,7 +1824,6 @@ def create_app(
                     fps=settings.resolved_fps,
                     jpeg_quality=settings.resolved_jpeg_quality,
                     chunk_duration_seconds=settings.chunk_duration_seconds,
-                    chunk_mp4_enabled=settings.chunk_mp4_enabled,
                     storage_threshold_percent=settings.storage_threshold_percent,
                     motion_detection_enabled=settings.motion_detection_enabled,
                     motion_sensitivity=settings.motion_sensitivity,
@@ -1962,15 +1958,20 @@ def create_app(
             raise HTTPException(status_code=404, detail="Recording not found") from exc
 
     @app.get("/api/surveillance/recordings/{name}/chunks/{chunk_index}")
-    async def fetch_surveillance_recording_chunk(name: str, chunk_index: int) -> dict[str, object]:
+    async def fetch_surveillance_recording_chunk(
+        name: str, chunk_index: int
+    ) -> FileResponse:
         if chunk_index < 1:
             raise HTTPException(status_code=404, detail="Recording chunk not found")
         try:
             if recording_manager is None:
-                return await asyncio.to_thread(
+                chunk_info = await asyncio.to_thread(
                     load_recording_chunk, RECORDINGS_DIR, name, chunk_index
                 )
-            return await recording_manager.get_recording_chunk(name, chunk_index)
+            else:
+                chunk_info = await recording_manager.get_recording_chunk(
+                    name, chunk_index
+                )
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Recording chunk not found") from exc
         except Exception as exc:  # pragma: no cover - defensive logging
@@ -1980,6 +1981,23 @@ def create_app(
             raise HTTPException(
                 status_code=500, detail="Unable to load recording chunk"
             ) from exc
+        if not isinstance(chunk_info, Mapping):
+            raise HTTPException(status_code=500, detail="Invalid chunk metadata")
+        path_value = chunk_info.get("file_path")
+        if not isinstance(path_value, str):
+            raise HTTPException(status_code=404, detail="Recording chunk not found")
+        path = Path(path_value)
+        if not path.exists() or not path.is_file():
+            raise HTTPException(status_code=404, detail="Recording chunk not found")
+        media_type = chunk_info.get("media_type")
+        if not isinstance(media_type, str):
+            media_type = "video/mp4"
+        response = FileResponse(path, media_type=media_type, filename=path.name)
+        size_bytes = chunk_info.get("size_bytes")
+        if isinstance(size_bytes, (int, float)) and size_bytes > 0:
+            response.headers["Content-Length"] = str(int(size_bytes))
+        response.headers["Content-Disposition"] = f"inline; filename=\"{path.name}\""
+        return response
 
     @app.get("/api/surveillance/recordings/{name}/download")
     async def download_surveillance_recording(name: str) -> StreamingResponse:

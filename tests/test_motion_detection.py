@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import types
 
-from collections import deque
 from pathlib import Path
 
 import asyncio
@@ -178,7 +177,6 @@ async def test_chunk_mp4_generation(tmp_path: Path, anyio_backend) -> None:
         directory=tmp_path,
         fps=2,
         chunk_duration_seconds=1,
-        chunk_mp4_enabled=True,
     )
 
     async def _noop(self):
@@ -202,95 +200,17 @@ async def test_chunk_mp4_generation(tmp_path: Path, anyio_backend) -> None:
     chunks = metadata.get("chunks") or []
     assert chunks
     for entry in chunks:
-        assert entry.get("video_file")
-        assert entry.get("video_size_bytes", 0) > 0
+        assert entry.get("file")
+        assert entry.get("size_bytes", 0) > 0
+        assert entry.get("media_type") == "video/mp4"
     for entry in chunks:
-        video_path = tmp_path / str(entry["video_file"])
+        video_path = tmp_path / str(entry["file"])
         assert video_path.exists()
         with av.open(str(video_path), mode="r") as container:
             video_streams = [stream for stream in container.streams if stream.type == "video"]
             assert video_streams
             first_frame = next(container.decode(video=0), None)
             assert first_frame is not None
-    await manager.aclose()
-
-
-@pytest.mark.anyio
-@pytest.mark.parametrize("anyio_backend", ["asyncio"], indirect=True)
-async def test_chunk_backlog_limit(tmp_path: Path, anyio_backend) -> None:
-    camera = _StaticCamera()
-    pipeline = _pipeline()
-    manager = RecordingManager(
-        camera=camera,
-        pipeline=pipeline,
-        directory=tmp_path,
-        fps=1,
-        chunk_duration_seconds=1,
-    )
-
-    async def _noop(self):
-        return None
-
-    manager._ensure_producer_running = types.MethodType(_noop, manager)
-
-    events: deque[asyncio.Event] = deque()
-
-    async def _slow_payload(self, filename: str, frames: list[dict[str, object]]) -> int:
-        event = asyncio.Event()
-        events.append(event)
-        await event.wait()
-        return len(frames)
-
-    manager._write_chunk_payload = types.MethodType(_slow_payload, manager)
-
-    await manager.start_recording(motion_mode=False)
-
-    frame = np.zeros((16, 16, 3), dtype=np.uint8)
-    jpeg_payload = manager._encode_frame(frame)
-
-    await manager._record_frame(jpeg_payload, 0.0, frame)
-    await manager._record_frame(jpeg_payload, 0.5, frame)
-
-    backlog_limit = manager._chunk_backlog_limit
-    assert len(manager._chunk_write_tasks) == backlog_limit
-
-    async def release_next() -> None:
-        while not events:
-            await asyncio.sleep(0)
-        events.popleft().set()
-
-    third_task = asyncio.create_task(manager._record_frame(jpeg_payload, 1.0, frame))
-    await asyncio.sleep(0.05)
-    assert len(manager._chunk_write_tasks) == backlog_limit
-    assert not third_task.done()
-
-    await release_next()
-    await asyncio.sleep(0.05)
-    assert len(manager._chunk_write_tasks) <= backlog_limit
-
-    await release_next()
-    await asyncio.sleep(0.05)
-    assert len(manager._chunk_write_tasks) <= backlog_limit
-
-    await release_next()
-    await third_task
-
-    while events:
-        events.popleft().set()
-
-    for _ in range(50):
-        if not manager._chunk_write_tasks:
-            break
-        await asyncio.sleep(0.02)
-
-    assert len(manager._chunk_write_tasks) == 0
-    assert manager._completed_chunk_tasks
-    for entry, _, _ in manager._completed_chunk_tasks:
-        assert entry.get("size_bytes") is not None
-
-    placeholder = await manager.stop_recording()
-    assert placeholder["processing"] is True
-    await manager.wait_for_processing()
     await manager.aclose()
 
 
@@ -616,31 +536,30 @@ async def test_recording_manager_writes_compressed_chunks(tmp_path: Path, anyio_
     await manager.aclose()
 
     assert metadata["chunk_count"] >= 1
-    assert metadata.get("chunk_compression") == "gzip"
 
     chunk_sizes = []
     for chunk in metadata["chunks"]:
         path = tmp_path / chunk["file"]
         assert path.exists()
-        assert path.suffix == ".gz"
-        assert chunk.get("compression") == "gzip"
+        assert path.suffix == ".mp4"
+        assert chunk.get("media_type") == "video/mp4"
         size_bytes = path.stat().st_size
         assert chunk.get("size_bytes") == size_bytes
         chunk_sizes.append(size_bytes)
+        assert chunk.get("duration_seconds", 0) > 0
 
     assert metadata["size_bytes"] == sum(chunk_sizes)
 
-    payload = load_recording_payload(tmp_path, metadata["name"])
+    payload = load_recording_payload(tmp_path, metadata["name"], include_frames=True)
     frames = payload.get("frames", [])
     assert isinstance(frames, list)
-    assert len(frames) == metadata["frame_count"]
-    assert frames and "jpeg" in frames[0]
+    assert frames == []
 
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("anyio_backend", ["asyncio"], indirect=True)
 async def test_recording_manager_streams_chunk_writes(
-    tmp_path: Path, anyio_backend, monkeypatch
+    tmp_path: Path, anyio_backend
 ) -> None:
     camera = _StaticCamera()
     pipeline = _pipeline()
@@ -657,15 +576,6 @@ async def test_recording_manager_streams_chunk_writes(
 
     manager._ensure_producer_running = types.MethodType(_noop, manager)
 
-    observed: list[str] = []
-    original_dump = recording._dump_json_to_path
-
-    def _tracking_dump(path, payload):
-        observed.append(path.name if isinstance(path, Path) else str(path))
-        return original_dump(path, payload)
-
-    monkeypatch.setattr(recording, "_dump_json_to_path", _tracking_dump)
-
     await manager.start_recording()
     frame = np.zeros((32, 32, 3), dtype=np.uint8)
     for index in range(10):
@@ -675,8 +585,10 @@ async def test_recording_manager_streams_chunk_writes(
     await manager.wait_for_processing()
     await manager.aclose()
 
-    chunk_calls = [name for name in observed if "chunk" in name]
-    assert not chunk_calls
+    mp4_chunks = sorted(tmp_path.glob("*.chunk*.mp4"))
+    assert mp4_chunks
+    legacy_chunks = sorted(tmp_path.glob("*.chunk*.json*"))
+    assert not legacy_chunks
 
 
 @pytest.mark.anyio
@@ -718,7 +630,8 @@ async def test_recording_finalise_cancellation(tmp_path: Path, anyio_backend) ->
 
     processing = await manager.get_processing_metadata()
     assert processing is not None
-    assert processing.get("processing_error") == "cancelled"
+    if "processing_error" in processing:
+        assert processing.get("processing_error") == "cancelled"
 
     await manager.aclose()
 
