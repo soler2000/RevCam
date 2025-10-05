@@ -1893,7 +1893,8 @@ class RecordingManager:
             return None
         array = _np.ascontiguousarray(array)
         attempts = 0
-        while attempts < 2:
+        max_attempts = max(2, len(_VIDEO_CODEC_CANDIDATES))
+        while attempts < max_attempts:
             chunk = self._get_or_create_chunk(array)
             if chunk is None:
                 return None
