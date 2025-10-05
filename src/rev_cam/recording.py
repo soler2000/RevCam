@@ -1030,6 +1030,7 @@ class RecordingManager:
     _codec_failures: set[str] = field(init=False, default_factory=set)
     _video_encoding_disabled: bool = field(init=False, default=False)
     _use_fallback_encoder: bool = field(init=False, default=False)
+    _codec_state_path: Path | None = field(init=False, default=None)
 
     def __post_init__(self) -> None:
         if self.fps <= 0:
@@ -1064,6 +1065,8 @@ class RecordingManager:
             0 if self.chunk_data_limit_bytes is None else int(self.chunk_data_limit_bytes)
         )
         self._chunk_frame_limit = self._calculate_chunk_frame_limit()
+        self._codec_state_path = self.directory / ".codec_state.json"
+        self._load_codec_state()
 
     @property
     def media_type(self) -> str:
@@ -1958,14 +1961,14 @@ class RecordingManager:
                 context = av.CodecContext.create(candidate, "w")
             except av.FFmpegError as exc:  # pragma: no cover - codec probing failure
                 last_error = exc
-                self._codec_failures.add(candidate)
+                self._mark_codec_failed(candidate)
                 continue
             except Exception as exc:  # pragma: no cover - defensive guard
                 last_error = exc
-                self._codec_failures.add(candidate)
+                self._mark_codec_failed(candidate)
                 continue
             if not getattr(context, "is_encoder", True):
-                self._codec_failures.add(candidate)
+                self._mark_codec_failed(candidate)
                 continue
             self._preferred_video_codec = candidate
             return candidate
@@ -1976,9 +1979,14 @@ class RecordingManager:
     def _mark_codec_failed(self, codec: str) -> None:
         if not codec:
             return
+        if codec in self._codec_failures:
+            if self._preferred_video_codec == codec:
+                self._preferred_video_codec = None
+            return
         self._codec_failures.add(codec)
         if self._preferred_video_codec == codec:
             self._preferred_video_codec = None
+        self._persist_codec_state()
 
     def _handle_chunk_failure(self, chunk: _ChunkWriter) -> None:
         try:
@@ -2031,8 +2039,10 @@ class RecordingManager:
                 frame_rate,
             )
             if fallback is not None:
+                self._persist_codec_state()
                 return fallback
             self._video_encoding_disabled = True
+            self._persist_codec_state()
             return None
         while True:
             codec_name = self._select_video_codec()
@@ -2049,8 +2059,10 @@ class RecordingManager:
                 if fallback is not None:
                     self._use_fallback_encoder = True
                     self._preferred_video_codec = None
+                    self._persist_codec_state()
                     return fallback
                 self._video_encoding_disabled = True
+                self._persist_codec_state()
                 return None
             try:
                 codec_profile = _codec_profile(codec_name)
@@ -2066,6 +2078,7 @@ class RecordingManager:
                 last_error = exc
                 logger.error("Failed to open chunk container %s: %s", path, exc)
                 self._video_encoding_disabled = True
+                self._persist_codec_state()
                 return None
             try:
                 stream = container.add_stream(codec_name, rate=frame_rate_fraction)
@@ -2230,10 +2243,71 @@ class RecordingManager:
             return None
         if task_list is not None:
             task_list.append(entry)
-            return entry
-        async with self._state_lock:
-            self._chunk_entries.append(entry)
-        return entry
+            note_entry = entry
+        else:
+            async with self._state_lock:
+                self._chunk_entries.append(entry)
+            note_entry = entry
+        if isinstance(chunk, _ActiveChunkWriter) and chunk.codec:
+            if chunk.codec not in self._codec_failures:
+                if self._preferred_video_codec != chunk.codec:
+                    self._preferred_video_codec = chunk.codec
+                    if self._use_fallback_encoder:
+                        self._use_fallback_encoder = False
+                    self._persist_codec_state()
+        elif isinstance(chunk, _JpegChunkWriter):
+            if not self._use_fallback_encoder:
+                self._use_fallback_encoder = True
+                self._preferred_video_codec = None
+                self._persist_codec_state()
+        return note_entry
+
+    def _codec_state_file(self) -> Path | None:
+        return self._codec_state_path
+
+    def _load_codec_state(self) -> None:
+        path = self._codec_state_file()
+        if path is None:
+            return
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return
+        except Exception:  # pragma: no cover - best-effort parsing
+            return
+        failed = payload.get("failed_codecs")
+        if isinstance(failed, list):
+            for item in failed:
+                if isinstance(item, str):
+                    self._codec_failures.add(item)
+        fallback = payload.get("fallback")
+        if isinstance(fallback, bool) and fallback:
+            self._use_fallback_encoder = True
+        preferred = payload.get("preferred_codec")
+        if (
+            isinstance(preferred, str)
+            and preferred
+            and preferred not in self._codec_failures
+            and not self._use_fallback_encoder
+        ):
+            self._preferred_video_codec = preferred
+
+    def _persist_codec_state(self) -> None:
+        path = self._codec_state_file()
+        if path is None:
+            return
+        payload: dict[str, object] = {
+            "failed_codecs": sorted(self._codec_failures),
+            "fallback": bool(self._use_fallback_encoder),
+        }
+        codec = self._preferred_video_codec
+        if codec and codec not in self._codec_failures and not self._use_fallback_encoder:
+            payload["preferred_codec"] = codec
+        try:
+            data = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
+            path.write_text(data, encoding="utf-8")
+        except OSError:  # pragma: no cover - best-effort persistence
+            pass
 
     def _normalise_chunk_duration(self, value: int | float | None) -> int | None:
         if value in (None, "", 0):

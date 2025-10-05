@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+import json
 import types
-
 from pathlib import Path
 
 import asyncio
@@ -359,7 +359,37 @@ async def test_chunk_codec_fallback(tmp_path: Path, monkeypatch, anyio_backend) 
     )
     assert all(entry.get("file", "").endswith(".mjpeg") for entry in chunks)
 
+    state_path = tmp_path / ".codec_state.json"
+    assert state_path.exists()
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert state.get("fallback") is True
+    assert "h264" in state.get("failed_codecs", [])
+
     await manager.aclose()
+
+    manager2 = RecordingManager(
+        camera=camera,
+        pipeline=pipeline,
+        directory=tmp_path,
+        fps=2,
+        chunk_duration_seconds=1,
+    )
+    manager2._ensure_producer_running = types.MethodType(_noop, manager2)
+    assert manager2._use_fallback_encoder is True
+
+    await manager2.start_recording()
+    await manager2._record_frame(jpeg_payload, 0.0, frame)
+    await manager2._record_frame(jpeg_payload, 0.5, frame)
+
+    placeholder2 = await manager2.stop_recording()
+    assert placeholder2["processing"] is True
+    metadata2 = await manager2.wait_for_processing()
+    assert metadata2 is not None
+    chunks2 = metadata2.get("chunks") or []
+    assert chunks2
+    assert all(entry.get("codec") == "jpeg-fallback" for entry in chunks2)
+
+    await manager2.aclose()
 
 
 @pytest.mark.anyio
