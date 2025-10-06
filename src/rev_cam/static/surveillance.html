@@ -251,6 +251,14 @@
         box-shadow: 0 0 0 1px rgba(255, 69, 58, 0.45) inset, 0 12px 28px rgba(255, 69, 58, 0.45);
         animation: motionAlertPulse 1.4s ease-in-out infinite;
       }
+      button.action.recording-active:hover,
+      button.action.recording-active:focus-visible,
+      #record-button[aria-pressed="true"]:hover,
+      #record-button[aria-pressed="true"]:focus-visible {
+        background: linear-gradient(135deg, rgba(255, 69, 58, 0.9), rgba(255, 105, 97, 0.95));
+        color: #fff;
+        box-shadow: 0 0 0 1px rgba(255, 69, 58, 0.45) inset, 0 12px 28px rgba(255, 69, 58, 0.45);
+      }
       button.action:disabled {
         opacity: 0.6;
         cursor: not-allowed;
@@ -491,7 +499,7 @@
       let lastStatusSnapshot = null;
       const STATUS_REFRESH_ACTIVE_MS = 2000;
       const STATUS_REFRESH_IDLE_MS = 5000;
-      const MANUAL_CONFIRMATION_GRACE_MS = 5000;
+      const MANUAL_CONFIRMATION_GRACE_MS = 20000;
       let statusRefreshHandle = null;
       let statusRequestSequence = 0;
       let latestRequestedStatusSequence = 0;
@@ -1275,7 +1283,7 @@
           buttons.forEach((button) => {
             button.disabled = false;
           });
-          const expectedSession = stoppingManual ? "idle" : sessionState;
+          const expectedSession = stoppingManual ? "idle" : "manual";
           applySessionVisuals(expectedSession);
           const statusPromise = loadStatus({ showLoading: true });
           statusPromise.catch((error) => {

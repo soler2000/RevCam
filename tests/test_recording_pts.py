@@ -33,7 +33,7 @@ class _DummyContainer:
 
 def test_chunk_writer_pts_are_relative(tmp_path):
     path = tmp_path / "chunk.mp4"
-    stream = _DummyStream(Fraction(1, 10))
+    stream = _DummyStream(Fraction(1, 1000))
     container = _DummyContainer()
     writer = recording._ActiveChunkWriter(
         name="test",
@@ -41,6 +41,7 @@ def test_chunk_writer_pts_are_relative(tmp_path):
         path=path,
         container=container,
         stream=stream,
+        time_base=Fraction(1, 1000),
         target_width=4,
         target_height=4,
         fps=10.0,

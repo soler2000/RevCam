@@ -892,6 +892,7 @@ class _ActiveChunkWriter:
     path: Path
     container: av.container.OutputContainer
     stream: av.video.stream.VideoStream
+    time_base: Fraction
     fps: float
     codec: str
     media_type: str
@@ -908,10 +909,13 @@ class _ActiveChunkWriter:
         relative = float(timestamp) - float(base)
         if relative < 0:
             relative = 0.0
-        if self.fps <= 0:
-            pts = self.frame_count
-        else:
+        time_base_value = float(self.time_base) if self.time_base else 0.0
+        if time_base_value > 0:
+            pts = int(round(relative / time_base_value))
+        elif self.fps > 0:
             pts = int(round(relative * float(self.fps)))
+        else:
+            pts = self.frame_count
         if pts <= self.last_pts:
             pts = self.last_pts + 1
         self.last_pts = pts
@@ -936,7 +940,7 @@ class _ActiveChunkWriter:
         ):
             frame = frame.reformat(width=self.target_width, height=self.target_height)
         frame.pts = self._compute_pts(timestamp)
-        frame.time_base = self.stream.time_base
+        frame.time_base = self.time_base
         for packet in self.stream.encode(frame):
             self.container.mux(packet)
             packet_size = getattr(packet, "size", None)
@@ -964,7 +968,13 @@ class _ActiveChunkWriter:
                 duration = max(0.0, float(self.last_timestamp - self.first_timestamp))
             except Exception:  # pragma: no cover - defensive conversion
                 duration = 0.0
-        if self.frame_count and self.fps > 0:
+        if self.last_pts >= 0:
+            try:
+                pts_duration = float(self.last_pts + 1) * float(self.time_base)
+            except Exception:  # pragma: no cover - defensive conversion
+                pts_duration = 0.0
+            duration = max(duration, pts_duration)
+        elif self.frame_count and self.fps > 0:
             minimum = float(self.frame_count) / float(self.fps)
             duration = max(duration, minimum)
         entry: dict[str, object] = {
@@ -2234,9 +2244,7 @@ class RecordingManager:
             return None
         frame_rate = 1.0 if self.fps <= 0 else float(self.fps)
         frame_rate_fraction = Fraction(str(frame_rate)).limit_denominator(1000)
-        time_base = Fraction(
-            frame_rate_fraction.denominator, frame_rate_fraction.numerator
-        )
+        time_base = Fraction(1, 1000)
         height, width = array.shape[:2]
         filename = self._chunk_filename(name, index, "mp4")
         path = self.directory / filename
@@ -2334,6 +2342,10 @@ class RecordingManager:
             pixel_format = codec_profile.get("pixel_format")
             stream.pix_fmt = pixel_format if pixel_format else "yuv420p"
             stream.time_base = time_base
+            try:
+                stream.average_rate = frame_rate_fraction
+            except Exception:  # pragma: no cover - best effort rate hint
+                pass
             if codec_name.startswith("h264") or codec_name == "libx264":
                 stream.options = {"movflags": "+faststart"}
             return _ActiveChunkWriter(
@@ -2342,6 +2354,7 @@ class RecordingManager:
                 path=path,
                 container=container,
                 stream=stream,
+                time_base=time_base,
                 fps=frame_rate,
                 codec=codec_name,
                 media_type=codec_profile.get("media_type", "video/mp4"),
