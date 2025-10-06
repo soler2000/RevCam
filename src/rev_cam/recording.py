@@ -432,7 +432,7 @@ def iter_recording_frames(
             if boundary:
                 for payload in _iter_mjpeg_frames(chunk_path, boundary):
                     try:
-                        array = simplejpeg.decode_jpeg(payload, colorspace="BGR")
+                        array = simplejpeg.decode_jpeg(payload, colorspace="RGB")
                     except Exception:  # pragma: no cover - skip invalid frames
                         continue
                     yield {"array": array, "chunk": dict(entry)}
@@ -450,7 +450,7 @@ def iter_recording_frames(
                     continue
                 for frame in container.decode(video_stream):
                     try:
-                        array = frame.to_ndarray(format="bgr24")
+                        array = frame.to_ndarray(format="rgb24")
                     except Exception:  # pragma: no cover - defensive decode
                         continue
                     yield {"array": array, "chunk": dict(entry)}
@@ -489,7 +489,7 @@ def build_recording_video(
                 if isinstance(jpeg_data, str) and jpeg_data:
                     try:
                         decoded = base64.b64decode(jpeg_data)
-                        array = simplejpeg.decode_jpeg(decoded, colorspace="BGR")
+                        array = simplejpeg.decode_jpeg(decoded, colorspace="RGB")
                     except Exception as exc:
                         raise ValueError("Recording frames are invalid") from exc
         if array is None:
@@ -519,7 +519,7 @@ def build_recording_video(
 
         def _encode(array_data: "_np.ndarray", position: int) -> None:
             frame_array = _np.ascontiguousarray(array_data)
-            frame = av.VideoFrame.from_ndarray(frame_array, format="bgr24")
+            frame = av.VideoFrame.from_ndarray(frame_array, format="rgb24")
             frame.pts = position
             frame.time_base = time_base
             for packet in stream.encode(frame):
@@ -540,7 +540,7 @@ def build_recording_video(
                     if isinstance(jpeg_data, str) and jpeg_data:
                         try:
                             decoded = base64.b64decode(jpeg_data)
-                            array = simplejpeg.decode_jpeg(decoded, colorspace="BGR")
+                            array = simplejpeg.decode_jpeg(decoded, colorspace="RGB")
                         except Exception:  # pragma: no cover - skip invalid frames
                             continue
             if array is None:
@@ -901,6 +901,17 @@ class _ActiveChunkWriter:
     first_timestamp: float | None = None
     last_timestamp: float | None = None
     bytes_written: int = 0
+    last_pts: int = field(init=False, default=-1)
+
+    def _compute_pts(self, timestamp: float) -> int:
+        if self.fps <= 0:
+            pts = self.frame_count
+        else:
+            pts = int(round(float(timestamp) * float(self.fps)))
+        if pts <= self.last_pts:
+            pts = self.last_pts + 1
+        self.last_pts = pts
+        return pts
 
     def _refresh_size(self) -> None:
         try:
@@ -913,14 +924,14 @@ class _ActiveChunkWriter:
         if self.first_timestamp is None:
             self.first_timestamp = float(timestamp)
         self.last_timestamp = float(timestamp)
-        frame = av.VideoFrame.from_ndarray(array, format="bgr24")
+        frame = av.VideoFrame.from_ndarray(array, format="rgb24")
         if (
             self.target_width > 0
             and self.target_height > 0
             and (frame.width != self.target_width or frame.height != self.target_height)
         ):
             frame = frame.reformat(width=self.target_width, height=self.target_height)
-        frame.pts = self.frame_count
+        frame.pts = self._compute_pts(timestamp)
         frame.time_base = self.stream.time_base
         for packet in self.stream.encode(frame):
             self.container.mux(packet)
@@ -944,8 +955,14 @@ class _ActiveChunkWriter:
             pass
         self.bytes_written = int(size)
         duration = 0.0
+        if self.first_timestamp is not None and self.last_timestamp is not None:
+            try:
+                duration = max(0.0, float(self.last_timestamp - self.first_timestamp))
+            except Exception:  # pragma: no cover - defensive conversion
+                duration = 0.0
         if self.frame_count and self.fps > 0:
-            duration = float(self.frame_count) / float(self.fps)
+            minimum = float(self.frame_count) / float(self.fps)
+            duration = max(duration, minimum)
         entry: dict[str, object] = {
             "file": self.path.name,
             "frame_count": int(self.frame_count),
@@ -1013,10 +1030,12 @@ class _JpegChunkWriter:
         if self.first_timestamp is None:
             self.first_timestamp = float(timestamp)
         self.last_timestamp = float(timestamp)
+        if _np is not None and not array.flags["C_CONTIGUOUS"]:
+            array = _np.ascontiguousarray(array)
         jpeg = simplejpeg.encode_jpeg(
             array,
             quality=max(1, min(100, int(self.jpeg_quality))),
-            colorspace="BGR",
+            colorspace="RGB",
         )
         marker = f"--{self.boundary}\r\n".encode("ascii")
         header = (
@@ -1041,8 +1060,14 @@ class _JpegChunkWriter:
             size = self.bytes_written
         self.bytes_written = int(size)
         duration = 0.0
+        if self.first_timestamp is not None and self.last_timestamp is not None:
+            try:
+                duration = max(0.0, float(self.last_timestamp - self.first_timestamp))
+            except Exception:  # pragma: no cover - defensive conversion
+                duration = 0.0
         if self.frame_count and self.fps > 0:
-            duration = float(self.frame_count) / float(self.fps)
+            minimum = float(self.frame_count) / float(self.fps)
+            duration = max(duration, minimum)
         entry: dict[str, object] = {
             "file": self.path.name,
             "frame_count": int(self.frame_count),
@@ -1108,7 +1133,7 @@ def _remux_mjpeg_video_chunk(
             time_base = getattr(video_stream, "time_base", None)
             for frame_index, frame in enumerate(container.decode(video_stream)):
                 try:
-                    array = frame.to_ndarray(format="bgr24")
+                    array = frame.to_ndarray(format="rgb24")
                 except Exception as exc:
                     raise RuntimeError("Unable to decode MJPEG frame") from exc
                 timestamp = None

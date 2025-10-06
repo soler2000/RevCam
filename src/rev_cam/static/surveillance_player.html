@@ -91,6 +91,21 @@
         flex-direction: column;
         gap: 0.75rem;
       }
+      .playback-toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.75rem;
+      }
+      #toggle-playback {
+        min-width: 6.5rem;
+        font-weight: 600;
+      }
+      #playback-mode {
+        flex: 1;
+        text-align: right;
+        font-size: 0.9rem;
+      }
       .chunk-navigation {
         display: flex;
         align-items: center;
@@ -184,7 +199,20 @@
         alt="Surveillance recording chunk"
         hidden
       />
+      <canvas
+        id="mjpeg-snapshot"
+        class="playback-frame"
+        role="img"
+        aria-label="Paused MJPEG frame"
+        hidden
+      ></canvas>
       <div class="video-actions" id="video-actions" hidden>
+        <div class="playback-toolbar">
+          <button type="button" id="toggle-playback" aria-label="Toggle playback">
+            ⏯
+          </button>
+          <span id="playback-mode" class="muted"></span>
+        </div>
         <div class="chunk-navigation">
           <button type="button" id="prev-chunk" aria-label="Previous chunk">⏮</button>
           <div id="chunk-indicator" class="chunk-indicator">Chunk 0 of 0</div>
@@ -207,12 +235,15 @@
       const video = document.getElementById("playback-video");
       const source = document.getElementById("playback-source");
       const image = document.getElementById("playback-image");
+      const canvas = document.getElementById("mjpeg-snapshot");
       const actions = document.getElementById("video-actions");
       const prevChunkButton = document.getElementById("prev-chunk");
       const nextChunkButton = document.getElementById("next-chunk");
       const chunkIndicator = document.getElementById("chunk-indicator");
       const chunkList = document.getElementById("chunk-list");
       const downloadLink = document.getElementById("download-link");
+      const playbackToggleButton = document.getElementById("toggle-playback");
+      const playbackMode = document.getElementById("playback-mode");
 
       let chunks = [];
       let currentChunkIndex = 0;
@@ -222,12 +253,102 @@
       let lastChunkUrl = null;
       let lastChunkAutoplay = false;
       let lastChunkMediaType = "video/mp4";
+      let lastChunkBaseUrl = null;
+      let currentMediaMode = "none";
+      let mjpegPaused = false;
 
       function revokeObjectUrl() {
         if (currentObjectUrl) {
           URL.revokeObjectURL(currentObjectUrl);
           currentObjectUrl = null;
         }
+      }
+
+      function hideMjpegSnapshot() {
+        if (!canvas) {
+          return;
+        }
+        const ctx = canvas.getContext("2d");
+        if (ctx) {
+          ctx.clearRect(0, 0, canvas.width || 0, canvas.height || 0);
+        }
+        canvas.hidden = true;
+      }
+
+      function updatePlaybackToggle() {
+        if (!playbackToggleButton) {
+          return;
+        }
+        if (currentMediaMode === "video" && video) {
+          playbackToggleButton.disabled = false;
+          playbackToggleButton.textContent = video.paused ? "▶︎ Play" : "⏸ Pause";
+          playbackToggleButton.title = video.paused
+            ? "Play video chunk"
+            : "Pause video chunk";
+          if (playbackMode) {
+            playbackMode.textContent = video.paused
+              ? "Video paused"
+              : "Video playing";
+          }
+        } else if (currentMediaMode === "mjpeg") {
+          playbackToggleButton.disabled = false;
+          playbackToggleButton.textContent = mjpegPaused ? "▶︎ Resume" : "⏸ Pause";
+          playbackToggleButton.title = mjpegPaused
+            ? "Resume MJPEG stream"
+            : "Pause MJPEG stream";
+          if (playbackMode) {
+            playbackMode.textContent = mjpegPaused
+              ? "MJPEG paused"
+              : "MJPEG streaming";
+          }
+        } else {
+          playbackToggleButton.disabled = true;
+          playbackToggleButton.textContent = "⏯";
+          playbackToggleButton.title = "Playback unavailable";
+          if (playbackMode) {
+            playbackMode.textContent = "";
+          }
+        }
+      }
+
+      function pauseMjpegStream() {
+        if (!image || mjpegPaused || currentMediaMode !== "mjpeg") {
+          return;
+        }
+        let snapshotShown = false;
+        if (canvas && image.naturalWidth && image.naturalHeight) {
+          const ctx = canvas.getContext("2d");
+          if (ctx) {
+            canvas.width = image.naturalWidth;
+            canvas.height = image.naturalHeight;
+            ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+            canvas.hidden = false;
+            snapshotShown = true;
+          }
+        }
+        image.src = "";
+        image.hidden = true;
+        mjpegPaused = true;
+        setStatus(`MJPEG chunk ${currentChunkIndex + 1} paused`);
+        updatePlaybackToggle();
+      }
+
+      function resumeMjpegStream() {
+        if (!image || !mjpegPaused || currentMediaMode !== "mjpeg") {
+          return;
+        }
+        const base = lastChunkBaseUrl;
+        if (!base) {
+          return;
+        }
+        const nextUrl = `${base}?v=${Date.now()}`;
+        lastChunkUrl = nextUrl;
+        mjpegPaused = false;
+        hideMjpegSnapshot();
+        image.hidden = false;
+        image.src = nextUrl;
+        setStatus(`Resuming MJPEG chunk ${currentChunkIndex + 1}`);
+        updatePlaybackToggle();
       }
 
       function setStatus(message, tone = "info") {
@@ -336,6 +457,7 @@
           chunkList.appendChild(button);
         });
         actions.hidden = false;
+        updatePlaybackToggle();
       }
 
       function buildChunkUrl(index) {
@@ -361,7 +483,11 @@
           image.hidden = true;
           image.src = "";
         }
+        hideMjpegSnapshot();
         revokeObjectUrl();
+        currentMediaMode = "none";
+        mjpegPaused = false;
+        updatePlaybackToggle();
       }
 
       function useVideoSource(url, mediaType, autoplay, strategy) {
@@ -381,6 +507,10 @@
         video.dataset.mediaType = mediaType;
         video.dataset.chunkIndex = String(currentChunkIndex + 1);
         video.dataset.loadStrategy = strategy;
+        currentMediaMode = "video";
+        mjpegPaused = false;
+        hideMjpegSnapshot();
+        updatePlaybackToggle();
         video.load();
         if (autoplay) {
           const playPromise = video.play();
@@ -409,6 +539,7 @@
         updateChunkUI();
         const chunk = chunks[index] ?? {};
         const chunkUrl = buildChunkUrl(index);
+        lastChunkBaseUrl = chunkUrl;
         const mediaType =
           typeof chunk.media_type === "string" && chunk.media_type.trim()
             ? chunk.media_type
@@ -424,10 +555,12 @@
           .toLowerCase()
           .startsWith("multipart/x-mixed-replace");
         if (isMultipart && image) {
+          hideMjpegSnapshot();
+          currentMediaMode = "mjpeg";
+          mjpegPaused = false;
           image.src = cacheBustedUrl;
           image.hidden = false;
-          video.dataset.mediaType = mediaType;
-          video.dataset.chunkIndex = String(index + 1);
+          updatePlaybackToggle();
           if (requestId === activeChunkRequest) {
             setStatus(`Streaming MJPEG chunk ${index + 1}`);
           }
@@ -534,11 +667,34 @@
           loadChunk(currentChunkIndex + 1, true);
         }
       });
+      if (playbackToggleButton) {
+        playbackToggleButton.addEventListener("click", () => {
+          if (currentMediaMode === "video" && video) {
+            if (video.paused) {
+              const promise = video.play();
+              if (promise && typeof promise.catch === "function") {
+                promise.catch(() => {
+                  /* autoplay prevented */
+                });
+              }
+            } else {
+              video.pause();
+            }
+          } else if (currentMediaMode === "mjpeg") {
+            if (mjpegPaused) {
+              resumeMjpegStream();
+            } else {
+              pauseMjpegStream();
+            }
+          }
+        });
+      }
       video.addEventListener("loadeddata", () => {
         const datasetIndex = Number(video.dataset.chunkIndex || "0");
         if (datasetIndex === currentChunkIndex + 1 && chunks.length) {
           setStatus(`Ready: chunk ${datasetIndex} of ${chunks.length}`);
         }
+        updatePlaybackToggle();
       });
       video.addEventListener("error", () => {
         const datasetIndex = Number(video.dataset.chunkIndex || "0");
@@ -558,14 +714,32 @@
           }
           setStatus("Unable to load video chunk", "error");
         }
+        updatePlaybackToggle();
       });
       video.addEventListener("ended", () => {
         if (currentChunkIndex < chunks.length - 1) {
           loadChunk(currentChunkIndex + 1, true);
         }
+        updatePlaybackToggle();
       });
+      video.addEventListener("play", updatePlaybackToggle);
+      video.addEventListener("pause", updatePlaybackToggle);
+      if (image) {
+        image.addEventListener("load", () => {
+          if (currentMediaMode === "mjpeg" && !mjpegPaused) {
+            setStatus(`Streaming MJPEG chunk ${currentChunkIndex + 1}`);
+            updatePlaybackToggle();
+          }
+        });
+        image.addEventListener("error", () => {
+          if (currentMediaMode === "mjpeg" && !mjpegPaused) {
+            setStatus("Unable to load video chunk", "error");
+          }
+        });
+      }
       window.addEventListener("beforeunload", revokeObjectUrl);
 
+      updatePlaybackToggle();
       initialise();
     </script>
   </body>
