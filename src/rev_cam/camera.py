@@ -399,7 +399,8 @@ class Picamera2Camera(BaseCamera):
         frame = await asyncio.to_thread(self._camera.capture_array)
         array = np.asarray(frame)
         if array.ndim == 3 and array.shape[2] >= 3:
-            converted = np.ascontiguousarray(array[..., :3])
+            rgb_view = array[..., :3]
+            converted = np.ascontiguousarray(rgb_view[..., ::-1])
             if converted.dtype != np.uint8:
                 converted = np.clip(converted, 0, 255).astype(np.uint8, copy=False)
             return converted

@@ -904,10 +904,14 @@ class _ActiveChunkWriter:
     last_pts: int = field(init=False, default=-1)
 
     def _compute_pts(self, timestamp: float) -> int:
+        base = self.first_timestamp if self.first_timestamp is not None else float(timestamp)
+        relative = float(timestamp) - float(base)
+        if relative < 0:
+            relative = 0.0
         if self.fps <= 0:
             pts = self.frame_count
         else:
-            pts = int(round(float(timestamp) * float(self.fps)))
+            pts = int(round(relative * float(self.fps)))
         if pts <= self.last_pts:
             pts = self.last_pts + 1
         self.last_pts = pts
