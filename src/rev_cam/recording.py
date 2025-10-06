@@ -217,8 +217,56 @@ def load_recording_payload(
     if chunk_sources:
         total_size = 0
         normalised_chunks: list[dict[str, object]] = []
-        for entry, chunk_path in chunk_sources:
+        updated_metadata_entries: dict[int, dict[str, object]] = {}
+        fps_value = metadata.get("fps") if isinstance(metadata, Mapping) else None
+        default_fps = (
+            float(fps_value)
+            if isinstance(fps_value, (int, float)) and fps_value > 0
+            else 10.0
+        )
+        jpeg_quality_value = metadata.get("jpeg_quality") if isinstance(metadata, Mapping) else None
+        jpeg_quality = (
+            int(jpeg_quality_value)
+            if isinstance(jpeg_quality_value, (int, float)) and jpeg_quality_value > 0
+            else 80
+        )
+        for index, (entry, chunk_path) in enumerate(chunk_sources, start=1):
             chunk_entry = dict(entry)
+            media_type_value = chunk_entry.get("media_type")
+            if (
+                isinstance(media_type_value, str)
+                and media_type_value.lower().startswith("video/x-motion-jpeg")
+                and chunk_path.suffix.lower() == ".avi"
+                and chunk_path.exists()
+                and chunk_path.is_file()
+            ):
+                start_offset_raw = chunk_entry.get("start_offset_seconds")
+                start_offset_value = (
+                    float(start_offset_raw)
+                    if isinstance(start_offset_raw, (int, float))
+                    else None
+                )
+                try:
+                    converted_entry = _remux_mjpeg_video_chunk(
+                        chunk_path,
+                        target_path=chunk_path.with_suffix(".mjpeg"),
+                        name=safe_name,
+                        index=index,
+                        fps=default_fps,
+                        jpeg_quality=jpeg_quality,
+                        boundary=f"chunk{index:03d}",
+                        start_offset=start_offset_value,
+                    )
+                except Exception:  # pragma: no cover - defensive logging
+                    logger.exception(
+                        "Failed to convert legacy MJPEG chunk %s for %s",
+                        index,
+                        safe_name,
+                    )
+                else:
+                    chunk_entry.update(converted_entry)
+                    chunk_path = directory / chunk_entry["file"]
+                    updated_metadata_entries[index - 1] = dict(chunk_entry)
             if chunk_path.exists() and chunk_path.is_file():
                 try:
                     size = chunk_path.stat().st_size
@@ -228,6 +276,16 @@ def load_recording_payload(
                     chunk_entry["size_bytes"] = int(size)
                     total_size += int(size)
             normalised_chunks.append(chunk_entry)
+        if updated_metadata_entries and isinstance(metadata, dict):
+            raw_chunks = metadata.get("chunks")
+            if isinstance(raw_chunks, list):
+                for idx, updated_entry in updated_metadata_entries.items():
+                    if 0 <= idx < len(raw_chunks):
+                        raw_chunks[idx] = dict(updated_entry)
+                try:
+                    _write_metadata(meta_path, metadata)
+                except OSError:  # pragma: no cover - best-effort persistence
+                    pass
         payload["chunks"] = normalised_chunks
         payload["chunk_count"] = len(normalised_chunks)
         if total_size and "size_bytes" not in payload:
@@ -276,6 +334,57 @@ def load_recording_chunk(
         media_type = entry.get("media_type")
         if not isinstance(media_type, str):
             media_type = "video/mp4"
+        elif media_type.lower().startswith("video/x-motion-jpeg") and chunk_path.suffix.lower() == ".avi":
+            fps_value = payload.get("fps")
+            fps = float(fps_value) if isinstance(fps_value, (int, float)) and fps_value > 0 else 10.0
+            start_offset = entry.get("start_offset_seconds")
+            start_offset_value = (
+                float(start_offset) if isinstance(start_offset, (int, float)) else None
+            )
+            target_path = chunk_path.with_suffix(".mjpeg")
+            try:
+                converted_entry = _remux_mjpeg_video_chunk(
+                    chunk_path,
+                    target_path=target_path,
+                    name=safe_name,
+                    index=chunk_index,
+                    fps=fps,
+                    jpeg_quality=int(payload.get("jpeg_quality", 80)),
+                    boundary=f"chunk{chunk_index:03d}",
+                    start_offset=start_offset_value,
+                )
+            except Exception:  # pragma: no cover - defensive logging
+                logger.exception(
+                    "Failed to upgrade legacy MJPEG chunk %s for %s",
+                    chunk_index,
+                    safe_name,
+                )
+            else:
+                chunk_entry = dict(converted_entry)
+                chunk_file = chunk_entry.get("file", chunk_file)
+                if isinstance(chunk_file, str):
+                    chunk_path = directory / chunk_file
+                media_type = chunk_entry.get("media_type", media_type)
+                size_bytes = chunk_entry.get("size_bytes", size_bytes)
+                chunks[chunk_index - 1] = chunk_entry
+                meta_path = directory / f"{safe_name}.meta.json"
+                metadata = _load_metadata(meta_path)
+                if isinstance(metadata, dict):
+                    raw_chunks = metadata.get("chunks")
+                    if (
+                        isinstance(raw_chunks, list)
+                        and 0 <= chunk_index - 1 < len(raw_chunks)
+                    ):
+                        raw_chunks[chunk_index - 1] = dict(chunk_entry)
+                        try:
+                            _write_metadata(meta_path, metadata)
+                        except OSError:
+                            pass
+                try:
+                    if chunk_path.exists():
+                        size_bytes = chunk_path.stat().st_size
+                except OSError:  # pragma: no cover - defensive stat
+                    pass
     else:
         raise FileNotFoundError("Chunk not found")
 
@@ -961,6 +1070,82 @@ class _JpegChunkWriter:
             pass
         self.bytes_written = 0
         self.frame_count = 0
+
+
+def _remux_mjpeg_video_chunk(
+    source_path: Path,
+    *,
+    target_path: Path,
+    name: str,
+    index: int,
+    fps: float,
+    jpeg_quality: int,
+    boundary: str,
+    start_offset: float | None = None,
+) -> dict[str, object]:
+    """Convert an MJPEG container file into a multipart MJPEG stream."""
+
+    effective_fps = float(fps) if fps and fps > 0 else 10.0
+    writer = _JpegChunkWriter(
+        name=name,
+        index=index,
+        path=target_path,
+        fps=effective_fps,
+        jpeg_quality=jpeg_quality,
+        boundary=boundary,
+    )
+    frame_base = float(start_offset) if isinstance(start_offset, (int, float)) else 0.0
+    frames_written = 0
+    try:
+        with av.open(str(source_path), mode="r") as container:
+            video_stream = None
+            for stream in container.streams:
+                if getattr(stream, "type", "") == "video":
+                    video_stream = stream
+                    break
+            if video_stream is None:
+                raise RuntimeError("MJPEG chunk does not contain a video stream")
+            time_base = getattr(video_stream, "time_base", None)
+            for frame_index, frame in enumerate(container.decode(video_stream)):
+                try:
+                    array = frame.to_ndarray(format="bgr24")
+                except Exception as exc:
+                    raise RuntimeError("Unable to decode MJPEG frame") from exc
+                timestamp = None
+                pts = getattr(frame, "pts", None)
+                if pts is not None and time_base:
+                    try:
+                        timestamp = float(pts * time_base)
+                    except Exception:
+                        timestamp = None
+                if timestamp is None:
+                    frame_time = getattr(frame, "time", None)
+                    if frame_time is not None:
+                        try:
+                            timestamp = float(frame_time)
+                        except Exception:
+                            timestamp = None
+                if timestamp is None:
+                    timestamp = frame_index / effective_fps
+                writer.add_frame(array, frame_base + float(timestamp))
+                frames_written += 1
+    except Exception:
+        writer.abort()
+        raise
+
+    if frames_written == 0:
+        writer.abort()
+        raise RuntimeError("MJPEG chunk did not contain any frames")
+
+    entry = writer.finalise()
+    if isinstance(start_offset, (int, float)):
+        entry["start_offset_seconds"] = round(float(start_offset), 3)
+    try:
+        if source_path.exists():
+            source_path.unlink()
+    except OSError:
+        pass
+    return entry
 
 
 @dataclass
@@ -2241,6 +2426,7 @@ class RecordingManager:
                 chunk.name,
             )
             return None
+        entry = await self._prepare_chunk_entry(chunk, entry)
         if task_list is not None:
             task_list.append(entry)
             note_entry = entry
@@ -2261,6 +2447,48 @@ class RecordingManager:
                 self._preferred_video_codec = None
                 self._persist_codec_state()
         return note_entry
+
+    async def _prepare_chunk_entry(
+        self, chunk: _ChunkWriter, entry: dict[str, object]
+    ) -> dict[str, object]:
+        if isinstance(chunk, _ActiveChunkWriter):
+            codec = entry.get("codec")
+            if isinstance(codec, str) and codec in {"mjpeg", "jpeg"}:
+                start_offset = entry.get("start_offset_seconds")
+                start_offset_value = (
+                    float(start_offset)
+                    if isinstance(start_offset, (int, float))
+                    else None
+                )
+                fps_value = chunk.fps if chunk.fps > 0 else float(self.fps or 10.0)
+                target_path = chunk.path.with_suffix(".mjpeg")
+                try:
+                    entry = await asyncio.to_thread(
+                        _remux_mjpeg_video_chunk,
+                        chunk.path,
+                        target_path=target_path,
+                        name=chunk.name,
+                        index=chunk.index,
+                        fps=fps_value,
+                        jpeg_quality=int(self.jpeg_quality),
+                        boundary=f"chunk{chunk.index:03d}",
+                        start_offset=start_offset_value,
+                    )
+                    chunk.path = target_path
+                    codec_name = entry.get("codec")
+                    if isinstance(codec_name, str):
+                        chunk.codec = codec_name
+                except Exception:
+                    logger.exception(
+                        "Failed to convert MJPEG chunk %s for %s to multipart stream",
+                        chunk.index,
+                        chunk.name,
+                    )
+                if not self._use_fallback_encoder:
+                    self._use_fallback_encoder = True
+                self._preferred_video_codec = None
+                self._mark_codec_failed(codec)
+        return entry
 
     def _codec_state_file(self) -> Path | None:
         return self._codec_state_path

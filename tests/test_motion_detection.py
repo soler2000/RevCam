@@ -258,16 +258,101 @@ async def test_chunk_encoder_handles_odd_frame_size(
     chunks = metadata.get("chunks") or []
     assert chunks
     entry = chunks[0]
-    assert entry.get("codec") == "mjpeg"
+    assert entry.get("codec") == "jpeg-fallback"
+    assert str(entry.get("file", "")).endswith(".mjpeg")
     video_path = tmp_path / str(entry["file"])
     assert video_path.exists()
-    with av.open(str(video_path), mode="r") as container:
-        video_streams = [stream for stream in container.streams if stream.type == "video"]
-        assert video_streams
-        stream = video_streams[0]
-        assert stream.width % 2 == 0
-        assert stream.height % 2 == 0
     await manager.aclose()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("anyio_backend", ["asyncio"], indirect=True)
+async def test_even_dimension_frame_encoding(
+    tmp_path: Path, monkeypatch, anyio_backend
+) -> None:
+    camera = _StaticCamera()
+    pipeline = _pipeline()
+    manager = RecordingManager(
+        camera=camera,
+        pipeline=pipeline,
+        directory=tmp_path,
+        fps=2,
+        chunk_duration_seconds=1,
+    )
+
+    async def _noop(self):
+        return None
+
+    manager._ensure_producer_running = types.MethodType(_noop, manager)
+
+    monkeypatch.setattr(recording, "_VIDEO_CODEC_CANDIDATES", ("h264",))
+    monkeypatch.setattr(
+        recording,
+        "_CODECS_REQUIRE_EVEN_DIMENSIONS",
+        frozenset({"h264"}),
+    )
+
+    captured: dict[str, object] = {}
+
+    class _DummyStream:
+        def __init__(self, codec_name: str) -> None:
+            self.codec_context = types.SimpleNamespace(
+                codec=types.SimpleNamespace(name=codec_name)
+            )
+            self.width: int = 0
+            self.height: int = 0
+            self.pix_fmt: str | None = None
+            self.time_base = None
+
+        def encode(self, frame=None):  # pragma: no cover - deterministic stub
+            return []
+
+    class _DummyContainer:
+        def __init__(self, path: str, mode: str = "w", format: str | None = None) -> None:
+            self.path = Path(path)
+            self.streams: list[_DummyStream] = []
+            self._handle = self.path.open("wb")
+
+        def add_stream(self, codec_name: str, rate):
+            stream = _DummyStream(codec_name)
+            self.streams.append(stream)
+            captured["stream"] = stream
+            return stream
+
+        def mux(self, packet) -> None:  # pragma: no cover - deterministic stub
+            return None
+
+        def close(self) -> None:
+            try:
+                self._handle.write(b"final")
+            finally:
+                self._handle.close()
+
+    monkeypatch.setattr(
+        recording.RecordingManager, "_select_video_codec", lambda self: "h264"
+    )
+    monkeypatch.setattr(
+        av, "open", lambda path, mode="w", format=None: _DummyContainer(path, mode, format)
+    )
+
+    await manager.start_recording()
+
+    frame = np.zeros((25, 37, 3), dtype=np.uint8)
+    frame[:8, :8, :] = 255
+    jpeg_payload = manager._encode_frame(frame)
+
+    await manager._record_frame(jpeg_payload, 0.0, frame)
+    await manager._record_frame(jpeg_payload, 0.6, frame)
+
+    placeholder = await manager.stop_recording()
+    assert placeholder["processing"] is True
+    await manager.wait_for_processing()
+    await manager.aclose()
+
+    stream = captured.get("stream")
+    assert stream is not None
+    assert stream.width % 2 == 0
+    assert stream.height % 2 == 0
 
 
 @pytest.mark.anyio
@@ -732,6 +817,57 @@ async def test_recording_manager_streams_chunk_writes(
     assert mp4_chunks
     legacy_chunks = sorted(tmp_path.glob("*.chunk*.json*"))
     assert not legacy_chunks
+
+
+def test_load_recording_chunk_upgrades_legacy_mjpeg(tmp_path: Path, monkeypatch) -> None:
+    metadata = {
+        "name": "legacy",
+        "chunks": [
+            {
+                "file": "legacy.chunk001.avi",
+                "media_type": "video/x-motion-jpeg",
+                "size_bytes": 128,
+                "codec": "mjpeg",
+            }
+        ],
+        "fps": 5,
+    }
+    meta_path = tmp_path / "legacy.meta.json"
+    meta_path.write_text(json.dumps(metadata))
+    avi_path = tmp_path / "legacy.chunk001.avi"
+    avi_path.write_bytes(b"avi")
+
+    def _fake_remux(
+        source_path: Path,
+        *,
+        target_path: Path,
+        name: str,
+        index: int,
+        fps: float,
+        jpeg_quality: int,
+        boundary: str,
+        start_offset: float | None = None,
+    ) -> dict[str, object]:
+        target_path.write_bytes(b"mjpeg")
+        return {
+            "file": target_path.name,
+            "media_type": f"multipart/x-mixed-replace; boundary={boundary}",
+            "size_bytes": target_path.stat().st_size,
+            "codec": "jpeg-fallback",
+            "frame_count": 3,
+            "duration_seconds": 0.6,
+        }
+
+    monkeypatch.setattr(recording, "_remux_mjpeg_video_chunk", _fake_remux)
+
+    chunk = recording.load_recording_chunk(tmp_path, "legacy", 1)
+    assert chunk["media_type"].startswith("multipart/x-mixed-replace")
+    assert chunk["chunk_file"].endswith(".mjpeg")
+    assert (tmp_path / chunk["chunk_file"]).exists()
+
+    updated = json.loads(meta_path.read_text())
+    assert updated["chunks"][0]["file"].endswith(".mjpeg")
+    assert updated["chunks"][0]["codec"] == "jpeg-fallback"
 
 
 @pytest.mark.anyio
