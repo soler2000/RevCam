@@ -963,20 +963,25 @@ class _ActiveChunkWriter:
             pass
         self.bytes_written = int(size)
         duration = 0.0
+        fps_minimum = 0.0
         if self.first_timestamp is not None and self.last_timestamp is not None:
             try:
                 duration = max(0.0, float(self.last_timestamp - self.first_timestamp))
             except Exception:  # pragma: no cover - defensive conversion
                 duration = 0.0
+        if self.frame_count and self.fps > 0:
+            try:
+                fps_minimum = float(self.frame_count) / float(self.fps)
+            except Exception:  # pragma: no cover - defensive conversion
+                fps_minimum = 0.0
         if self.last_pts >= 0:
             try:
                 pts_duration = float(self.last_pts + 1) * float(self.time_base)
             except Exception:  # pragma: no cover - defensive conversion
                 pts_duration = 0.0
             duration = max(duration, pts_duration)
-        elif self.frame_count and self.fps > 0:
-            minimum = float(self.frame_count) / float(self.fps)
-            duration = max(duration, minimum)
+        if fps_minimum > 0:
+            duration = max(duration, fps_minimum)
         entry: dict[str, object] = {
             "file": self.path.name,
             "frame_count": int(self.frame_count),
@@ -1845,7 +1850,11 @@ class RecordingManager:
                 if start is None:
                     timestamp = 0.0
                 else:
-                    timestamp = max(0.0, frame_time - start)
+                    delta = frame_time - start
+                    if delta < 0 and frame_time >= 0:
+                        timestamp = float(frame_time)
+                    else:
+                        timestamp = max(0.0, delta)
                 if self._thumbnail is None:
                     self._thumbnail = base64.b64encode(payload).decode("ascii")
                 self._total_frame_count += 1
@@ -2244,7 +2253,7 @@ class RecordingManager:
             return None
         frame_rate = 1.0 if self.fps <= 0 else float(self.fps)
         frame_rate_fraction = Fraction(str(frame_rate)).limit_denominator(1000)
-        time_base = Fraction(1, 1000)
+        time_base = Fraction(1, 1_000_000)
         height, width = array.shape[:2]
         filename = self._chunk_filename(name, index, "mp4")
         path = self.directory / filename

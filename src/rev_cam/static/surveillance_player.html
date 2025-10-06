@@ -97,6 +97,71 @@
         justify-content: space-between;
         gap: 0.75rem;
       }
+      .playback-progress {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+      }
+      .playback-progress .progress-time {
+        width: 3.25rem;
+        text-align: center;
+        font-variant-numeric: tabular-nums;
+        color: var(--text-muted);
+        font-size: 0.9rem;
+      }
+      #playback-progress {
+        flex: 1;
+        -webkit-appearance: none;
+        appearance: none;
+        height: 0.4rem;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.12);
+        outline: none;
+      }
+      #playback-progress:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
+      #playback-progress::-webkit-slider-runnable-track {
+        height: 0.4rem;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.12);
+      }
+      #playback-progress::-moz-range-track {
+        height: 0.4rem;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.12);
+      }
+      #playback-progress::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 0.9rem;
+        height: 0.9rem;
+        border-radius: 50%;
+        background: var(--accent);
+        border: none;
+        box-shadow: 0 0 0 2px rgba(10, 132, 255, 0.3);
+        cursor: pointer;
+        transition: transform 0.15s ease, box-shadow 0.15s ease;
+      }
+      #playback-progress::-webkit-slider-thumb:hover {
+        transform: scale(1.1);
+        box-shadow: 0 0 0 4px rgba(10, 132, 255, 0.2);
+      }
+      #playback-progress::-moz-range-thumb {
+        width: 0.9rem;
+        height: 0.9rem;
+        border-radius: 50%;
+        background: var(--accent);
+        border: none;
+        box-shadow: 0 0 0 2px rgba(10, 132, 255, 0.3);
+        cursor: pointer;
+        transition: transform 0.15s ease, box-shadow 0.15s ease;
+      }
+      #playback-progress::-moz-range-thumb:hover {
+        transform: scale(1.1);
+        box-shadow: 0 0 0 4px rgba(10, 132, 255, 0.2);
+      }
       #toggle-playback {
         min-width: 6.5rem;
         font-weight: 600;
@@ -213,6 +278,19 @@
           </button>
           <span id="playback-mode" class="muted"></span>
         </div>
+        <div class="playback-progress" id="progress-container" hidden>
+          <span class="progress-time" id="progress-current">0:00</span>
+          <input
+            type="range"
+            id="playback-progress"
+            min="0"
+            max="0"
+            step="0.01"
+            value="0"
+            aria-label="Seek within video chunk"
+          />
+          <span class="progress-time" id="progress-total">0:00</span>
+        </div>
         <div class="chunk-navigation">
           <button type="button" id="prev-chunk" aria-label="Previous chunk">⏮</button>
           <div id="chunk-indicator" class="chunk-indicator">Chunk 0 of 0</div>
@@ -244,6 +322,10 @@
       const downloadLink = document.getElementById("download-link");
       const playbackToggleButton = document.getElementById("toggle-playback");
       const playbackMode = document.getElementById("playback-mode");
+      const progressContainer = document.getElementById("progress-container");
+      const progressSlider = document.getElementById("playback-progress");
+      const progressCurrent = document.getElementById("progress-current");
+      const progressTotal = document.getElementById("progress-total");
 
       let chunks = [];
       let currentChunkIndex = 0;
@@ -256,6 +338,8 @@
       let lastChunkBaseUrl = null;
       let currentMediaMode = "none";
       let mjpegPaused = false;
+      let isScrubbing = false;
+      let lastKnownDuration = 0;
 
       function revokeObjectUrl() {
         if (currentObjectUrl) {
@@ -308,6 +392,108 @@
           if (playbackMode) {
             playbackMode.textContent = "";
           }
+        }
+      }
+
+      function formatClock(seconds, includeFraction = false) {
+        if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds < 0) {
+          return "0:00";
+        }
+        const wholeSeconds = Math.floor(seconds);
+        const fraction = includeFraction
+          ? Math.min(9, Math.max(0, Math.floor((seconds - wholeSeconds) * 10)))
+          : 0;
+        const hours = Math.floor(wholeSeconds / 3600);
+        const minutes = Math.floor((wholeSeconds % 3600) / 60);
+        const secs = wholeSeconds % 60;
+        const pad = (value) => value.toString().padStart(2, "0");
+        let base;
+        if (hours > 0) {
+          base = `${hours}:${pad(minutes)}:${pad(secs)}`;
+        } else {
+          base = `${minutes}:${pad(secs)}`;
+        }
+        if (fraction > 0) {
+          return `${base}.${fraction}`;
+        }
+        return base;
+      }
+
+      function resetProgressUI() {
+        lastKnownDuration = 0;
+        if (progressContainer) {
+          progressContainer.hidden = true;
+        }
+        if (progressSlider) {
+          progressSlider.value = "0";
+          progressSlider.max = "0";
+          progressSlider.disabled = true;
+        }
+        if (progressCurrent) {
+          progressCurrent.textContent = "0:00";
+        }
+        if (progressTotal) {
+          progressTotal.textContent = "0:00";
+        }
+      }
+
+      function prepareProgressUI(durationSeconds) {
+        if (!progressContainer || !progressSlider) {
+          return;
+        }
+        const numericDuration =
+          typeof durationSeconds === "number" && Number.isFinite(durationSeconds) && durationSeconds > 0
+            ? durationSeconds
+            : 0;
+        lastKnownDuration = numericDuration;
+        progressContainer.hidden = false;
+        progressSlider.disabled = numericDuration <= 0;
+        progressSlider.value = "0";
+        progressSlider.max = numericDuration > 0 ? String(numericDuration) : "0";
+        if (progressCurrent) {
+          progressCurrent.textContent = "0:00";
+        }
+        if (progressTotal) {
+          progressTotal.textContent =
+            numericDuration > 0 ? formatClock(numericDuration) : "0:00";
+        }
+      }
+
+      function updateProgressUI(durationOverride) {
+        if (!progressContainer || !progressSlider || !video || progressContainer.hidden) {
+          return;
+        }
+        let duration = lastKnownDuration;
+        if (typeof durationOverride === "number" && Number.isFinite(durationOverride) && durationOverride > 0) {
+          duration = durationOverride;
+        } else {
+          const metadataDuration = Number(video.duration);
+          if (Number.isFinite(metadataDuration) && metadataDuration > 0) {
+            duration = metadataDuration;
+          } else {
+            const chunk = chunks[currentChunkIndex] ?? {};
+            const chunkDuration = Number(chunk.duration_seconds);
+            if (Number.isFinite(chunkDuration) && chunkDuration > 0) {
+              duration = chunkDuration;
+            }
+          }
+        }
+        if (duration > 0) {
+          lastKnownDuration = duration;
+        }
+        const sliderMax = lastKnownDuration > 0 ? lastKnownDuration : 0;
+        progressSlider.max = sliderMax > 0 ? String(sliderMax) : "0";
+        progressSlider.disabled = sliderMax <= 0;
+        if (!isScrubbing) {
+          const currentTime = Number(video.currentTime);
+          progressSlider.value = Number.isFinite(currentTime) && currentTime >= 0 ? String(currentTime) : "0";
+        }
+        const sliderValue = Number(progressSlider.value);
+        if (progressCurrent) {
+          progressCurrent.textContent = formatClock(sliderValue, true);
+        }
+        if (progressTotal) {
+          progressTotal.textContent = sliderMax > 0 ? formatClock(sliderMax) : "0:00";
         }
       }
 
@@ -485,6 +671,7 @@
         }
         hideMjpegSnapshot();
         revokeObjectUrl();
+        resetProgressUI();
         currentMediaMode = "none";
         mjpegPaused = false;
         updatePlaybackToggle();
@@ -511,6 +698,7 @@
         mjpegPaused = false;
         hideMjpegSnapshot();
         updatePlaybackToggle();
+        updateProgressUI();
         video.load();
         video.defaultPlaybackRate = 1;
         try {
@@ -572,6 +760,7 @@
           }
           return;
         } else {
+          prepareProgressUI(chunk.duration_seconds);
           try {
             const response = await fetch(cacheBustedUrl, { cache: "no-store" });
             if (requestId !== activeChunkRequest) {
@@ -603,6 +792,7 @@
                 autoplay
               );
               if (!retried) {
+                resetProgressUI();
                 setStatus("Unable to load video chunk", "error");
               }
             }
@@ -695,12 +885,16 @@
           }
         });
       }
+      video.addEventListener("loadedmetadata", () => {
+        updateProgressUI(video.duration);
+      });
       video.addEventListener("loadeddata", () => {
         const datasetIndex = Number(video.dataset.chunkIndex || "0");
         if (datasetIndex === currentChunkIndex + 1 && chunks.length) {
           setStatus(`Ready: chunk ${datasetIndex} of ${chunks.length}`);
         }
         updatePlaybackToggle();
+        updateProgressUI();
       });
       video.addEventListener("error", () => {
         const datasetIndex = Number(video.dataset.chunkIndex || "0");
@@ -722,14 +916,30 @@
         }
         updatePlaybackToggle();
       });
+      video.addEventListener("timeupdate", () => {
+        updateProgressUI();
+      });
+      video.addEventListener("seeking", () => {
+        updateProgressUI();
+      });
+      video.addEventListener("seeked", () => {
+        updateProgressUI();
+      });
       video.addEventListener("ended", () => {
         if (currentChunkIndex < chunks.length - 1) {
           loadChunk(currentChunkIndex + 1, true);
         }
         updatePlaybackToggle();
+        updateProgressUI();
       });
-      video.addEventListener("play", updatePlaybackToggle);
-      video.addEventListener("pause", updatePlaybackToggle);
+      video.addEventListener("play", () => {
+        updatePlaybackToggle();
+        updateProgressUI();
+      });
+      video.addEventListener("pause", () => {
+        updatePlaybackToggle();
+        updateProgressUI();
+      });
       if (image) {
         image.addEventListener("load", () => {
           if (currentMediaMode === "mjpeg" && !mjpegPaused) {
@@ -740,6 +950,42 @@
         image.addEventListener("error", () => {
           if (currentMediaMode === "mjpeg" && !mjpegPaused) {
             setStatus("Unable to load video chunk", "error");
+          }
+        });
+      }
+      if (progressSlider) {
+        progressSlider.addEventListener("pointerdown", () => {
+          isScrubbing = true;
+        });
+        progressSlider.addEventListener("pointerup", () => {
+          isScrubbing = false;
+        });
+        progressSlider.addEventListener("pointercancel", () => {
+          isScrubbing = false;
+        });
+        progressSlider.addEventListener("keydown", () => {
+          isScrubbing = true;
+        });
+        progressSlider.addEventListener("keyup", () => {
+          isScrubbing = false;
+        });
+        progressSlider.addEventListener("blur", () => {
+          isScrubbing = false;
+        });
+        progressSlider.addEventListener("change", () => {
+          isScrubbing = false;
+        });
+        progressSlider.addEventListener("input", (event) => {
+          if (!video) {
+            return;
+          }
+          isScrubbing = true;
+          const value = Number(event.target.value);
+          if (Number.isFinite(value) && value >= 0) {
+            video.currentTime = value;
+            if (progressCurrent) {
+              progressCurrent.textContent = formatClock(value, true);
+            }
           }
         });
       }
