@@ -43,7 +43,6 @@ from .pipeline import FramePipeline
 from .recording import (
     RecordingManager,
     build_recording_video,
-    load_recording_chunk,
     load_recording_metadata,
     load_recording_payload,
     purge_recordings,
@@ -1957,46 +1956,38 @@ def create_app(
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Recording not found") from exc
 
-    @app.get("/api/surveillance/recordings/{name}/chunks/{chunk_index}")
-    async def fetch_surveillance_recording_chunk(
-        name: str, chunk_index: int
-    ) -> FileResponse:
-        if chunk_index < 1:
-            raise HTTPException(status_code=404, detail="Recording chunk not found")
+    @app.get("/api/surveillance/recordings/{name}/media")
+    async def fetch_surveillance_recording_media(name: str) -> FileResponse:
         try:
             if recording_manager is None:
-                chunk_info = await asyncio.to_thread(
-                    load_recording_chunk, RECORDINGS_DIR, name, chunk_index
+                payload = await asyncio.to_thread(
+                    load_recording_payload, RECORDINGS_DIR, name, include_frames=False
                 )
             else:
-                chunk_info = await recording_manager.get_recording_chunk(
-                    name, chunk_index
+                payload = await recording_manager.get_recording(
+                    name, include_frames=False
                 )
         except FileNotFoundError as exc:
-            raise HTTPException(status_code=404, detail="Recording chunk not found") from exc
-        except Exception as exc:  # pragma: no cover - defensive logging
-            logger.exception(
-                "Failed to load surveillance chunk %s for %s", chunk_index, name
-            )
-            raise HTTPException(
-                status_code=500, detail="Unable to load recording chunk"
-            ) from exc
-        if not isinstance(chunk_info, Mapping):
-            raise HTTPException(status_code=500, detail="Invalid chunk metadata")
-        path_value = chunk_info.get("file_path")
-        if not isinstance(path_value, str):
-            raise HTTPException(status_code=404, detail="Recording chunk not found")
-        path = Path(path_value)
-        if not path.exists() or not path.is_file():
-            raise HTTPException(status_code=404, detail="Recording chunk not found")
-        media_type = chunk_info.get("media_type")
+            raise HTTPException(status_code=404, detail="Recording not found") from exc
+        if not isinstance(payload, Mapping):
+            raise HTTPException(status_code=500, detail="Invalid recording metadata")
+        file_name = payload.get("file")
+        if not isinstance(file_name, str):
+            raise HTTPException(status_code=404, detail="Recording not found")
+        file_path = RECORDINGS_DIR / file_name
+        if not file_path.exists() or not file_path.is_file():
+            raise HTTPException(status_code=404, detail="Recording not found")
+        media_type = payload.get("media_type")
         if not isinstance(media_type, str):
             media_type = "video/mp4"
-        response = FileResponse(path, media_type=media_type, filename=path.name)
-        size_bytes = chunk_info.get("size_bytes")
-        if isinstance(size_bytes, (int, float)) and size_bytes > 0:
-            response.headers["Content-Length"] = str(int(size_bytes))
-        response.headers["Content-Disposition"] = f"inline; filename=\"{path.name}\""
+        response = FileResponse(file_path, media_type=media_type, filename=file_path.name)
+        try:
+            size = file_path.stat().st_size
+        except OSError:
+            size = None
+        if isinstance(size, int) and size > 0:
+            response.headers["Content-Length"] = str(size)
+        response.headers["Content-Disposition"] = f"inline; filename=\"{file_path.name}\""
         return response
 
     @app.get("/api/surveillance/recordings/{name}/download")

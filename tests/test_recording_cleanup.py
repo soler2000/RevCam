@@ -17,22 +17,18 @@ def _write(path: Path, data: bytes | str = b"data") -> None:
 
 def test_remove_recording_files_removes_known_artifacts(tmp_path: Path) -> None:
     name = "example"
-    chunk_name = f"{name}.chunk001.mp4"
+    video_name = f"{name}.mp4"
     metadata = {
         "name": name,
-        "chunks": [
-            {
-                "file": chunk_name,
-                "frame_count": 1,
-                "size_bytes": 2,
-                "media_type": "video/mp4",
-            },
-        ],
+        "file": video_name,
+        "frame_count": 1,
+        "size_bytes": 2,
+        "media_type": "video/mp4",
     }
 
     meta_path = tmp_path / f"{name}.meta.json"
     _write(meta_path, json.dumps(metadata))
-    _write(tmp_path / chunk_name)
+    _write(tmp_path / video_name)
     _write(tmp_path / f"{name}.mp4")
     _write(tmp_path / f"{name}.thumbnail.jpeg")
 
@@ -40,7 +36,7 @@ def test_remove_recording_files_removes_known_artifacts(tmp_path: Path) -> None:
 
     for suffix in (".meta.json", ".mp4", ".thumbnail.jpeg"):
         assert not (tmp_path / f"{name}{suffix}").exists()
-    assert not (tmp_path / chunk_name).exists()
+    assert not (tmp_path / video_name).exists()
 
 
 def test_remove_recording_files_handles_missing_metadata(tmp_path: Path) -> None:

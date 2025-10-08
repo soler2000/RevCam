@@ -148,20 +148,16 @@ def test_update_surveillance_settings_expert_validation(client: TestClient) -> N
 def test_delete_surveillance_recording(client: TestClient) -> None:
     recordings_dir: Path = client.recordings_dir
     name = "20230101-010101"
-    chunk_file = recordings_dir / f"{name}.chunk001.mp4"
-    chunk_file.write_bytes(b"mp4")
+    video_file = recordings_dir / f"{name}.mp4"
+    video_file.write_bytes(b"mp4")
     meta = recordings_dir / f"{name}.meta.json"
     meta.write_text(
         json.dumps({
             "name": name,
-            "chunks": [
-                {
-                    "file": chunk_file.name,
-                    "frame_count": 0,
-                    "size_bytes": chunk_file.stat().st_size,
-                    "media_type": "video/mp4",
-                }
-            ],
+            "file": video_file.name,
+            "media_type": "video/mp4",
+            "frame_count": 0,
+            "size_bytes": video_file.stat().st_size,
             "ended_at": "2023-01-01T00:00:00+00:00",
         }),
         encoding="utf-8",
@@ -169,31 +165,26 @@ def test_delete_surveillance_recording(client: TestClient) -> None:
     response = client.delete(f"/api/surveillance/recordings/{name}")
     assert response.status_code == 200
     assert not meta.exists()
-    assert not chunk_file.exists()
+    assert not video_file.exists()
 
 
-def test_fetch_surveillance_recording_metadata_and_chunk(client: TestClient) -> None:
+def test_fetch_surveillance_recording_metadata_and_media(client: TestClient) -> None:
     recordings_dir: Path = client.recordings_dir
     name = "20230102-020202"
-    chunk_file = recordings_dir / f"{name}.chunk001.mp4"
-    chunk_payload = b"fake-mp4-data"
-    chunk_file.write_bytes(chunk_payload)
+    video_file = recordings_dir / f"{name}.mp4"
+    video_payload = b"fake-mp4-data"
+    video_file.write_bytes(video_payload)
     meta = recordings_dir / f"{name}.meta.json"
     meta.write_text(
         json.dumps(
             {
                 "name": name,
                 "fps": 5,
-                "chunks": [
-                    {
-                        "file": chunk_file.name,
-                        "frame_count": 10,
-                        "size_bytes": chunk_file.stat().st_size,
-                        "duration_seconds": 2.5,
-                        "media_type": "video/mp4",
-                        "start_offset_seconds": 0.0,
-                    }
-                ],
+                "file": video_file.name,
+                "frame_count": 10,
+                "size_bytes": video_file.stat().st_size,
+                "duration_seconds": 2.5,
+                "media_type": "video/mp4",
             }
         ),
         encoding="utf-8",
@@ -205,19 +196,21 @@ def test_fetch_surveillance_recording_metadata_and_chunk(client: TestClient) -> 
     assert response.status_code == 200
     payload = response.json()
     assert payload["name"] == name
-    assert payload["chunks"][0]["file"] == chunk_file.name
-    assert payload["chunks"][0]["media_type"] == "video/mp4"
-    assert payload["chunks"][0]["duration_seconds"] == 2.5
+    assert payload["file"] == video_file.name
+    assert payload["media_type"] == "video/mp4"
+    assert payload["duration_seconds"] == 2.5
     assert "frames" not in payload
 
-    chunk_response = client.get(f"/api/surveillance/recordings/{name}/chunks/1")
-    assert chunk_response.status_code == 200
-    assert chunk_response.headers["content-type"].startswith("video/mp4")
-    assert "inline" in chunk_response.headers["content-disposition"].lower()
-    assert chunk_response.content == chunk_payload
+    media_response = client.get(f"/api/surveillance/recordings/{name}/media")
+    assert media_response.status_code == 200
+    assert media_response.headers["content-type"].startswith("video/mp4")
+    assert "inline" in media_response.headers["content-disposition"].lower()
+    assert media_response.content == video_payload
 
 
-def test_fetch_surveillance_recording_chunk_mjpeg(client: TestClient) -> None:
+def test_fetch_surveillance_recording_media_for_legacy_mjpeg(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     recordings_dir: Path = client.recordings_dir
     name = "20230102-020203"
     chunk_file = recordings_dir / f"{name}.chunk001.mjpeg"
@@ -244,33 +237,50 @@ def test_fetch_surveillance_recording_chunk_mjpeg(client: TestClient) -> None:
         encoding="utf-8",
     )
 
+    def _fake_remux(
+        source_path: Path,
+        *,
+        target_path: Path,
+        name: str,
+        index: int,
+        fps: float,
+        jpeg_quality: int,
+        boundary: str,
+        start_offset: float | None = None,
+    ) -> dict[str, object]:
+        target_path.write_bytes(chunk_payload)
+        return {
+            "file": target_path.name,
+            "media_type": f"multipart/x-mixed-replace; boundary={boundary}",
+            "size_bytes": target_path.stat().st_size,
+            "codec": "jpeg-fallback",
+        }
+
+    monkeypatch.setattr(recording, "_remux_mjpeg_video_chunk", _fake_remux)
+
     response = client.get(
         f"/api/surveillance/recordings/{name}", params={"include_frames": "false"}
     )
     assert response.status_code == 200
     payload = response.json()
-    assert payload["chunks"][0]["media_type"].startswith(
+    assert payload["file"].endswith(".mjpeg")
+    assert payload["media_type"].startswith("multipart/x-mixed-replace")
+
+    media_response = client.get(f"/api/surveillance/recordings/{name}/media")
+    assert media_response.status_code == 200
+    assert media_response.headers["content-type"].startswith(
         "multipart/x-mixed-replace"
     )
-
-    chunk_response = client.get(f"/api/surveillance/recordings/{name}/chunks/1")
-    assert chunk_response.status_code == 200
-    assert chunk_response.headers["content-type"].startswith(
-        "multipart/x-mixed-replace"
-    )
-    assert chunk_response.content == chunk_payload
+    assert media_response.content == chunk_payload
 
 
-def test_fetch_surveillance_recording_chunk_not_found(client: TestClient) -> None:
+def test_fetch_surveillance_recording_media_not_found(client: TestClient) -> None:
     recordings_dir: Path = client.recordings_dir
     name = "20230103-030303"
     meta = recordings_dir / f"{name}.meta.json"
-    meta.write_text(
-        json.dumps({"name": name, "chunks": []}),
-        encoding="utf-8",
-    )
+    meta.write_text(json.dumps({"name": name}), encoding="utf-8")
 
-    response = client.get(f"/api/surveillance/recordings/{name}/chunks/2")
+    response = client.get(f"/api/surveillance/recordings/{name}/media")
     assert response.status_code == 404
 
 

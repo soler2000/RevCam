@@ -197,28 +197,25 @@ async def test_chunk_mp4_generation(tmp_path: Path, anyio_backend) -> None:
     assert placeholder["processing"] is True
     metadata = await manager.wait_for_processing()
     assert metadata is not None
-    chunks = metadata.get("chunks") or []
-    assert chunks
-    for entry in chunks:
-        assert entry.get("file")
-        assert entry.get("size_bytes", 0) > 0
-        assert entry.get("media_type") == "video/mp4"
-    for entry in chunks:
-        video_path = tmp_path / str(entry["file"])
-        assert video_path.exists()
-        with av.open(str(video_path), mode="r") as container:
-            video_streams = [stream for stream in container.streams if stream.type == "video"]
-            assert video_streams
-            first_frame = next(container.decode(video=0), None)
-            assert first_frame is not None
-        assert entry.get("codec")
+    assert metadata.get("media_type") == "video/mp4"
+    assert metadata.get("size_bytes", 0) > 0
+    file_name = metadata.get("file")
+    assert isinstance(file_name, str)
+    video_path = tmp_path / file_name
+    assert video_path.exists()
+    with av.open(str(video_path), mode="r") as container:
+        video_streams = [stream for stream in container.streams if stream.type == "video"]
+        assert video_streams
+        first_frame = next(container.decode(video=0), None)
+        assert first_frame is not None
+    assert metadata.get("video_codec")
     await manager.aclose()
 
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("anyio_backend", ["asyncio"], indirect=True)
 async def test_chunk_encoder_handles_odd_frame_size(
-    tmp_path: Path, monkeypatch, anyio_backend
+    tmp_path: Path, anyio_backend
 ) -> None:
     camera = _StaticCamera()
     pipeline = _pipeline()
@@ -235,13 +232,6 @@ async def test_chunk_encoder_handles_odd_frame_size(
 
     manager._ensure_producer_running = types.MethodType(_noop, manager)
 
-    monkeypatch.setattr(recording, "_VIDEO_CODEC_CANDIDATES", ("mjpeg",))
-    monkeypatch.setattr(
-        recording,
-        "_CODECS_REQUIRE_EVEN_DIMENSIONS",
-        frozenset({"mjpeg"}),
-    )
-
     await manager.start_recording()
 
     frame = np.zeros((25, 37, 3), dtype=np.uint8)
@@ -255,12 +245,13 @@ async def test_chunk_encoder_handles_odd_frame_size(
     assert placeholder["processing"] is True
     metadata = await manager.wait_for_processing()
     assert metadata is not None
-    chunks = metadata.get("chunks") or []
-    assert chunks
-    entry = chunks[0]
-    assert entry.get("codec") == "jpeg-fallback"
-    assert str(entry.get("file", "")).endswith(".mjpeg")
-    video_path = tmp_path / str(entry["file"])
+    codec_name = metadata.get("video_codec")
+    assert isinstance(codec_name, str)
+    assert "264" in codec_name or codec_name.startswith("h264")
+    file_name = metadata.get("file")
+    assert isinstance(file_name, str)
+    assert file_name.endswith(".mp4")
+    video_path = tmp_path / file_name
     assert video_path.exists()
     await manager.aclose()
 
@@ -388,93 +379,6 @@ async def test_manual_recording_disables_motion_when_requested(
     assert placeholder["processing"] is True
     await manager.wait_for_processing()
     await manager.aclose()
-
-
-@pytest.mark.anyio
-@pytest.mark.parametrize("anyio_backend", ["asyncio"], indirect=True)
-async def test_chunk_codec_fallback(tmp_path: Path, monkeypatch, anyio_backend) -> None:
-    camera = _StaticCamera()
-    pipeline = _pipeline()
-    manager = RecordingManager(
-        camera=camera,
-        pipeline=pipeline,
-        directory=tmp_path,
-        fps=2,
-        chunk_duration_seconds=1,
-    )
-
-    async def _noop(self):
-        return None
-
-    manager._ensure_producer_running = types.MethodType(_noop, manager)
-
-    monkeypatch.setattr(recording, "_VIDEO_CODEC_CANDIDATES", ("h264", "mjpeg"))
-
-    failure_flag = {"raised": False}
-    original_add_frame = recording._ActiveChunkWriter.add_frame
-
-    def _failing_add_frame(self, array, timestamp):
-        if self.codec in {"h264", "mjpeg"}:
-            failure_flag["raised"] = True
-            raise av.FFmpegError(-541478725, "codec not found")
-        return original_add_frame(self, array, timestamp)
-
-    monkeypatch.setattr(recording._ActiveChunkWriter, "add_frame", _failing_add_frame)
-
-    await manager.start_recording()
-
-    frame = np.zeros((24, 24, 3), dtype=np.uint8)
-    frame[:8, :8, :] = 255
-    jpeg_payload = manager._encode_frame(frame)
-
-    await manager._record_frame(jpeg_payload, 0.0, frame)
-    await manager._record_frame(jpeg_payload, 0.5, frame)
-
-    placeholder = await manager.stop_recording()
-    assert placeholder["processing"] is True
-    metadata = await manager.wait_for_processing()
-    assert metadata is not None
-    chunks = metadata.get("chunks") or []
-    assert chunks
-    assert failure_flag["raised"] is True
-    assert all(entry.get("codec") == "jpeg-fallback" for entry in chunks)
-    assert all(
-        str(entry.get("media_type", "")).startswith("multipart/x-mixed-replace")
-        for entry in chunks
-    )
-    assert all(entry.get("file", "").endswith(".mjpeg") for entry in chunks)
-
-    state_path = tmp_path / ".codec_state.json"
-    assert state_path.exists()
-    state = json.loads(state_path.read_text(encoding="utf-8"))
-    assert state.get("fallback") is True
-    assert "h264" in state.get("failed_codecs", [])
-
-    await manager.aclose()
-
-    manager2 = RecordingManager(
-        camera=camera,
-        pipeline=pipeline,
-        directory=tmp_path,
-        fps=2,
-        chunk_duration_seconds=1,
-    )
-    manager2._ensure_producer_running = types.MethodType(_noop, manager2)
-    assert manager2._use_fallback_encoder is True
-
-    await manager2.start_recording()
-    await manager2._record_frame(jpeg_payload, 0.0, frame)
-    await manager2._record_frame(jpeg_payload, 0.5, frame)
-
-    placeholder2 = await manager2.stop_recording()
-    assert placeholder2["processing"] is True
-    metadata2 = await manager2.wait_for_processing()
-    assert metadata2 is not None
-    chunks2 = metadata2.get("chunks") or []
-    assert chunks2
-    assert all(entry.get("codec") == "jpeg-fallback" for entry in chunks2)
-
-    await manager2.aclose()
 
 
 @pytest.mark.anyio
@@ -763,20 +667,15 @@ async def test_recording_manager_writes_compressed_chunks(tmp_path: Path, anyio_
     assert metadata is not None
     await manager.aclose()
 
-    assert metadata["chunk_count"] >= 1
-
-    chunk_sizes = []
-    for chunk in metadata["chunks"]:
-        path = tmp_path / chunk["file"]
-        assert path.exists()
-        assert path.suffix == ".mp4"
-        assert chunk.get("media_type") == "video/mp4"
-        size_bytes = path.stat().st_size
-        assert chunk.get("size_bytes") == size_bytes
-        chunk_sizes.append(size_bytes)
-        assert chunk.get("duration_seconds", 0) > 0
-
-    assert metadata["size_bytes"] == sum(chunk_sizes)
+    assert metadata.get("media_type") == "video/mp4"
+    file_name = metadata.get("file")
+    assert isinstance(file_name, str)
+    path = tmp_path / file_name
+    assert path.exists()
+    assert path.suffix == ".mp4"
+    size_bytes = path.stat().st_size
+    assert metadata.get("size_bytes") == size_bytes
+    assert metadata.get("duration_seconds", 0) > 0
 
     payload = load_recording_payload(tmp_path, metadata["name"], include_frames=True)
     frames = payload.get("frames", [])
@@ -813,13 +712,13 @@ async def test_recording_manager_streams_chunk_writes(
     await manager.wait_for_processing()
     await manager.aclose()
 
-    mp4_chunks = sorted(tmp_path.glob("*.chunk*.mp4"))
-    assert mp4_chunks
+    mp4_files = sorted(tmp_path.glob("*.mp4"))
+    assert mp4_files
     legacy_chunks = sorted(tmp_path.glob("*.chunk*.json*"))
     assert not legacy_chunks
 
 
-def test_load_recording_chunk_upgrades_legacy_mjpeg(tmp_path: Path, monkeypatch) -> None:
+def test_load_recording_payload_upgrades_legacy_mjpeg(tmp_path: Path, monkeypatch) -> None:
     metadata = {
         "name": "legacy",
         "chunks": [
@@ -860,10 +759,10 @@ def test_load_recording_chunk_upgrades_legacy_mjpeg(tmp_path: Path, monkeypatch)
 
     monkeypatch.setattr(recording, "_remux_mjpeg_video_chunk", _fake_remux)
 
-    chunk = recording.load_recording_chunk(tmp_path, "legacy", 1)
-    assert chunk["media_type"].startswith("multipart/x-mixed-replace")
-    assert chunk["chunk_file"].endswith(".mjpeg")
-    assert (tmp_path / chunk["chunk_file"]).exists()
+    payload = recording.load_recording_payload(tmp_path, "legacy", include_frames=False)
+    assert payload["media_type"].startswith("multipart/x-mixed-replace")
+    assert payload["file"].endswith(".mjpeg")
+    assert (tmp_path / payload["file"]).exists()
 
     updated = json.loads(meta_path.read_text())
     assert updated["chunks"][0]["file"].endswith(".mjpeg")
