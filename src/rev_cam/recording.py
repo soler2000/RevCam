@@ -66,6 +66,23 @@ def _codec_profile(codec: str) -> Mapping[str, str]:
     }
 
 
+def _select_time_base(frame_rate: Fraction) -> Fraction:
+    """Choose a sane container time base for a given frame rate."""
+
+    numerator = frame_rate.numerator
+    denominator = frame_rate.denominator
+    if numerator <= 0:
+        numerator = 1
+    if denominator <= 0:
+        denominator = 1
+    # Use millisecond granularity relative to the FPS to preserve pacing while
+    # staying within encoder-friendly bounds (e.g. V4L2 H.264).
+    time_base = Fraction(denominator, numerator * 1000)
+    if time_base <= 0:
+        return Fraction(1, 1000)
+    return time_base.limit_denominator(90_000)
+
+
 def _extract_multipart_boundary(media_type: str) -> str | None:
     if not isinstance(media_type, str):
         return None
@@ -2014,7 +2031,7 @@ class RecordingManager:
             return None
         frame_rate = 1.0 if self.fps <= 0 else float(self.fps)
         frame_rate_fraction = Fraction(str(frame_rate)).limit_denominator(1000)
-        time_base = Fraction(1, 1_000_000)
+        time_base = _select_time_base(frame_rate_fraction)
         height, width = array.shape[:2]
         filename = self._chunk_filename(name, index, "mp4")
         path = self.directory / filename
@@ -2090,6 +2107,12 @@ class RecordingManager:
             pixel_format = codec_profile.get("pixel_format")
             stream.pix_fmt = pixel_format if pixel_format else "yuv420p"
             stream.time_base = time_base
+            try:
+                # Some encoders (e.g. hardware H.264) require the codec context
+                # time base to match the stream for avcodec_send_frame().
+                stream.codec_context.time_base = time_base
+            except AttributeError:  # pragma: no cover - codec context optional
+                pass
             try:
                 stream.average_rate = frame_rate_fraction
             except Exception:  # pragma: no cover - best effort rate hint

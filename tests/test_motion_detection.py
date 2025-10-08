@@ -5,6 +5,7 @@ import types
 from pathlib import Path
 
 import asyncio
+from fractions import Fraction
 
 import av
 import numpy as np
@@ -344,6 +345,7 @@ async def test_even_dimension_frame_encoding(
     assert stream is not None
     assert stream.width % 2 == 0
     assert stream.height % 2 == 0
+    assert stream.time_base == Fraction(1, 2000)
 
 
 @pytest.mark.anyio
