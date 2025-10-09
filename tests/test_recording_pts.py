@@ -63,3 +63,28 @@ def test_chunk_writer_pts_are_relative(tmp_path):
     entry = writer.finalise()
     assert entry["frame_count"] == 3
     assert container.closed
+
+
+class _DummyCodecContext:
+    def __init__(self, formats) -> None:
+        self.pix_fmts = formats
+        self.time_base = None
+        self.pix_fmt = None
+
+
+class _DummyStreamWithFormats:
+    def __init__(self, formats) -> None:
+        self.codec_context = _DummyCodecContext(formats)
+        self.pix_fmt = None
+
+
+def test_select_stream_pixel_format_prefers_requested_when_available():
+    stream = _DummyStreamWithFormats(["yuv420p", "nv12"])
+    result = recording._select_stream_pixel_format(stream, "yuv420p")
+    assert result == "yuv420p"
+
+
+def test_select_stream_pixel_format_falls_back_to_supported_format():
+    stream = _DummyStreamWithFormats([b"NV12"])
+    result = recording._select_stream_pixel_format(stream, "yuv420p")
+    assert result == "nv12"

@@ -63,6 +63,48 @@ _CODECS_REQUIRE_EVEN_DIMENSIONS: frozenset[str] = frozenset(
 )
 
 
+def _normalise_pixel_format(value: object) -> str | None:
+    """Return a lower-cased pixel format string when ``value`` is usable."""
+
+    if isinstance(value, str):
+        value = value.strip()
+        return value.lower() or None
+    if isinstance(value, bytes):
+        try:
+            decoded = value.decode("ascii", errors="ignore").strip()
+        except Exception:  # pragma: no cover - defensive decode
+            return None
+        return decoded.lower() or None
+    return None
+
+
+def _select_stream_pixel_format(
+    stream: av.video.stream.VideoStream,
+    requested: str | None,
+) -> str:
+    """Choose a pixel format compatible with ``stream`` and the requested value."""
+
+    requested_format = _normalise_pixel_format(requested) or "yuv420p"
+    codec_context = getattr(stream, "codec_context", None)
+    available: tuple[str, ...] = ()
+    if codec_context is not None:
+        pix_fmts = getattr(codec_context, "pix_fmts", None)
+        if isinstance(pix_fmts, (list, tuple)):
+            collected: list[str] = []
+            for item in pix_fmts:
+                normalised = _normalise_pixel_format(item)
+                if normalised:
+                    collected.append(normalised)
+            available = tuple(collected)
+    if not available:
+        return requested_format
+    preferred_order: list[str] = [requested_format, "yuv420p", "nv12", "nv21", "p010le"]
+    for candidate in preferred_order:
+        if candidate and candidate in available:
+            return candidate
+    return available[0]
+
+
 def _codec_profile(codec: str) -> Mapping[str, object]:
     base: dict[str, object] = {
         "format": "mp4",
@@ -2711,7 +2753,8 @@ class RecordingManager:
                 continue
             stream.width = target_width
             stream.height = target_height
-            pixel_format = str(codec_profile.get("pixel_format", "yuv420p"))
+            requested_pixel_format = str(codec_profile.get("pixel_format", "yuv420p"))
+            pixel_format = _select_stream_pixel_format(stream, requested_pixel_format)
             stream.pix_fmt = pixel_format
             stream.time_base = time_base
             try:
@@ -2719,6 +2762,10 @@ class RecordingManager:
                 # time base to match the stream for avcodec_send_frame().
                 stream.codec_context.time_base = time_base
             except AttributeError:  # pragma: no cover - codec context optional
+                pass
+            try:
+                stream.codec_context.pix_fmt = pixel_format
+            except Exception:  # pragma: no cover - codec context may not expose pix_fmt
                 pass
             try:
                 stream.average_rate = frame_rate_fraction
