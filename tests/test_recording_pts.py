@@ -88,3 +88,20 @@ def test_select_stream_pixel_format_falls_back_to_supported_format():
     stream = _DummyStreamWithFormats([b"NV12"])
     result = recording._select_stream_pixel_format(stream, "yuv420p")
     assert result == "nv12"
+
+
+def test_prepare_frame_for_encoding_normalises_shape_and_dtype():
+    source = np.linspace(0, 1024, 36, dtype=np.float32).reshape(6, 6)
+    prepared = recording._prepare_frame_for_encoding(source)
+    assert prepared is not None
+    assert prepared.dtype == np.uint8
+    assert prepared.shape == (6, 6, 3)
+    assert prepared.flags["C_CONTIGUOUS"]
+
+
+def test_prepare_frame_for_encoding_trims_extra_channels():
+    source = np.ones((4, 4, 5), dtype=np.uint16) * 1024
+    prepared = recording._prepare_frame_for_encoding(source)
+    assert prepared is not None
+    assert prepared.shape == (4, 4, 3)
+    assert np.all(prepared == 255)

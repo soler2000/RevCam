@@ -46,10 +46,10 @@ class RecordingProcessingError(RuntimeError):
 
 
 _VIDEO_CODEC_CANDIDATES: tuple[str, ...] = (
+    "libx264",
+    "h264",
     "h264_v4l2m2m",
     "h264_omx",
-    "h264",
-    "libx264",
 )
 
 
@@ -103,6 +103,32 @@ def _select_stream_pixel_format(
         if candidate and candidate in available:
             return candidate
     return available[0]
+
+
+def _prepare_frame_for_encoding(array: "_np.ndarray") -> "_np.ndarray | None":
+    """Normalise frame arrays before handing them to the encoder."""
+
+    if _np is None:
+        return None
+
+    frame_array = _np.asarray(array)
+    if frame_array.ndim == 2:
+        frame_array = _np.repeat(frame_array[:, :, _np.newaxis], 3, axis=2)
+    elif frame_array.ndim == 3:
+        if frame_array.shape[2] == 1:
+            frame_array = _np.repeat(frame_array, 3, axis=2)
+        elif frame_array.shape[2] > 3:
+            frame_array = frame_array[:, :, :3]
+    else:
+        return None
+
+    if frame_array.dtype != _np.uint8:
+        frame_array = _np.clip(frame_array, 0, 255).astype(_np.uint8)
+
+    if not bool(getattr(frame_array.flags, "c_contiguous", False)):
+        frame_array = _np.ascontiguousarray(frame_array)
+
+    return frame_array
 
 
 def _codec_profile(codec: str) -> Mapping[str, object]:
@@ -2816,10 +2842,9 @@ class RecordingManager:
     ) -> _ChunkWriter | None:
         if _np is None:
             return None
-        array = _np.asarray(frame_array)
-        if array.ndim != 3 or array.shape[2] != 3:
+        array = _prepare_frame_for_encoding(frame_array)
+        if array is None:
             return None
-        array = _np.ascontiguousarray(array)
         attempts = 0
         max_attempts = max(1, len(_VIDEO_CODEC_CANDIDATES))
         while attempts < max_attempts:
