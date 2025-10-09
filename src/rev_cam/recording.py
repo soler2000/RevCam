@@ -208,6 +208,9 @@ def load_recording_payload(
     metadata = _load_metadata(meta_path)
     if metadata is None:
         raise FileNotFoundError("Recording not found")
+    if not isinstance(metadata, dict):
+        metadata = dict(metadata)
+    metadata_dirty = False
     chunk_entries, chunk_sources = _collect_chunk_sources(directory, safe_name, metadata)
 
     payload: dict[str, object] = dict(metadata)
@@ -266,6 +269,17 @@ def load_recording_payload(
                     chunk_entry.update(converted_entry)
                     chunk_path = directory / chunk_entry["file"]
                     updated_metadata_entries[index - 1] = dict(chunk_entry)
+                    metadata_dirty = True
+            if not chunk_path.exists() or not chunk_path.is_file():
+                file_name = chunk_entry.get("file")
+                if isinstance(file_name, str) and ".chunk001" in file_name:
+                    base_name = file_name.replace(".chunk001", "", 1)
+                    fallback_path = directory / base_name
+                    if fallback_path.exists() and fallback_path.is_file():
+                        chunk_entry["file"] = base_name
+                        chunk_path = fallback_path
+                        updated_metadata_entries[index - 1] = dict(chunk_entry)
+                        metadata_dirty = True
             if chunk_path.exists() and chunk_path.is_file():
                 try:
                     size = chunk_path.stat().st_size
@@ -277,34 +291,62 @@ def load_recording_payload(
             normalised_chunks.append(chunk_entry)
         if primary_chunk := (normalised_chunks[0] if normalised_chunks else None):
             file_name = primary_chunk.get("file")
-            if isinstance(file_name, str) and "file" not in payload:
-                payload["file"] = file_name
+            if isinstance(file_name, str):
+                if payload.get("file") != file_name:
+                    payload["file"] = file_name
+                    if isinstance(metadata, dict):
+                        metadata["file"] = file_name
+                        metadata_dirty = True
             media_type = primary_chunk.get("media_type")
-            if isinstance(media_type, str) and "media_type" not in payload:
+            if isinstance(media_type, str) and payload.get("media_type") != media_type:
                 payload["media_type"] = media_type
+                if isinstance(metadata, dict):
+                    metadata["media_type"] = media_type
+                    metadata_dirty = True
             codec_name = primary_chunk.get("codec")
-            if isinstance(codec_name, str) and "video_codec" not in payload:
+            if isinstance(codec_name, str) and payload.get("video_codec") != codec_name:
                 payload["video_codec"] = codec_name
+                if isinstance(metadata, dict):
+                    metadata["video_codec"] = codec_name
+                    metadata_dirty = True
         if updated_metadata_entries and isinstance(metadata, dict):
             raw_chunks = metadata.get("chunks")
             if isinstance(raw_chunks, list):
                 for idx, updated_entry in updated_metadata_entries.items():
                     if 0 <= idx < len(raw_chunks):
                         raw_chunks[idx] = dict(updated_entry)
-                try:
-                    _write_metadata(meta_path, metadata)
-                except OSError:  # pragma: no cover - best-effort persistence
-                    pass
+                metadata_dirty = True
         payload["chunks"] = normalised_chunks
         payload["chunk_count"] = len(normalised_chunks)
         if total_size and "size_bytes" not in payload:
             payload["size_bytes"] = total_size
         if include_frames:
             payload["frames"] = []
+        if metadata_dirty:
+            try:
+                _write_metadata(meta_path, metadata)
+            except OSError:  # pragma: no cover - best-effort persistence
+                pass
         return payload
     file_value = payload.get("file")
     if isinstance(file_value, str):
         file_path = directory / file_value
+        if not file_path.exists() or not file_path.is_file():
+            if ".chunk001" in file_value:
+                base_name = file_value.replace(".chunk001", "", 1)
+                candidate = directory / base_name
+                if candidate.exists() and candidate.is_file():
+                    file_value = base_name
+                    payload["file"] = base_name
+                    file_path = candidate
+                    if isinstance(metadata, dict):
+                        metadata["file"] = base_name
+                        raw_chunks = metadata.get("chunks")
+                        if isinstance(raw_chunks, list) and raw_chunks:
+                            first = raw_chunks[0]
+                            if isinstance(first, dict):
+                                first["file"] = base_name
+                        metadata_dirty = True
         if file_path.exists() and file_path.is_file():
             payload["file_path"] = str(file_path)
             try:
@@ -316,6 +358,11 @@ def load_recording_payload(
         media_type = payload.get("media_type")
         if not isinstance(media_type, str):
             payload["media_type"] = "video/mp4"
+        if metadata_dirty:
+            try:
+                _write_metadata(meta_path, metadata)
+            except OSError:  # pragma: no cover - best-effort persistence
+                pass
     if include_frames:
         payload["frames"] = []
     return payload
@@ -1418,7 +1465,10 @@ class RecordingManager:
                             self._chunk_byte_limit
                             and self._active_chunk_bytes >= self._chunk_byte_limit
                         )
-                        or self._active_chunk.frame_count >= self._chunk_frame_limit
+                        or (
+                            self._chunk_frame_limit
+                            and self._active_chunk.frame_count >= self._chunk_frame_limit
+                        )
                     )
                 ):
                     flush_request = self._pop_active_chunk_locked()

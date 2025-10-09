@@ -771,6 +771,33 @@ def test_load_recording_payload_upgrades_legacy_mjpeg(tmp_path: Path, monkeypatc
     assert updated["chunks"][0]["codec"] == "jpeg-fallback"
 
 
+def test_load_recording_payload_upgrades_single_chunk(tmp_path: Path) -> None:
+    name = "single"
+    legacy_file = f"{name}.chunk001.mp4"
+    mp4_path = tmp_path / f"{name}.mp4"
+    mp4_path.write_bytes(b"mp4-data")
+    metadata = {
+        "name": name,
+        "file": legacy_file,
+        "chunks": [
+            {
+                "file": legacy_file,
+                "media_type": "video/mp4",
+                "size_bytes": len(b"mp4-data"),
+            }
+        ],
+    }
+    meta_path = tmp_path / f"{name}.meta.json"
+    meta_path.write_text(json.dumps(metadata))
+
+    payload = recording.load_recording_payload(tmp_path, name, include_frames=False)
+
+    assert payload["file"] == f"{name}.mp4"
+    assert payload.get("chunk_count") == 1
+    assert payload["chunks"][0]["file"] == f"{name}.mp4"
+    assert json.loads(meta_path.read_text())["file"] == f"{name}.mp4"
+
+
 @pytest.mark.anyio
 @pytest.mark.parametrize("anyio_backend", ["asyncio"], indirect=True)
 async def test_recording_finalise_cancellation(tmp_path: Path, anyio_backend) -> None:
