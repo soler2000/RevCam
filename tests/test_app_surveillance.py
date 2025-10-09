@@ -48,7 +48,10 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     monkeypatch.setattr(app_module, "create_reversing_aids_overlay", lambda *args, **kwargs: _noop_overlay())
 
     recordings_dir = tmp_path / "recordings"
-    recordings_dir.mkdir()
+    media_dir = recordings_dir / "media"
+    preview_dir = recordings_dir / "previews"
+    media_dir.mkdir(parents=True)
+    preview_dir.mkdir(parents=True)
     monkeypatch.setattr(app_module, "RECORDINGS_DIR", recordings_dir)
 
     config_path = tmp_path / "config.json"
@@ -148,13 +151,13 @@ def test_update_surveillance_settings_expert_validation(client: TestClient) -> N
 def test_delete_surveillance_recording(client: TestClient) -> None:
     recordings_dir: Path = client.recordings_dir
     name = "20230101-010101"
-    video_file = recordings_dir / f"{name}.mp4"
+    video_file = recordings_dir / "media" / f"{name}.mp4"
     video_file.write_bytes(b"mp4")
     meta = recordings_dir / f"{name}.meta.json"
     meta.write_text(
         json.dumps({
             "name": name,
-            "file": video_file.name,
+            "file": f"media/{video_file.name}",
             "media_type": "video/mp4",
             "frame_count": 0,
             "size_bytes": video_file.stat().st_size,
@@ -171,20 +174,23 @@ def test_delete_surveillance_recording(client: TestClient) -> None:
 def test_fetch_surveillance_recording_metadata_and_media(client: TestClient) -> None:
     recordings_dir: Path = client.recordings_dir
     name = "20230102-020202"
-    video_file = recordings_dir / f"{name}.mp4"
+    video_file = recordings_dir / "media" / f"{name}.mp4"
     video_payload = b"fake-mp4-data"
     video_file.write_bytes(video_payload)
+    preview_file = recordings_dir / "previews" / f"{name}.jpg"
+    preview_file.write_bytes(b"jpg")
     meta = recordings_dir / f"{name}.meta.json"
     meta.write_text(
         json.dumps(
             {
                 "name": name,
                 "fps": 5,
-                "file": video_file.name,
+                "file": f"media/{video_file.name}",
                 "frame_count": 10,
                 "size_bytes": video_file.stat().st_size,
                 "duration_seconds": 2.5,
                 "media_type": "video/mp4",
+                "preview_file": f"previews/{name}.jpg",
             }
         ),
         encoding="utf-8",
@@ -196,7 +202,8 @@ def test_fetch_surveillance_recording_metadata_and_media(client: TestClient) -> 
     assert response.status_code == 200
     payload = response.json()
     assert payload["name"] == name
-    assert payload["file"] == video_file.name
+    assert payload["file"] == f"media/{video_file.name}"
+    assert payload.get("preview_file") == f"previews/{name}.jpg"
     assert payload["media_type"] == "video/mp4"
     assert payload["duration_seconds"] == 2.5
     assert "frames" not in payload
@@ -213,7 +220,7 @@ def test_fetch_surveillance_recording_media_for_legacy_mjpeg(
 ) -> None:
     recordings_dir: Path = client.recordings_dir
     name = "20230102-020203"
-    chunk_file = recordings_dir / f"{name}.chunk001.mjpeg"
+    chunk_file = recordings_dir / "media" / f"{name}.chunk001.mjpeg"
     chunk_payload = b"fake-avi-data"
     chunk_file.write_bytes(chunk_payload)
     meta = recordings_dir / f"{name}.meta.json"
@@ -224,7 +231,7 @@ def test_fetch_surveillance_recording_media_for_legacy_mjpeg(
                 "fps": 5,
                 "chunks": [
                     {
-                        "file": chunk_file.name,
+                        "file": f"media/{chunk_file.name}",
                         "frame_count": 10,
                         "size_bytes": chunk_file.stat().st_size,
                         "duration_seconds": 2.5,

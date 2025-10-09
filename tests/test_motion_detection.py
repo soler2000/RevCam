@@ -714,18 +714,20 @@ async def test_recording_manager_streams_chunk_writes(
     await manager.wait_for_processing()
     await manager.aclose()
 
-    mp4_files = sorted(tmp_path.glob("*.mp4"))
+    mp4_files = sorted((tmp_path / "media").glob("*.mp4"))
     assert mp4_files
-    legacy_chunks = sorted(tmp_path.glob("*.chunk*.json*"))
+    legacy_chunks = sorted((tmp_path / "media").glob("*.chunk*.json*"))
     assert not legacy_chunks
 
 
 def test_load_recording_payload_upgrades_legacy_mjpeg(tmp_path: Path, monkeypatch) -> None:
+    media_dir = tmp_path / "media"
+    media_dir.mkdir()
     metadata = {
         "name": "legacy",
         "chunks": [
             {
-                "file": "legacy.chunk001.avi",
+                "file": "media/legacy.chunk001.avi",
                 "media_type": "video/x-motion-jpeg",
                 "size_bytes": 128,
                 "codec": "mjpeg",
@@ -735,7 +737,7 @@ def test_load_recording_payload_upgrades_legacy_mjpeg(tmp_path: Path, monkeypatc
     }
     meta_path = tmp_path / "legacy.meta.json"
     meta_path.write_text(json.dumps(metadata))
-    avi_path = tmp_path / "legacy.chunk001.avi"
+    avi_path = media_dir / "legacy.chunk001.avi"
     avi_path.write_bytes(b"avi")
 
     def _fake_remux(
@@ -764,6 +766,7 @@ def test_load_recording_payload_upgrades_legacy_mjpeg(tmp_path: Path, monkeypatc
     payload = recording.load_recording_payload(tmp_path, "legacy", include_frames=False)
     assert payload["media_type"].startswith("multipart/x-mixed-replace")
     assert payload["file"].endswith(".mjpeg")
+    assert payload["file"].startswith("media/")
     assert (tmp_path / payload["file"]).exists()
 
     updated = json.loads(meta_path.read_text())
@@ -773,8 +776,10 @@ def test_load_recording_payload_upgrades_legacy_mjpeg(tmp_path: Path, monkeypatc
 
 def test_load_recording_payload_upgrades_single_chunk(tmp_path: Path) -> None:
     name = "single"
-    legacy_file = f"{name}.chunk001.mp4"
-    mp4_path = tmp_path / f"{name}.mp4"
+    legacy_file = f"media/{name}.chunk001.mp4"
+    media_dir = tmp_path / "media"
+    media_dir.mkdir()
+    mp4_path = media_dir / f"{name}.mp4"
     mp4_path.write_bytes(b"mp4-data")
     metadata = {
         "name": name,
@@ -792,10 +797,10 @@ def test_load_recording_payload_upgrades_single_chunk(tmp_path: Path) -> None:
 
     payload = recording.load_recording_payload(tmp_path, name, include_frames=False)
 
-    assert payload["file"] == f"{name}.mp4"
+    assert payload["file"] == f"media/{name}.mp4"
     assert payload.get("chunk_count") == 1
-    assert payload["chunks"][0]["file"] == f"{name}.mp4"
-    assert json.loads(meta_path.read_text())["file"] == f"{name}.mp4"
+    assert payload["chunks"][0]["file"] == f"media/{name}.mp4"
+    assert json.loads(meta_path.read_text())["file"] == f"media/{name}.mp4"
 
 
 @pytest.mark.anyio

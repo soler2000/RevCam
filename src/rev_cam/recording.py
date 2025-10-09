@@ -248,10 +248,11 @@ def load_recording_payload(
                     if isinstance(start_offset_raw, (int, float))
                     else None
                 )
+                target_path = chunk_path.with_suffix(".mjpeg")
                 try:
                     converted_entry = _remux_mjpeg_video_chunk(
                         chunk_path,
-                        target_path=chunk_path.with_suffix(".mjpeg"),
+                        target_path=target_path,
                         name=safe_name,
                         index=index,
                         fps=default_fps,
@@ -266,6 +267,14 @@ def load_recording_payload(
                         safe_name,
                     )
                 else:
+                    try:
+                        relative_target = target_path.relative_to(directory)
+                        relative_name = relative_target.as_posix()
+                    except Exception:
+                        relative_name = converted_entry.get("file", target_path.name)
+                    else:
+                        converted_entry["file"] = relative_name
+                    chunk_entry["file"] = str(converted_entry.get("file", target_path.name))
                     chunk_entry.update(converted_entry)
                     chunk_path = directory / chunk_entry["file"]
                     updated_metadata_entries[index - 1] = dict(chunk_entry)
@@ -280,6 +289,15 @@ def load_recording_payload(
                         chunk_path = fallback_path
                         updated_metadata_entries[index - 1] = dict(chunk_entry)
                         metadata_dirty = True
+                if not chunk_path.exists() or not chunk_path.is_file():
+                    if isinstance(file_name, str):
+                        media_candidate = directory / "media" / Path(file_name).name
+                        if media_candidate.exists() and media_candidate.is_file():
+                            relative_media = (Path("media") / media_candidate.name).as_posix()
+                            chunk_entry["file"] = relative_media
+                            chunk_path = media_candidate
+                            updated_metadata_entries[index - 1] = dict(chunk_entry)
+                            metadata_dirty = True
             if chunk_path.exists() and chunk_path.is_file():
                 try:
                     size = chunk_path.stat().st_size
@@ -347,6 +365,21 @@ def load_recording_payload(
                             if isinstance(first, dict):
                                 first["file"] = base_name
                         metadata_dirty = True
+            if not file_path.exists() or not file_path.is_file():
+                media_candidate = directory / "media" / Path(file_value).name
+                if media_candidate.exists() and media_candidate.is_file():
+                    new_value = (Path("media") / media_candidate.name).as_posix()
+                    payload["file"] = new_value
+                    file_value = new_value
+                    file_path = media_candidate
+                    if isinstance(metadata, dict):
+                        metadata["file"] = new_value
+                        raw_chunks = metadata.get("chunks")
+                        if isinstance(raw_chunks, list) and raw_chunks:
+                            first = raw_chunks[0]
+                            if isinstance(first, dict):
+                                first["file"] = new_value
+                        metadata_dirty = True
         if file_path.exists() and file_path.is_file():
             payload["file_path"] = str(file_path)
             try:
@@ -355,6 +388,11 @@ def load_recording_payload(
                 size = payload.get("size_bytes")
             else:
                 payload["size_bytes"] = int(size)
+        preview_file = metadata.get("preview_file") if isinstance(metadata, Mapping) else None
+        if isinstance(preview_file, str):
+            preview_path = directory / preview_file
+            if preview_path.exists() and preview_path.is_file():
+                payload["preview_file"] = preview_file
         media_type = payload.get("media_type")
         if not isinstance(media_type, str):
             payload["media_type"] = "video/mp4"
@@ -476,6 +514,9 @@ def remove_recording_files(directory: Path, name: str) -> None:
         directory / f"{safe_name}.meta.json",
         directory / f"{safe_name}.meta.json.gz",
     }
+    media_dir = directory / "media"
+    preview_dir = directory / "previews"
+    search_roots = (directory, media_dir, preview_dir)
 
     metadata: Mapping[str, object] | None = None
     for meta_path in (
@@ -513,16 +554,18 @@ def remove_recording_files(directory: Path, name: str) -> None:
         f"{safe_name}.chunk*.json",
         f"{safe_name}.chunk*.json.gz",
     ):
-        for chunk_path in directory.glob(pattern):
-            candidates.add(chunk_path)
+        for root in search_roots:
+            for chunk_path in root.glob(pattern):
+                candidates.add(chunk_path)
 
     for pattern in (
         f"{safe_name}*.mp4",
         f"{safe_name}*.jpg",
         f"{safe_name}*.jpeg",
     ):
-        for artefact in directory.glob(pattern):
-            candidates.add(artefact)
+        for root in search_roots:
+            for artefact in root.glob(pattern):
+                candidates.add(artefact)
 
     for candidate in candidates:
         try:
@@ -806,6 +849,7 @@ class _ActiveChunkWriter:
     fps: float
     codec: str
     media_type: str
+    relative_file: str
     target_width: int
     target_height: int
     frame_count: int = 0
@@ -890,7 +934,7 @@ class _ActiveChunkWriter:
         if fps_minimum > 0:
             duration = max(duration, fps_minimum)
         entry: dict[str, object] = {
-            "file": self.path.name,
+            "file": self.relative_file,
             "frame_count": int(self.frame_count),
             "size_bytes": int(self.bytes_written),
             "duration_seconds": round(duration, 3),
@@ -1026,6 +1070,8 @@ class RecordingManager:
     camera: BaseCamera
     pipeline: FramePipeline
     directory: Path
+    media_directory: Path = field(init=False)
+    preview_directory: Path = field(init=False)
     fps: int = 10
     jpeg_quality: int = 80
     boundary: str = "recording"
@@ -1093,6 +1139,10 @@ class RecordingManager:
         if not (1 <= self.jpeg_quality <= 100):
             raise ValueError("jpeg_quality must be between 1 and 100")
         self.directory.mkdir(parents=True, exist_ok=True)
+        self.media_directory = self.directory / "media"
+        self.preview_directory = self.directory / "previews"
+        self.media_directory.mkdir(parents=True, exist_ok=True)
+        self.preview_directory.mkdir(parents=True, exist_ok=True)
         self._frame_interval = 1.0 / float(self.fps)
         self.chunk_duration_seconds = self._normalise_chunk_duration(self.chunk_duration_seconds)
         self.storage_threshold_percent = self._normalise_storage_threshold(self.storage_threshold_percent)
@@ -1330,6 +1380,21 @@ class RecordingManager:
                 size_bytes = int(size_value)
         if size_bytes:
             metadata["size_bytes"] = size_bytes
+        thumbnail_data = metadata.get("thumbnail")
+        if isinstance(thumbnail_data, str) and thumbnail_data:
+            try:
+                preview_bytes = base64.b64decode(thumbnail_data, validate=False)
+            except Exception:
+                preview_bytes = b""
+            if preview_bytes:
+                preview_name = f"{name}.jpg"
+                preview_path = self.preview_directory / preview_name
+                try:
+                    preview_path.write_bytes(preview_bytes)
+                except OSError:  # pragma: no cover - best-effort write
+                    pass
+                else:
+                    metadata["preview_file"] = (Path("previews") / preview_name).as_posix()
         if processing_error:
             metadata["processing_error"] = processing_error
         meta_path = self.directory / f"{name}.meta.json"
@@ -2084,7 +2149,8 @@ class RecordingManager:
         time_base = _select_time_base(frame_rate_fraction)
         height, width = array.shape[:2]
         filename = self._chunk_filename(name, index, "mp4")
-        path = self.directory / filename
+        relative_file = Path("media") / filename
+        path = self.media_directory / filename
         last_error: Exception | None = None
         if path.exists():
             try:
@@ -2104,7 +2170,8 @@ class RecordingManager:
             try:
                 codec_profile = _codec_profile(codec_name)
                 filename = self._chunk_filename(name, index, codec_profile["extension"])
-                path = self.directory / filename
+                relative_file = Path("media") / filename
+                path = self.media_directory / filename
                 if path.exists():
                     try:
                         path.unlink()
@@ -2181,6 +2248,7 @@ class RecordingManager:
                 media_type=codec_profile.get("media_type", "video/mp4"),
                 target_width=target_width,
                 target_height=target_height,
+                relative_file=relative_file.as_posix(),
             )
 
     def _append_frame_to_chunk_locked(

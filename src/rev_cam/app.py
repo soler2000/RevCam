@@ -392,6 +392,8 @@ def create_app(
         )
     )
     RECORDINGS_DIR.mkdir(parents=True, exist_ok=True)
+    (RECORDINGS_DIR / "media").mkdir(parents=True, exist_ok=True)
+    (RECORDINGS_DIR / "previews").mkdir(parents=True, exist_ok=True)
     camera: BaseCamera | None = None
     streamer: MJPEGStreamer | None = None
     webrtc_manager: WebRTCManager | None = None

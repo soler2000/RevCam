@@ -18,25 +18,31 @@ def _write(path: Path, data: bytes | str = b"data") -> None:
 def test_remove_recording_files_removes_known_artifacts(tmp_path: Path) -> None:
     name = "example"
     video_name = f"{name}.mp4"
+    media_dir = tmp_path / "media"
+    preview_dir = tmp_path / "previews"
+    media_dir.mkdir()
+    preview_dir.mkdir()
     metadata = {
         "name": name,
-        "file": video_name,
+        "file": f"media/{video_name}",
         "frame_count": 1,
         "size_bytes": 2,
         "media_type": "video/mp4",
+        "preview_file": f"previews/{name}.jpg",
     }
 
     meta_path = tmp_path / f"{name}.meta.json"
     _write(meta_path, json.dumps(metadata))
-    _write(tmp_path / video_name)
-    _write(tmp_path / f"{name}.mp4")
-    _write(tmp_path / f"{name}.thumbnail.jpeg")
+    _write(media_dir / video_name)
+    _write(media_dir / f"{name}.chunk001.mp4")
+    _write(preview_dir / f"{name}.jpg")
 
     remove_recording_files(tmp_path, name)
 
-    for suffix in (".meta.json", ".mp4", ".thumbnail.jpeg"):
-        assert not (tmp_path / f"{name}{suffix}").exists()
-    assert not (tmp_path / video_name).exists()
+    assert not meta_path.exists()
+    assert not (media_dir / video_name).exists()
+    assert not (media_dir / f"{name}.chunk001.mp4").exists()
+    assert not (preview_dir / f"{name}.jpg").exists()
 
 
 def test_remove_recording_files_handles_missing_metadata(tmp_path: Path) -> None:
