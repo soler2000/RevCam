@@ -141,7 +141,6 @@ class SurveillanceSettings:
     expert_fps: int = 6
     expert_jpeg_quality: int = 75
     chunk_duration_seconds: int | None = None
-    chunk_mp4_enabled: bool = False
     overlays_enabled: bool = True
     remember_recording_state: bool = False
     motion_detection_enabled: bool = False
@@ -245,7 +244,6 @@ class SurveillanceSettings:
         object.__setattr__(self, "motion_post_event_seconds", float(post_seconds))
         object.__setattr__(self, "auto_purge_days", auto_purge)
         object.__setattr__(self, "storage_threshold_percent", threshold_percent)
-        object.__setattr__(self, "chunk_mp4_enabled", bool(self.chunk_mp4_enabled))
 
     def resolved_values(self) -> tuple[int, int]:
         """Return the effective fps and JPEG quality for surveillance recording."""
@@ -269,7 +267,6 @@ class SurveillanceSettings:
             "expert_fps": int(self.expert_fps),
             "expert_jpeg_quality": int(self.expert_jpeg_quality),
             "chunk_duration_seconds": self.chunk_duration_seconds,
-            "chunk_mp4_enabled": bool(self.chunk_mp4_enabled),
             "overlays_enabled": bool(self.overlays_enabled),
             "remember_recording_state": bool(self.remember_recording_state),
             "motion_detection_enabled": bool(self.motion_detection_enabled),

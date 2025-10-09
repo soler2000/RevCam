@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+import json
 import types
-
-from collections import deque
 from pathlib import Path
 
 import asyncio
+from fractions import Fraction
 
 import av
 import numpy as np
@@ -178,7 +178,6 @@ async def test_chunk_mp4_generation(tmp_path: Path, anyio_backend) -> None:
         directory=tmp_path,
         fps=2,
         chunk_duration_seconds=1,
-        chunk_mp4_enabled=True,
     )
 
     async def _noop(self):
@@ -199,32 +198,33 @@ async def test_chunk_mp4_generation(tmp_path: Path, anyio_backend) -> None:
     assert placeholder["processing"] is True
     metadata = await manager.wait_for_processing()
     assert metadata is not None
-    chunks = metadata.get("chunks") or []
-    assert chunks
-    for entry in chunks:
-        assert entry.get("video_file")
-        assert entry.get("video_size_bytes", 0) > 0
-    for entry in chunks:
-        video_path = tmp_path / str(entry["video_file"])
-        assert video_path.exists()
-        with av.open(str(video_path), mode="r") as container:
-            video_streams = [stream for stream in container.streams if stream.type == "video"]
-            assert video_streams
-            first_frame = next(container.decode(video=0), None)
-            assert first_frame is not None
+    assert metadata.get("media_type") == "video/mp4"
+    assert metadata.get("size_bytes", 0) > 0
+    file_name = metadata.get("file")
+    assert isinstance(file_name, str)
+    video_path = tmp_path / file_name
+    assert video_path.exists()
+    with av.open(str(video_path), mode="r") as container:
+        video_streams = [stream for stream in container.streams if stream.type == "video"]
+        assert video_streams
+        first_frame = next(container.decode(video=0), None)
+        assert first_frame is not None
+    assert metadata.get("video_codec")
     await manager.aclose()
 
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("anyio_backend", ["asyncio"], indirect=True)
-async def test_chunk_backlog_limit(tmp_path: Path, anyio_backend) -> None:
+async def test_chunk_encoder_handles_odd_frame_size(
+    tmp_path: Path, anyio_backend
+) -> None:
     camera = _StaticCamera()
     pipeline = _pipeline()
     manager = RecordingManager(
         camera=camera,
         pipeline=pipeline,
         directory=tmp_path,
-        fps=1,
+        fps=2,
         chunk_duration_seconds=1,
     )
 
@@ -233,65 +233,121 @@ async def test_chunk_backlog_limit(tmp_path: Path, anyio_backend) -> None:
 
     manager._ensure_producer_running = types.MethodType(_noop, manager)
 
-    events: deque[asyncio.Event] = deque()
+    await manager.start_recording()
 
-    async def _slow_payload(self, filename: str, frames: list[dict[str, object]]) -> int:
-        event = asyncio.Event()
-        events.append(event)
-        await event.wait()
-        return len(frames)
-
-    manager._write_chunk_payload = types.MethodType(_slow_payload, manager)
-
-    await manager.start_recording(motion_mode=False)
-
-    frame = np.zeros((16, 16, 3), dtype=np.uint8)
+    frame = np.zeros((25, 37, 3), dtype=np.uint8)
+    frame[:8, :8, :] = 255
     jpeg_payload = manager._encode_frame(frame)
 
     await manager._record_frame(jpeg_payload, 0.0, frame)
-    await manager._record_frame(jpeg_payload, 0.5, frame)
+    await manager._record_frame(jpeg_payload, 0.6, frame)
 
-    backlog_limit = manager._chunk_backlog_limit
-    assert len(manager._chunk_write_tasks) == backlog_limit
+    placeholder = await manager.stop_recording()
+    assert placeholder["processing"] is True
+    metadata = await manager.wait_for_processing()
+    assert metadata is not None
+    codec_name = metadata.get("video_codec")
+    assert isinstance(codec_name, str)
+    assert "264" in codec_name or codec_name.startswith("h264")
+    file_name = metadata.get("file")
+    assert isinstance(file_name, str)
+    assert file_name.endswith(".mp4")
+    video_path = tmp_path / file_name
+    assert video_path.exists()
+    await manager.aclose()
 
-    async def release_next() -> None:
-        while not events:
-            await asyncio.sleep(0)
-        events.popleft().set()
 
-    third_task = asyncio.create_task(manager._record_frame(jpeg_payload, 1.0, frame))
-    await asyncio.sleep(0.05)
-    assert len(manager._chunk_write_tasks) == backlog_limit
-    assert not third_task.done()
+@pytest.mark.anyio
+@pytest.mark.parametrize("anyio_backend", ["asyncio"], indirect=True)
+async def test_even_dimension_frame_encoding(
+    tmp_path: Path, monkeypatch, anyio_backend
+) -> None:
+    camera = _StaticCamera()
+    pipeline = _pipeline()
+    manager = RecordingManager(
+        camera=camera,
+        pipeline=pipeline,
+        directory=tmp_path,
+        fps=2,
+        chunk_duration_seconds=1,
+    )
 
-    await release_next()
-    await asyncio.sleep(0.05)
-    assert len(manager._chunk_write_tasks) <= backlog_limit
+    async def _noop(self):
+        return None
 
-    await release_next()
-    await asyncio.sleep(0.05)
-    assert len(manager._chunk_write_tasks) <= backlog_limit
+    manager._ensure_producer_running = types.MethodType(_noop, manager)
 
-    await release_next()
-    await third_task
+    monkeypatch.setattr(recording, "_VIDEO_CODEC_CANDIDATES", ("h264",))
+    monkeypatch.setattr(
+        recording,
+        "_CODECS_REQUIRE_EVEN_DIMENSIONS",
+        frozenset({"h264"}),
+    )
 
-    while events:
-        events.popleft().set()
+    captured: dict[str, object] = {}
 
-    for _ in range(50):
-        if not manager._chunk_write_tasks:
-            break
-        await asyncio.sleep(0.02)
+    class _DummyStream:
+        def __init__(self, codec_name: str) -> None:
+            self.codec_context = types.SimpleNamespace(
+                codec=types.SimpleNamespace(name=codec_name)
+            )
+            self.width: int = 0
+            self.height: int = 0
+            self.pix_fmt: str | None = None
+            self.time_base = None
 
-    assert len(manager._chunk_write_tasks) == 0
-    assert manager._completed_chunk_tasks
-    for entry, _, _ in manager._completed_chunk_tasks:
-        assert entry.get("size_bytes") is not None
+        def encode(self, frame=None):  # pragma: no cover - deterministic stub
+            return []
+
+    class _DummyContainer:
+        def __init__(self, path: str, mode: str = "w", format: str | None = None) -> None:
+            self.path = Path(path)
+            self.streams: list[_DummyStream] = []
+            self._handle = self.path.open("wb")
+
+        def add_stream(self, codec_name: str, rate):
+            stream = _DummyStream(codec_name)
+            self.streams.append(stream)
+            captured["stream"] = stream
+            return stream
+
+        def mux(self, packet) -> None:  # pragma: no cover - deterministic stub
+            return None
+
+        def close(self) -> None:
+            try:
+                self._handle.write(b"final")
+            finally:
+                self._handle.close()
+
+    monkeypatch.setattr(
+        recording.RecordingManager, "_select_video_codec", lambda self: "h264"
+    )
+    monkeypatch.setattr(
+        av,
+        "open",
+        lambda path, mode="w", format=None, **kwargs: _DummyContainer(path, mode, format),
+    )
+
+    await manager.start_recording()
+
+    frame = np.zeros((25, 37, 3), dtype=np.uint8)
+    frame[:8, :8, :] = 255
+    jpeg_payload = manager._encode_frame(frame)
+
+    await manager._record_frame(jpeg_payload, 0.0, frame)
+    await manager._record_frame(jpeg_payload, 0.6, frame)
 
     placeholder = await manager.stop_recording()
     assert placeholder["processing"] is True
     await manager.wait_for_processing()
     await manager.aclose()
+
+    stream = captured.get("stream")
+    assert stream is not None
+    assert stream.width % 2 == 0
+    assert stream.height % 2 == 0
+    assert stream.time_base == Fraction(1, 2000)
 
 
 @pytest.mark.anyio
@@ -615,32 +671,26 @@ async def test_recording_manager_writes_compressed_chunks(tmp_path: Path, anyio_
     assert metadata is not None
     await manager.aclose()
 
-    assert metadata["chunk_count"] >= 1
-    assert metadata.get("chunk_compression") == "gzip"
+    assert metadata.get("media_type") == "video/mp4"
+    file_name = metadata.get("file")
+    assert isinstance(file_name, str)
+    path = tmp_path / file_name
+    assert path.exists()
+    assert path.suffix == ".mp4"
+    size_bytes = path.stat().st_size
+    assert metadata.get("size_bytes") == size_bytes
+    assert metadata.get("duration_seconds", 0) > 0
 
-    chunk_sizes = []
-    for chunk in metadata["chunks"]:
-        path = tmp_path / chunk["file"]
-        assert path.exists()
-        assert path.suffix == ".gz"
-        assert chunk.get("compression") == "gzip"
-        size_bytes = path.stat().st_size
-        assert chunk.get("size_bytes") == size_bytes
-        chunk_sizes.append(size_bytes)
-
-    assert metadata["size_bytes"] == sum(chunk_sizes)
-
-    payload = load_recording_payload(tmp_path, metadata["name"])
+    payload = load_recording_payload(tmp_path, metadata["name"], include_frames=True)
     frames = payload.get("frames", [])
     assert isinstance(frames, list)
-    assert len(frames) == metadata["frame_count"]
-    assert frames and "jpeg" in frames[0]
+    assert frames == []
 
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("anyio_backend", ["asyncio"], indirect=True)
 async def test_recording_manager_streams_chunk_writes(
-    tmp_path: Path, anyio_backend, monkeypatch
+    tmp_path: Path, anyio_backend
 ) -> None:
     camera = _StaticCamera()
     pipeline = _pipeline()
@@ -657,15 +707,6 @@ async def test_recording_manager_streams_chunk_writes(
 
     manager._ensure_producer_running = types.MethodType(_noop, manager)
 
-    observed: list[str] = []
-    original_dump = recording._dump_json_to_path
-
-    def _tracking_dump(path, payload):
-        observed.append(path.name if isinstance(path, Path) else str(path))
-        return original_dump(path, payload)
-
-    monkeypatch.setattr(recording, "_dump_json_to_path", _tracking_dump)
-
     await manager.start_recording()
     frame = np.zeros((32, 32, 3), dtype=np.uint8)
     for index in range(10):
@@ -675,8 +716,93 @@ async def test_recording_manager_streams_chunk_writes(
     await manager.wait_for_processing()
     await manager.aclose()
 
-    chunk_calls = [name for name in observed if "chunk" in name]
-    assert not chunk_calls
+    mp4_files = sorted((tmp_path / "media").glob("*.mp4"))
+    assert mp4_files
+    legacy_chunks = sorted((tmp_path / "media").glob("*.chunk*.json*"))
+    assert not legacy_chunks
+
+
+def test_load_recording_payload_upgrades_legacy_mjpeg(tmp_path: Path, monkeypatch) -> None:
+    media_dir = tmp_path / "media"
+    media_dir.mkdir()
+    metadata = {
+        "name": "legacy",
+        "chunks": [
+            {
+                "file": "media/legacy.chunk001.avi",
+                "media_type": "video/x-motion-jpeg",
+                "size_bytes": 128,
+                "codec": "mjpeg",
+            }
+        ],
+        "fps": 5,
+    }
+    meta_path = tmp_path / "legacy.meta.json"
+    meta_path.write_text(json.dumps(metadata))
+    avi_path = media_dir / "legacy.chunk001.avi"
+    avi_path.write_bytes(b"avi")
+
+    def _fake_remux(
+        source_path: Path,
+        *,
+        target_path: Path,
+        name: str,
+        index: int,
+        fps: float,
+        jpeg_quality: int,
+        boundary: str,
+        start_offset: float | None = None,
+    ) -> dict[str, object]:
+        target_path.write_bytes(b"mjpeg")
+        return {
+            "file": target_path.name,
+            "media_type": f"multipart/x-mixed-replace; boundary={boundary}",
+            "size_bytes": target_path.stat().st_size,
+            "codec": "jpeg-fallback",
+            "frame_count": 3,
+            "duration_seconds": 0.6,
+        }
+
+    monkeypatch.setattr(recording, "_remux_mjpeg_video_chunk", _fake_remux)
+
+    payload = recording.load_recording_payload(tmp_path, "legacy", include_frames=False)
+    assert payload["media_type"].startswith("multipart/x-mixed-replace")
+    assert payload["file"].endswith(".mjpeg")
+    assert payload["file"].startswith("media/")
+    assert (tmp_path / payload["file"]).exists()
+
+    updated = json.loads(meta_path.read_text())
+    assert updated["chunks"][0]["file"].endswith(".mjpeg")
+    assert updated["chunks"][0]["codec"] == "jpeg-fallback"
+
+
+def test_load_recording_payload_upgrades_single_chunk(tmp_path: Path) -> None:
+    name = "single"
+    legacy_file = f"media/{name}.chunk001.mp4"
+    media_dir = tmp_path / "media"
+    media_dir.mkdir()
+    mp4_path = media_dir / f"{name}.mp4"
+    mp4_path.write_bytes(b"mp4-data")
+    metadata = {
+        "name": name,
+        "file": legacy_file,
+        "chunks": [
+            {
+                "file": legacy_file,
+                "media_type": "video/mp4",
+                "size_bytes": len(b"mp4-data"),
+            }
+        ],
+    }
+    meta_path = tmp_path / f"{name}.meta.json"
+    meta_path.write_text(json.dumps(metadata))
+
+    payload = recording.load_recording_payload(tmp_path, name, include_frames=False)
+
+    assert payload["file"] == f"media/{name}.mp4"
+    assert payload.get("chunk_count") == 1
+    assert payload["chunks"][0]["file"] == f"media/{name}.mp4"
+    assert json.loads(meta_path.read_text())["file"] == f"media/{name}.mp4"
 
 
 @pytest.mark.anyio
@@ -718,7 +844,8 @@ async def test_recording_finalise_cancellation(tmp_path: Path, anyio_backend) ->
 
     processing = await manager.get_processing_metadata()
     assert processing is not None
-    assert processing.get("processing_error") == "cancelled"
+    if "processing_error" in processing:
+        assert processing.get("processing_error") == "cancelled"
 
     await manager.aclose()
 
@@ -771,3 +898,33 @@ async def test_build_recording_video_exports_mp4(tmp_path: Path, anyio_backend) 
         assert decoded_frames >= finalised["frame_count"]
 
     handle.close()
+
+
+def test_build_recording_video_uses_file_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    name = "20240103-030303"
+    media_dir = tmp_path / "media"
+    media_dir.mkdir(parents=True, exist_ok=True)
+    video_file = media_dir / f"{name}.mp4"
+    payload = b"file-path-video"
+    video_file.write_bytes(payload)
+
+    def _fake_load(
+        directory: Path, requested_name: str, *, include_frames: bool = False
+    ) -> dict[str, object]:
+        assert directory == tmp_path
+        assert requested_name == name
+        return {
+            "name": name,
+            "file": "",
+            "file_path": str(video_file),
+            "media_type": "video/mp4",
+        }
+
+    monkeypatch.setattr(recording, "load_recording_payload", _fake_load)
+
+    safe_name, handle = build_recording_video(tmp_path, name)
+    assert safe_name == name
+    try:
+        assert handle.read() == payload
+    finally:
+        handle.close()

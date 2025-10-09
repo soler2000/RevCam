@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import gzip
 import json
 import logging
 import shutil
@@ -15,8 +14,17 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from tempfile import SpooledTemporaryFile
-from typing import AsyncGenerator, Awaitable, Callable, Iterable, Mapping, Sequence
+from typing import (
+    IO,
+    AsyncGenerator,
+    Awaitable,
+    Callable,
+    Iterable,
+    Mapping,
+    MutableMapping,
+    Protocol,
+    Sequence,
+)
 
 import av
 import simplejpeg
@@ -33,6 +41,90 @@ from .pipeline import FramePipeline
 logger = logging.getLogger(__name__)
 
 
+_VIDEO_CODEC_CANDIDATES: tuple[str, ...] = (
+    "h264_v4l2m2m",
+    "h264_omx",
+    "h264",
+    "libx264",
+)
+
+
+_CODECS_REQUIRE_EVEN_DIMENSIONS: frozenset[str] = frozenset(
+    {
+        "h264",
+        "libx264",
+        "h264_v4l2m2m",
+        "h264_omx",
+    }
+)
+
+
+def _codec_profile(codec: str) -> Mapping[str, object]:
+    base: dict[str, object] = {
+        "format": "mp4",
+        "extension": ".mp4",
+        "pixel_format": "yuv420p",
+        "media_type": "video/mp4",
+    }
+    if codec.startswith("h264") or codec == "libx264":
+        base["container_options"] = {"movflags": "+faststart"}
+    return base
+
+
+def _select_time_base(frame_rate: Fraction) -> Fraction:
+    """Choose a sane container time base for a given frame rate."""
+
+    numerator = frame_rate.numerator
+    denominator = frame_rate.denominator
+    if numerator <= 0:
+        numerator = 1
+    if denominator <= 0:
+        denominator = 1
+    # Use millisecond granularity relative to the FPS to preserve pacing while
+    # staying within encoder-friendly bounds (e.g. V4L2 H.264).
+    time_base = Fraction(denominator, numerator * 1000)
+    if time_base <= 0:
+        return Fraction(1, 1000)
+    return time_base.limit_denominator(90_000)
+
+
+def _extract_multipart_boundary(media_type: str) -> str | None:
+    if not isinstance(media_type, str):
+        return None
+    parts = [segment.strip() for segment in media_type.split(";")]
+    if not parts or not parts[0].lower().startswith("multipart/x-mixed-replace"):
+        return None
+    for segment in parts[1:]:
+        if not segment.lower().startswith("boundary="):
+            continue
+        boundary = segment.split("=", 1)[1].strip().strip('"')
+        if boundary:
+            return boundary
+    return None
+
+
+def _iter_mjpeg_frames(path: Path, boundary: str) -> Iterable[bytes]:
+    marker = f"--{boundary}".encode("ascii", errors="ignore")
+    try:
+        data = path.read_bytes()
+    except OSError:  # pragma: no cover - best-effort read
+        return []
+    if not marker or marker not in data:
+        return []
+    payloads: list[bytes] = []
+    for part in data.split(marker):
+        part = part.strip()
+        if not part or part == b"--":
+            continue
+        header, _, body = part.partition(b"\r\n\r\n")
+        if not _:
+            continue
+        payload = body.rstrip(b"\r\n")
+        if payload:
+            payloads.append(payload)
+    return payloads
+
+
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -42,130 +134,231 @@ def _safe_recording_name(name: str) -> str:
     if not safe_name:
         raise FileNotFoundError("Recording not found")
     return safe_name
+def _load_metadata(path: Path) -> dict[str, object] | None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:  # pragma: no cover - best-effort parsing
+        return None
+    return payload if isinstance(payload, dict) else None
 
 
-def _load_json_from_path(path: Path, compression: str | None = None) -> object:
-    if compression == "gzip":
-        with gzip.open(path, "rt", encoding="utf-8") as handle:
-            return json.load(handle)
-    if path.suffix == ".gz":
-        with gzip.open(path, "rt", encoding="utf-8") as handle:
-            return json.load(handle)
-    return json.loads(path.read_text(encoding="utf-8"))
+def _write_metadata(path: Path, payload: Mapping[str, object]) -> None:
+    data = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
+    path.write_text(data, encoding="utf-8")
 
 
-def _dump_json_to_path(path: Path, payload: object) -> int:
-    data = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode(
-        "utf-8"
-    )
-    if path.suffix == ".gz":
-        with gzip.open(path, "wb") as handle:
-            handle.write(data)
+def _ensure_centralised_asset(
+    directory: Path, value: str, *, subdir: str
+) -> tuple[str, Path, bool]:
+    """Ensure ``value`` points at ``directory/subdir`` and return its relative path.
+
+    If the referenced file exists outside of the target directory, it is moved into
+    ``directory/subdir``. When the file cannot be located the function still returns
+    the normalised relative path so metadata can be updated consistently.
+    """
+
+    if not isinstance(value, str) or not value:
+        target_dir = directory / subdir
+        target_dir.mkdir(parents=True, exist_ok=True)
+        return value, target_dir, False
+
+    raw_path = Path(value)
+    name = raw_path.name
+    target_dir = directory / subdir
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target_path = target_dir / name if name else target_dir
+
+    candidates: list[Path] = []
+    if raw_path.is_absolute():
+        candidates.append(raw_path)
     else:
-        path.write_bytes(data)
-    return path.stat().st_size
+        candidates.append(directory / raw_path)
+        if raw_path.parent != Path(subdir):
+            candidates.append(directory / raw_path.name)
+    candidates.append(target_path)
 
+    seen: set[Path] = set()
+    resolved_path = target_path
+    found = False
 
-def _dump_chunk_frames_to_path(
-    path: Path, frames: Iterable[Mapping[str, object]]
-) -> int:
-    """Stream ``frames`` to ``path`` without building a large JSON blob in memory."""
-
-    def _write_frames(handle) -> None:
-        handle.write("{\"frames\":[")
-        first = True
-        for frame in frames:
-            if not isinstance(frame, Mapping):
-                continue
-            if not first:
-                handle.write(",")
-            json.dump(frame, handle, separators=(",", ":"), ensure_ascii=False)
-            first = False
-        handle.write("]}")
-
-    if path.suffix == ".gz":
-        with gzip.open(path, "wt", encoding="utf-8") as handle:
-            _write_frames(handle)
-    else:
-        with path.open("w", encoding="utf-8") as handle:
-            _write_frames(handle)
-    return path.stat().st_size
-
-
-def _dump_chunk_video_to_path(
-    path: Path, frames: Sequence[Mapping[str, object]], fps: float
-) -> int:
-    frame_rate = 1.0 if fps <= 0 else float(fps)
-    frame_rate_fraction = Fraction(str(frame_rate)).limit_denominator(1000)
-    time_base = Fraction(frame_rate_fraction.denominator, frame_rate_fraction.numerator)
-
-    first_array = None
-    first_index = -1
-    for index, frame in enumerate(frames):
-        jpeg_data = frame.get("jpeg") if isinstance(frame, Mapping) else None
-        if not isinstance(jpeg_data, str) or not jpeg_data:
+    for candidate in candidates:
+        if not isinstance(candidate, Path):
             continue
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        if not candidate.exists() or candidate.is_dir():
+            continue
+        found = True
+        if candidate.parent == target_dir:
+            resolved_path = candidate
+            break
+        target_candidate = target_dir / candidate.name
+        if target_candidate == candidate:
+            resolved_path = candidate
+            break
         try:
-            decoded = base64.b64decode(jpeg_data)
-            array = simplejpeg.decode_jpeg(decoded, colorspace="BGR")
-        except Exception:  # pragma: no cover - skip invalid frames
-            continue
-        if array.ndim != 3 or array.shape[2] != 3:
-            continue
-        first_array = array
-        first_index = index
-        break
-
-    if first_array is None:
-        if path.exists():
+            if target_candidate.exists() and target_candidate != candidate:
+                target_candidate.unlink()
+        except OSError:
+            pass
+        try:
+            candidate.replace(target_candidate)
+            resolved_path = target_candidate
+            break
+        except OSError:
             try:
-                path.unlink()
-            except OSError:  # pragma: no cover - best effort cleanup
-                pass
-        return 0
+                shutil.copy2(candidate, target_candidate)
+                candidate.unlink()
+            except Exception:
+                resolved_path = candidate
+                break
+            else:
+                resolved_path = target_candidate
+                break
 
-    height, width = first_array.shape[:2]
-    with av.open(str(path), mode="w", format="mp4") as container:
-        stream = container.add_stream("h264", rate=frame_rate_fraction)
-        stream.width = int(width)
-        stream.height = int(height)
-        stream.pix_fmt = "yuv420p"
-        stream.time_base = time_base
-        stream.options = {"movflags": "+faststart"}
+    if not found and name:
+        resolved_path = target_dir / name
 
-        def _encode(array_data: "_np.ndarray", position: int) -> None:
-            frame_obj = av.VideoFrame.from_ndarray(array_data, format="bgr24")
-            frame_obj.pts = position
-            frame_obj.time_base = time_base
-            for packet in stream.encode(frame_obj):
-                container.mux(packet)
+    try:
+        relative = resolved_path.relative_to(directory).as_posix()
+    except ValueError:
+        relative = (Path(subdir) / name).as_posix() if name else str(value)
 
-        position = 0
-        _encode(first_array, position)
-        position += 1
+    return relative, resolved_path, found
 
-        for index, frame in enumerate(frames):
-            if index <= first_index:
+
+def resolve_recording_media_path(
+    directory: Path, payload: Mapping[str, object]
+) -> Path:
+    """Return the on-disk media path for ``payload`` within ``directory``.
+
+    The helper inspects the ``file_path`` and ``file`` metadata entries, falling
+    back to any chunk references and known centralised media locations. When a
+    file is located the payload is updated in-place (if mutable) so downstream
+    callers observe the normalised relative path.
+    """
+
+    if not isinstance(directory, Path):
+        raise TypeError("directory must be a pathlib.Path instance")
+
+    candidate_paths: list[Path] = []
+    seen: set[Path] = set()
+    target: MutableMapping[str, object] | None = (
+        payload if isinstance(payload, MutableMapping) else None
+    )
+
+    def _register(path: Path) -> None:
+        if path in seen:
+            return
+        seen.add(path)
+        candidate_paths.append(path)
+
+    def _coerce(path_value: str) -> Path:
+        path = Path(path_value)
+        return path if path.is_absolute() else directory / path
+
+    def _add_media_candidates(value: str) -> None:
+        if not value:
+            return
+        base_path = _coerce(value)
+        _register(base_path)
+        path_obj = Path(value)
+        if not path_obj.is_absolute():
+            _register(directory / "media" / path_obj.name)
+
+    desktop_value = payload.get("desktop_file") if isinstance(payload, Mapping) else None
+    if isinstance(desktop_value, str) and desktop_value:
+        _register(_coerce(desktop_value))
+
+    file_path_value = payload.get("file_path") if isinstance(payload, Mapping) else None
+    if isinstance(file_path_value, str) and file_path_value:
+        _register(_coerce(file_path_value))
+
+    file_value = payload.get("file") if isinstance(payload, Mapping) else None
+    if isinstance(file_value, str) and file_value:
+        _add_media_candidates(file_value)
+
+    chunks = payload.get("chunks") if isinstance(payload, Mapping) else None
+    if isinstance(chunks, Sequence):
+        for entry in chunks:
+            if not isinstance(entry, Mapping):
                 continue
-            jpeg_data = frame.get("jpeg") if isinstance(frame, Mapping) else None
-            if not isinstance(jpeg_data, str) or not jpeg_data:
-                continue
-            try:
-                decoded = base64.b64decode(jpeg_data)
-                array = simplejpeg.decode_jpeg(decoded, colorspace="BGR")
-            except Exception:  # pragma: no cover - skip invalid frames
-                continue
-            if array.ndim != 3 or array.shape[2] != 3:
-                continue
-            if array.shape[0] != height or array.shape[1] != width:
-                continue
-            _encode(array, position)
-            position += 1
+            chunk_file = entry.get("file")
+            if isinstance(chunk_file, str) and chunk_file:
+                _add_media_candidates(chunk_file)
 
-        for packet in stream.encode():
-            container.mux(packet)
+    name_value = payload.get("name") if isinstance(payload, Mapping) else None
+    if isinstance(name_value, str) and name_value:
+        base_name = Path(name_value)
+        stems: set[str] = {base_name.name}
+        if base_name.suffix:
+            stems.add(base_name.stem)
+        for stem in stems:
+            if not stem:
+                continue
+            stem_path = Path(stem)
+            suffix = stem_path.suffix.lower()
+            candidates: list[str] = []
+            if suffix:
+                candidates.append(stem_path.name)
+                candidates.append(stem_path.stem)
+            else:
+                candidates.append(stem)
+            for candidate_name in list(candidates):
+                base_stem = Path(candidate_name).stem or candidate_name
+                for extension in (".mp4", ".mjpeg", ".avi", ".mov"):
+                    composed = f"{base_stem}{extension}"
+                    _register(directory / "media" / composed)
+                    _register(directory / composed)
+            for candidate_name in candidates:
+                _register(directory / "media" / candidate_name)
+                _register(directory / candidate_name)
 
-    return path.stat().st_size
+    for candidate in candidate_paths:
+        if candidate.exists() and candidate.is_file():
+            _update_payload_media_fields(target, candidate, directory)
+            return candidate
+        if ".chunk001" in candidate.name:
+            base_name = candidate.name.replace(".chunk001", "", 1)
+            alternate = candidate.with_name(base_name)
+            if alternate.exists() and alternate.is_file():
+                _update_payload_media_fields(target, alternate, directory)
+                return alternate
+            alt_media = directory / "media" / base_name
+            if alt_media.exists() and alt_media.is_file():
+                _update_payload_media_fields(target, alt_media, directory)
+                return alt_media
+
+    # As a final fallback, probe the central media directory using the recording
+    # name and common file extensions even when metadata has not yet been
+    # normalised.
+    if isinstance(name_value, str) and name_value:
+        stem = Path(name_value).stem or name_value
+        for extension in (".mp4", ".mjpeg", ".avi", ".mov"):
+            candidate = directory / "media" / f"{stem}{extension}"
+            if candidate.exists() and candidate.is_file():
+                _update_payload_media_fields(target, candidate, directory)
+                return candidate
+            candidate = directory / f"{stem}{extension}"
+            if candidate.exists() and candidate.is_file():
+                _update_payload_media_fields(target, candidate, directory)
+                return candidate
+
+    raise FileNotFoundError("Recording media file not found")
+
+
+def _update_payload_media_fields(
+    payload: MutableMapping[str, object] | None, path: Path, directory: Path
+) -> None:
+    if payload is None:
+        return
+    payload["file_path"] = str(path)
+    try:
+        relative = path.relative_to(directory).as_posix()
+    except ValueError:
+        relative = path.name
+    payload["file"] = relative
 
 
 def load_recording_metadata(directory: Path) -> list[dict[str, object]]:
@@ -173,12 +366,21 @@ def load_recording_metadata(directory: Path) -> list[dict[str, object]]:
 
     items: list[dict[str, object]] = []
     for path in sorted(directory.glob("*.meta.json"), reverse=True):
-        try:
-            data = _load_json_from_path(path)
-        except Exception:  # pragma: no cover - best-effort parsing
+        data = _load_metadata(path)
+        if data is None:
             continue
         if isinstance(data, dict):
             data.setdefault("name", path.stem.replace(".meta", ""))
+            file_name = data.get("file")
+            if isinstance(file_name, str):
+                file_path = directory / file_name
+                if file_path.exists() and file_path.is_file():
+                    try:
+                        size = file_path.stat().st_size
+                    except OSError:
+                        size = None
+                    else:
+                        data.setdefault("size_bytes", int(size))
             chunks = data.get("chunks")
             if isinstance(chunks, list):
                 total = 0
@@ -195,9 +397,9 @@ def load_recording_metadata(directory: Path) -> list[dict[str, object]]:
 
 def _collect_chunk_sources(
     directory: Path, safe_name: str, metadata: Mapping[str, object] | None
-) -> tuple[list[dict[str, object]], list[tuple[dict[str, object], Path, str | None]]]:
+) -> tuple[list[dict[str, object]], list[tuple[dict[str, object], Path]]]:
     chunk_entries: list[dict[str, object]] = []
-    sources: list[tuple[dict[str, object], Path, str | None]] = []
+    sources: list[tuple[dict[str, object], Path]] = []
     if not metadata:
         return chunk_entries, sources
     chunks = metadata.get("chunks")
@@ -210,153 +412,254 @@ def _collect_chunk_sources(
         if not isinstance(filename, str):
             continue
         chunk_entry = dict(entry)
-        compression = entry.get("compression")
-        compression_name: str | None
-        if isinstance(compression, str):
-            compression_name = compression.lower()
-        else:
-            compression_name = None
         chunk_entries.append(chunk_entry)
-        sources.append((chunk_entry, directory / filename, compression_name))
+        sources.append((chunk_entry, directory / filename))
     return chunk_entries, sources
-
-
-def _normalise_frames(payload: object) -> list[dict[str, object]]:
-    if isinstance(payload, Mapping):
-        candidate = payload.get("frames")
-    else:
-        candidate = payload
-    if not isinstance(candidate, list):
-        return []
-    return [frame for frame in candidate if isinstance(frame, Mapping)]
-
-
 def load_recording_payload(
     directory: Path, name: str, *, include_frames: bool = True
 ) -> dict[str, object]:
     """Load a recording payload by ``name`` from ``directory`` synchronously."""
 
     safe_name = _safe_recording_name(name)
-    metadata: dict[str, object] | None = None
     meta_path = directory / f"{safe_name}.meta.json"
-    if meta_path.exists() and meta_path.is_file():
-        try:
-            candidate = json.loads(meta_path.read_text(encoding="utf-8"))
-        except Exception:  # pragma: no cover - best-effort parsing
-            metadata = None
-        else:
-            metadata = candidate if isinstance(candidate, dict) else None
-
+    if not meta_path.exists() or not meta_path.is_file():
+        raise FileNotFoundError("Recording not found")
+    metadata = _load_metadata(meta_path)
+    if metadata is None:
+        raise FileNotFoundError("Recording not found")
+    if not isinstance(metadata, dict):
+        metadata = dict(metadata)
+    metadata_dirty = False
     chunk_entries, chunk_sources = _collect_chunk_sources(directory, safe_name, metadata)
 
-    frames: list[dict[str, object]] = []
-    if include_frames:
-        if chunk_sources:
-            for _, chunk_path, compression in chunk_sources:
-                if not chunk_path.exists() or not chunk_path.is_file():
-                    continue
-                try:
-                    chunk_payload = _load_json_from_path(chunk_path, compression)
-                except Exception:  # pragma: no cover - best-effort parsing
-                    continue
-                frames.extend(_normalise_frames(chunk_payload))
-        else:
-            data_path = directory / f"{safe_name}.json"
-            if not data_path.exists() or not data_path.is_file():
-                gz_path = directory / f"{safe_name}.json.gz"
-                if gz_path.exists() and gz_path.is_file():
-                    data_path = gz_path
-                else:
-                    raise FileNotFoundError("Recording not found")
-            payload = _load_json_from_path(data_path)
-            if metadata is None and isinstance(payload, Mapping):
-                metadata = {
-                    key: value for key, value in payload.items() if key != "frames"
-                }
-            frames = _normalise_frames(payload)
-    else:
-        # Ensure the recording exists even if we are not loading frames.
-        if not chunk_sources:
-            data_path = directory / f"{safe_name}.json"
-            if not data_path.exists() or not data_path.is_file():
-                gz_path = directory / f"{safe_name}.json.gz"
-                if not gz_path.exists() or not gz_path.is_file():
-                    raise FileNotFoundError("Recording not found")
-                data_path = gz_path
-            if metadata is None:
-                try:
-                    payload = _load_json_from_path(data_path)
-                except Exception:  # pragma: no cover - best-effort parsing
-                    metadata = None
-                else:
-                    if isinstance(payload, Mapping):
-                        metadata = {
-                            key: value for key, value in payload.items() if key != "frames"
-                        }
-
-    payload: dict[str, object]
-    if metadata is not None:
-        payload = dict(metadata)
-    else:
-        payload = {"name": safe_name}
+    payload: dict[str, object] = dict(metadata)
     payload.setdefault("name", safe_name)
-    if chunk_entries:
-        payload["chunks"] = chunk_entries
+
+    if chunk_sources:
+        total_size = 0
+        normalised_chunks: list[dict[str, object]] = []
+        updated_metadata_entries: dict[int, dict[str, object]] = {}
+        fps_value = metadata.get("fps") if isinstance(metadata, Mapping) else None
+        default_fps = (
+            float(fps_value)
+            if isinstance(fps_value, (int, float)) and fps_value > 0
+            else 10.0
+        )
+        jpeg_quality_value = metadata.get("jpeg_quality") if isinstance(metadata, Mapping) else None
+        jpeg_quality = (
+            int(jpeg_quality_value)
+            if isinstance(jpeg_quality_value, (int, float)) and jpeg_quality_value > 0
+            else 80
+        )
+        for index, (entry, chunk_path) in enumerate(chunk_sources, start=1):
+            chunk_entry = dict(entry)
+            file_name_value = chunk_entry.get("file")
+            if isinstance(file_name_value, str) and file_name_value:
+                normalised_file, resolved_path, _ = _ensure_centralised_asset(
+                    directory, file_name_value, subdir="media"
+                )
+                if normalised_file != file_name_value:
+                    chunk_entry["file"] = normalised_file
+                    updated_metadata_entries[index - 1] = dict(chunk_entry)
+                    metadata_dirty = True
+                chunk_path = resolved_path
+            media_type_value = chunk_entry.get("media_type")
+            if (
+                isinstance(media_type_value, str)
+                and media_type_value.lower().startswith("video/x-motion-jpeg")
+                and chunk_path.suffix.lower() == ".avi"
+                and chunk_path.exists()
+                and chunk_path.is_file()
+            ):
+                start_offset_raw = chunk_entry.get("start_offset_seconds")
+                start_offset_value = (
+                    float(start_offset_raw)
+                    if isinstance(start_offset_raw, (int, float))
+                    else None
+                )
+                target_path = chunk_path.with_suffix(".mjpeg")
+                try:
+                    converted_entry = _remux_mjpeg_video_chunk(
+                        chunk_path,
+                        target_path=target_path,
+                        name=safe_name,
+                        index=index,
+                        fps=default_fps,
+                        jpeg_quality=jpeg_quality,
+                        boundary=f"chunk{index:03d}",
+                        start_offset=start_offset_value,
+                    )
+                except Exception:  # pragma: no cover - defensive logging
+                    logger.exception(
+                        "Failed to convert legacy MJPEG chunk %s for %s",
+                        index,
+                        safe_name,
+                    )
+                else:
+                    try:
+                        relative_target = target_path.relative_to(directory)
+                        relative_name = relative_target.as_posix()
+                    except Exception:
+                        relative_name = converted_entry.get("file", target_path.name)
+                    else:
+                        converted_entry["file"] = relative_name
+                    chunk_entry["file"] = str(converted_entry.get("file", target_path.name))
+                    chunk_entry.update(converted_entry)
+                    chunk_path = directory / chunk_entry["file"]
+                    updated_metadata_entries[index - 1] = dict(chunk_entry)
+                    metadata_dirty = True
+            if not chunk_path.exists() or not chunk_path.is_file():
+                file_name = chunk_entry.get("file")
+                if isinstance(file_name, str) and ".chunk001" in file_name:
+                    base_name = file_name.replace(".chunk001", "", 1)
+                    fallback_path = directory / base_name
+                    if fallback_path.exists() and fallback_path.is_file():
+                        chunk_entry["file"] = base_name
+                        chunk_path = fallback_path
+                        updated_metadata_entries[index - 1] = dict(chunk_entry)
+                        metadata_dirty = True
+                if not chunk_path.exists() or not chunk_path.is_file():
+                    if isinstance(file_name, str):
+                        media_candidate = directory / "media" / Path(file_name).name
+                        if media_candidate.exists() and media_candidate.is_file():
+                            relative_media = (Path("media") / media_candidate.name).as_posix()
+                            chunk_entry["file"] = relative_media
+                            chunk_path = media_candidate
+                            updated_metadata_entries[index - 1] = dict(chunk_entry)
+                            metadata_dirty = True
+            if chunk_path.exists() and chunk_path.is_file():
+                try:
+                    size = chunk_path.stat().st_size
+                except OSError:  # pragma: no cover - defensive stat
+                    size = chunk_entry.get("size_bytes")
+                else:
+                    chunk_entry["size_bytes"] = int(size)
+                    total_size += int(size)
+            normalised_chunks.append(chunk_entry)
+        if primary_chunk := (normalised_chunks[0] if normalised_chunks else None):
+            file_name = primary_chunk.get("file")
+            if isinstance(file_name, str):
+                normalised_file, resolved_path, _ = _ensure_centralised_asset(
+                    directory, file_name, subdir="media"
+                )
+                if normalised_file != file_name:
+                    primary_chunk["file"] = normalised_file
+                    normalised_chunks[0] = dict(primary_chunk)
+                    if isinstance(metadata, dict):
+                        raw_chunks = metadata.get("chunks")
+                        if isinstance(raw_chunks, list) and raw_chunks:
+                            first = raw_chunks[0]
+                            if isinstance(first, dict):
+                                first["file"] = normalised_file
+                        metadata_dirty = True
+                if payload.get("file") != normalised_file:
+                    payload["file"] = normalised_file
+                    if isinstance(metadata, dict):
+                        metadata["file"] = normalised_file
+                        metadata_dirty = True
+                if resolved_path.exists() and resolved_path.is_file():
+                    payload["file_path"] = str(resolved_path)
+            media_type = primary_chunk.get("media_type")
+            if isinstance(media_type, str) and payload.get("media_type") != media_type:
+                payload["media_type"] = media_type
+                if isinstance(metadata, dict):
+                    metadata["media_type"] = media_type
+                    metadata_dirty = True
+            codec_name = primary_chunk.get("codec")
+            if isinstance(codec_name, str) and payload.get("video_codec") != codec_name:
+                payload["video_codec"] = codec_name
+                if isinstance(metadata, dict):
+                    metadata["video_codec"] = codec_name
+                    metadata_dirty = True
+        if updated_metadata_entries and isinstance(metadata, dict):
+            raw_chunks = metadata.get("chunks")
+            if isinstance(raw_chunks, list):
+                for idx, updated_entry in updated_metadata_entries.items():
+                    if 0 <= idx < len(raw_chunks):
+                        raw_chunks[idx] = dict(updated_entry)
+                metadata_dirty = True
+        payload["chunks"] = normalised_chunks
+        payload["chunk_count"] = len(normalised_chunks)
+        if total_size and "size_bytes" not in payload:
+            payload["size_bytes"] = total_size
+        if include_frames:
+            payload["frames"] = []
+        if metadata_dirty:
+            try:
+                _write_metadata(meta_path, metadata)
+            except OSError:  # pragma: no cover - best-effort persistence
+                pass
+        return payload
+    file_value = payload.get("file")
+    if isinstance(file_value, str):
+        normalised_file, resolved_path, found_asset = _ensure_centralised_asset(
+            directory, file_value, subdir="media"
+        )
+        if normalised_file != file_value:
+            payload["file"] = normalised_file
+            if isinstance(metadata, dict):
+                metadata["file"] = normalised_file
+                metadata_dirty = True
+        file_path = resolved_path
+        if not file_path.exists() or not file_path.is_file():
+            if ".chunk001" in normalised_file:
+                base_name = normalised_file.replace(".chunk001", "", 1)
+                candidate = directory / base_name
+                if candidate.exists() and candidate.is_file():
+                    normalised_file = base_name
+                    payload["file"] = base_name
+                    file_path = candidate
+                    if isinstance(metadata, dict):
+                        metadata["file"] = base_name
+                        raw_chunks = metadata.get("chunks")
+                        if isinstance(raw_chunks, list) and raw_chunks:
+                            first = raw_chunks[0]
+                            if isinstance(first, dict):
+                                first["file"] = base_name
+                        metadata_dirty = True
+            if not file_path.exists() or not file_path.is_file():
+                media_candidate = directory / "media" / Path(normalised_file).name
+                if media_candidate.exists() and media_candidate.is_file():
+                    normalised_file = (Path("media") / media_candidate.name).as_posix()
+                    payload["file"] = normalised_file
+                    file_path = media_candidate
+                    if isinstance(metadata, dict):
+                        metadata["file"] = normalised_file
+                        raw_chunks = metadata.get("chunks")
+                        if isinstance(raw_chunks, list) and raw_chunks:
+                            first = raw_chunks[0]
+                            if isinstance(first, dict):
+                                first["file"] = normalised_file
+                        metadata_dirty = True
+        if file_path.exists() and file_path.is_file():
+            payload["file_path"] = str(file_path)
+        try:
+            size = file_path.stat().st_size
+        except OSError:
+            size = payload.get("size_bytes")
+        else:
+            payload["size_bytes"] = int(size)
+        preview_file = metadata.get("preview_file") if isinstance(metadata, Mapping) else None
+        if isinstance(preview_file, str):
+            normalised_preview, preview_path, _ = _ensure_centralised_asset(
+                directory, preview_file, subdir="previews"
+            )
+            if normalised_preview != preview_file and isinstance(metadata, dict):
+                metadata["preview_file"] = normalised_preview
+                metadata_dirty = True
+            if preview_path.exists() and preview_path.is_file():
+                payload["preview_file"] = normalised_preview
+        media_type = payload.get("media_type")
+        if not isinstance(media_type, str):
+            payload["media_type"] = "video/mp4"
+        if metadata_dirty:
+            try:
+                _write_metadata(meta_path, metadata)
+            except OSError:  # pragma: no cover - best-effort persistence
+                pass
     if include_frames:
-        payload["frames"] = frames
+        payload["frames"] = []
     return payload
-
-
-def load_recording_chunk(
-    directory: Path, name: str, chunk_index: int
-) -> dict[str, object]:
-    """Load the frames for a specific ``chunk_index`` of ``name``."""
-
-    if chunk_index < 1:
-        raise FileNotFoundError("Chunk not found")
-
-    safe_name = _safe_recording_name(name)
-    payload = load_recording_payload(directory, safe_name, include_frames=False)
-    chunks = payload.get("chunks")
-    frames: list[dict[str, object]] = []
-    chunk_total = 0
-    chunk_file: str | None = None
-    if isinstance(chunks, list) and chunks:
-        chunk_total = len(chunks)
-        if chunk_index > chunk_total:
-            raise FileNotFoundError("Chunk not found")
-        entry = chunks[chunk_index - 1]
-        if not isinstance(entry, Mapping):
-            raise FileNotFoundError("Chunk not found")
-        filename = entry.get("file")
-        if not isinstance(filename, str):
-            raise FileNotFoundError("Chunk not found")
-        chunk_file = filename
-        compression = entry.get("compression")
-        compression_name = compression.lower() if isinstance(compression, str) else None
-        chunk_path = directory / filename
-        if not chunk_path.exists() or not chunk_path.is_file():
-            raise FileNotFoundError("Chunk not found")
-        chunk_payload = _load_json_from_path(chunk_path, compression_name)
-        frames = _normalise_frames(chunk_payload)
-    else:
-        if chunk_index != 1:
-            raise FileNotFoundError("Chunk not found")
-        fallback = load_recording_payload(directory, safe_name, include_frames=True)
-        raw_frames = fallback.get("frames")
-        if isinstance(raw_frames, list):
-            frames = [frame for frame in raw_frames if isinstance(frame, Mapping)]
-        chunk_total = 1 if frames else 0
-
-    return {
-        "name": safe_name,
-        "chunk_index": chunk_index,
-        "chunk_count": chunk_total,
-        "chunk_file": chunk_file,
-        "frame_count": len(frames),
-        "fps": payload.get("fps") if isinstance(payload, Mapping) else None,
-        "frames": frames,
-    }
 
 
 def iter_recording_frames(
@@ -373,112 +676,115 @@ def iter_recording_frames(
     else:
         base_metadata = metadata
 
-    _, chunk_sources = _collect_chunk_sources(directory, safe_name, base_metadata)
-    if chunk_sources:
-        for _, chunk_path, compression in chunk_sources:
-            if not chunk_path.exists() or not chunk_path.is_file():
-                continue
-            try:
-                chunk_payload = _load_json_from_path(chunk_path, compression)
-            except Exception:  # pragma: no cover - best-effort parsing
-                continue
-            for frame in _normalise_frames(chunk_payload):
-                yield frame
+    file_value = base_metadata.get("file") if isinstance(base_metadata, Mapping) else None
+    if isinstance(file_value, str):
+        file_path = directory / file_value
+        if not file_path.exists() or not file_path.is_file():
+            raise FileNotFoundError("Recording not found")
+        try:
+            container = av.open(str(file_path), mode="r")
+        except Exception as exc:  # pragma: no cover - defensive open
+            raise FileNotFoundError("Recording not found") from exc
+        with container:
+            video_stream = None
+            for stream in container.streams.video:
+                video_stream = stream
+                break
+            if video_stream is None:
+                raise RuntimeError("Recording does not contain a video stream")
+            chunk_info = {"file": file_value, "media_type": base_metadata.get("media_type", "video/mp4")}
+            for frame in container.decode(video_stream):
+                try:
+                    array = frame.to_ndarray(format="rgb24")
+                except Exception:  # pragma: no cover - defensive decode
+                    continue
+                yield {"array": array, "chunk": dict(chunk_info)}
         return
 
-    data_path = directory / f"{safe_name}.json"
-    if not data_path.exists() or not data_path.is_file():
-        gz_path = directory / f"{safe_name}.json.gz"
-        if gz_path.exists() and gz_path.is_file():
-            data_path = gz_path
-        else:
-            raise FileNotFoundError("Recording not found")
-    payload = _load_json_from_path(data_path)
-    for frame in _normalise_frames(payload):
-        yield frame
+    chunk_entries, chunk_sources = _collect_chunk_sources(
+        directory, safe_name, base_metadata
+    )
+    if chunk_sources:
+        for entry, chunk_path in chunk_sources:
+            if not chunk_path.exists() or not chunk_path.is_file():
+                continue
+            boundary = None
+            if isinstance(entry, Mapping):
+                media_type = entry.get("media_type")
+                if isinstance(media_type, str):
+                    boundary = _extract_multipart_boundary(media_type)
+            if boundary:
+                for payload in _iter_mjpeg_frames(chunk_path, boundary):
+                    try:
+                        array = simplejpeg.decode_jpeg(payload, colorspace="RGB")
+                    except Exception:  # pragma: no cover - skip invalid frames
+                        continue
+                    yield {"array": array, "chunk": dict(entry)}
+                continue
+            try:
+                container = av.open(str(chunk_path), mode="r")
+            except Exception:  # pragma: no cover - defensive open
+                continue
+            with container:
+                video_stream = None
+                for stream in container.streams.video:
+                    video_stream = stream
+                    break
+                if video_stream is None:
+                    continue
+                for frame in container.decode(video_stream):
+                    try:
+                        array = frame.to_ndarray(format="rgb24")
+                    except Exception:  # pragma: no cover - defensive decode
+                        continue
+                    yield {"array": array, "chunk": dict(entry)}
+        return
+
+    raise FileNotFoundError("Recording not found")
 
 
 def build_recording_video(
     directory: Path, name: str
-) -> tuple[str, SpooledTemporaryFile]:
-    """Render recording ``name`` to an MP4 file and return a file-like object."""
+) -> tuple[str, IO[bytes]]:
+    """Return the recorded MP4 file for ``name`` as a readable handle."""
 
     safe_name = _safe_recording_name(name)
     payload = load_recording_payload(directory, safe_name, include_frames=False)
-    frame_rate_value = payload.get("fps")
-    if isinstance(frame_rate_value, (int, float)) and frame_rate_value > 0:
-        frame_rate = float(frame_rate_value)
-    else:
-        frame_rate = 10.0
+    try:
+        file_path = resolve_recording_media_path(directory, payload)
+    except FileNotFoundError as exc:
+        raise FileNotFoundError("Recording media file not found") from exc
+    except Exception as exc:  # pragma: no cover - defensive failure
+        raise FileNotFoundError("Recording media file not found") from exc
+    handle = file_path.open("rb")
+    return safe_name, handle
 
-    frame_iterator = iter_recording_frames(directory, safe_name, payload)
 
-    # Identify the first usable frame so we can determine the output dimensions.
-    first_array = None
-    for frame in frame_iterator:
-        jpeg_data = frame.get("jpeg")
-        if not isinstance(jpeg_data, str) or not jpeg_data:
-            continue
-        try:
-            decoded = base64.b64decode(jpeg_data)
-            array = simplejpeg.decode_jpeg(decoded, colorspace="BGR")
-        except Exception as exc:
-            raise ValueError("Recording frames are invalid") from exc
-        if array.ndim != 3 or array.shape[2] != 3:
-            raise ValueError("Recording frames are invalid")
-        first_array = array
-        break
+def export_recording_media(
+    directory: Path,
+    name: str,
+    target_directory: Path | None = None,
+) -> Path:
+    """Copy the recording media for ``name`` into ``target_directory``.
 
-    if first_array is None:
-        raise ValueError("Recording does not contain any usable frames")
+    Returns the destination path of the copied file. ``target_directory`` defaults
+    to the user's desktop directory when omitted.
+    """
 
-    height, width = first_array.shape[:2]
-    archive = SpooledTemporaryFile(max_size=64 * 1024 * 1024)
-    frame_rate_fraction = Fraction(str(frame_rate)).limit_denominator(1000)
-    time_base = Fraction(
-        frame_rate_fraction.denominator, frame_rate_fraction.numerator
-    )
-
-    with av.open(archive, mode="w", format="mp4") as container:
-        stream = container.add_stream("h264", rate=frame_rate_fraction)
-        stream.width = int(width)
-        stream.height = int(height)
-        stream.pix_fmt = "yuv420p"
-        stream.time_base = time_base
-        stream.options = {"movflags": "+faststart"}
-
-        def _encode(array_data: "_np.ndarray", position: int) -> None:
-            frame = av.VideoFrame.from_ndarray(array_data, format="bgr24")
-            frame.pts = position
-            frame.time_base = time_base
-            for packet in stream.encode(frame):
-                container.mux(packet)
-
-        position = 0
-        _encode(first_array, position)
-        position += 1
-
-        for frame in frame_iterator:
-            jpeg_data = frame.get("jpeg")
-            if not isinstance(jpeg_data, str) or not jpeg_data:
-                continue
-            try:
-                decoded = base64.b64decode(jpeg_data)
-                array = simplejpeg.decode_jpeg(decoded, colorspace="BGR")
-            except Exception:  # pragma: no cover - skip invalid frames
-                continue
-            if array.ndim != 3 or array.shape[2] != 3:
-                continue
-            if array.shape[0] != height or array.shape[1] != width:
-                continue
-            _encode(array, position)
-            position += 1
-
-        for packet in stream.encode():
-            container.mux(packet)
-
-    archive.seek(0)
-    return safe_name, archive
+    safe_name = _safe_recording_name(name)
+    payload = load_recording_payload(directory, safe_name, include_frames=False)
+    file_path = resolve_recording_media_path(directory, payload)
+    destination_root = target_directory
+    if destination_root is None:
+        destination_root = Path.home() / "Desktop"
+    destination_root.mkdir(parents=True, exist_ok=True)
+    destination = destination_root / file_path.name
+    if destination.resolve() == file_path.resolve():
+        # Ensure the file exists at the destination even if it's already in the
+        # requested directory.
+        return destination
+    shutil.copy2(file_path, destination)
+    return destination
 
 
 def remove_recording_files(directory: Path, name: str) -> None:
@@ -491,6 +797,9 @@ def remove_recording_files(directory: Path, name: str) -> None:
         directory / f"{safe_name}.meta.json",
         directory / f"{safe_name}.meta.json.gz",
     }
+    media_dir = directory / "media"
+    preview_dir = directory / "previews"
+    search_roots = (directory, media_dir, preview_dir)
 
     metadata: Mapping[str, object] | None = None
     for meta_path in (
@@ -510,6 +819,9 @@ def remove_recording_files(directory: Path, name: str) -> None:
             break
 
     if metadata is not None:
+        file_entry = metadata.get("file")
+        if isinstance(file_entry, str):
+            candidates.add(directory / file_entry)
         chunks = metadata.get("chunks")
         if isinstance(chunks, list):
             for entry in chunks:
@@ -519,19 +831,24 @@ def remove_recording_files(directory: Path, name: str) -> None:
                         candidates.add(directory / filename)
 
     for pattern in (
+        f"{safe_name}.chunk*.mp4",
+        f"{safe_name}.chunk*.avi",
+        f"{safe_name}.chunk*.mjpeg",
         f"{safe_name}.chunk*.json",
         f"{safe_name}.chunk*.json.gz",
     ):
-        for chunk_path in directory.glob(pattern):
-            candidates.add(chunk_path)
+        for root in search_roots:
+            for chunk_path in root.glob(pattern):
+                candidates.add(chunk_path)
 
     for pattern in (
         f"{safe_name}*.mp4",
         f"{safe_name}*.jpg",
         f"{safe_name}*.jpeg",
     ):
-        for artefact in directory.glob(pattern):
-            candidates.add(artefact)
+        for root in search_roots:
+            for artefact in root.glob(pattern):
+                candidates.add(artefact)
 
     for candidate in candidates:
         try:
@@ -780,15 +1097,257 @@ class MotionDetector:
         return numeric
 
 
-@dataclass
-class _ChunkTaskState:
-    entry: dict[str, object]
-    payload_task: asyncio.Task[int]
-    video_task: asyncio.Task[int] | None
-    completion: asyncio.Future[None]
+class _ChunkWriter(Protocol):
+    """Protocol implemented by active chunk writers."""
 
-    def as_tuple(self) -> tuple[dict[str, object], asyncio.Task[int], asyncio.Task[int] | None]:
-        return (self.entry, self.payload_task, self.video_task)
+    name: str
+    index: int
+    path: Path
+    fps: float
+    codec: str
+    media_type: str
+    frame_count: int
+    bytes_written: int
+
+    def add_frame(self, array: "_np.ndarray", timestamp: float) -> None:
+        ...
+
+    def finalise(self) -> dict[str, object]:
+        ...
+
+    def abort(self) -> None:
+        ...
+
+
+@dataclass
+class _ActiveChunkWriter:
+    """Active FFmpeg-backed chunk that receives frames incrementally."""
+
+    name: str
+    index: int
+    path: Path
+    container: av.container.OutputContainer
+    stream: av.video.stream.VideoStream
+    time_base: Fraction
+    fps: float
+    codec: str
+    media_type: str
+    relative_file: str
+    target_width: int
+    target_height: int
+    pixel_format: str
+    frame_count: int = 0
+    first_timestamp: float | None = None
+    last_timestamp: float | None = None
+    bytes_written: int = 0
+    last_pts: int = field(init=False, default=-1)
+
+    def _compute_pts(self, timestamp: float) -> int:
+        base = self.first_timestamp if self.first_timestamp is not None else float(timestamp)
+        relative = float(timestamp) - float(base)
+        if relative < 0:
+            relative = 0.0
+        time_base_value = float(self.time_base) if self.time_base else 0.0
+        if time_base_value > 0:
+            pts = int(round(relative / time_base_value))
+        elif self.fps > 0:
+            pts = int(round(relative * float(self.fps)))
+        else:
+            pts = self.frame_count
+        if pts <= self.last_pts:
+            pts = self.last_pts + 1
+        self.last_pts = pts
+        return pts
+
+    def _refresh_size(self) -> None:
+        try:
+            size = self.path.stat().st_size
+        except OSError:  # pragma: no cover - best-effort stat
+            return
+        self.bytes_written = max(self.bytes_written, int(size))
+
+    def add_frame(self, array: "_np.ndarray", timestamp: float) -> None:
+        if self.first_timestamp is None:
+            self.first_timestamp = float(timestamp)
+        self.last_timestamp = float(timestamp)
+        frame = av.VideoFrame.from_ndarray(array, format="rgb24")
+        target_width = self.target_width or frame.width
+        target_height = self.target_height or frame.height
+        pixel_format = self.pixel_format or "yuv420p"
+        frame = frame.reformat(
+            width=target_width, height=target_height, format=pixel_format
+        )
+        frame.pts = self._compute_pts(timestamp)
+        frame.time_base = self.time_base
+        for packet in self.stream.encode(frame):
+            self.container.mux(packet)
+            packet_size = getattr(packet, "size", None)
+            if isinstance(packet_size, int) and packet_size > 0:
+                self.bytes_written += packet_size
+        self.frame_count += 1
+        self._refresh_size()
+
+    def finalise(self) -> dict[str, object]:
+        for packet in self.stream.encode():
+            self.container.mux(packet)
+            packet_size = getattr(packet, "size", None)
+            if isinstance(packet_size, int) and packet_size > 0:
+                self.bytes_written += packet_size
+        self.container.close()
+        size = self.bytes_written
+        try:
+            size = max(size, self.path.stat().st_size)
+        except OSError:  # pragma: no cover - best-effort stat
+            pass
+        self.bytes_written = int(size)
+        duration = 0.0
+        fps_minimum = 0.0
+        if self.first_timestamp is not None and self.last_timestamp is not None:
+            try:
+                duration = max(0.0, float(self.last_timestamp - self.first_timestamp))
+            except Exception:  # pragma: no cover - defensive conversion
+                duration = 0.0
+        if self.frame_count and self.fps > 0:
+            try:
+                fps_minimum = float(self.frame_count) / float(self.fps)
+            except Exception:  # pragma: no cover - defensive conversion
+                fps_minimum = 0.0
+        if self.last_pts >= 0:
+            try:
+                pts_duration = float(self.last_pts + 1) * float(self.time_base)
+            except Exception:  # pragma: no cover - defensive conversion
+                pts_duration = 0.0
+            duration = max(duration, pts_duration)
+        if fps_minimum > 0:
+            duration = max(duration, fps_minimum)
+        entry: dict[str, object] = {
+            "file": self.relative_file,
+            "frame_count": int(self.frame_count),
+            "size_bytes": int(self.bytes_written),
+            "duration_seconds": round(duration, 3),
+            "media_type": self.media_type,
+            "codec": self.codec,
+        }
+        if self.first_timestamp is not None:
+            entry["start_offset_seconds"] = round(float(self.first_timestamp), 3)
+        return entry
+
+    def abort(self) -> None:
+        """Abort the writer and clean up the partially written file."""
+
+        try:
+            self.stream.encode()  # flush buffered packets to avoid PyAV warnings
+        except Exception:  # pragma: no cover - best-effort cleanup
+            pass
+        try:
+            self.container.close()
+        except Exception:  # pragma: no cover - best-effort cleanup
+            pass
+        try:
+            if self.path.exists():
+                self.path.unlink()
+        except OSError:  # pragma: no cover - best-effort cleanup
+            pass
+        self.bytes_written = 0
+        self.frame_count = 0
+
+
+def _remux_mjpeg_video_chunk(
+    source_path: Path,
+    *,
+    target_path: Path,
+    name: str,
+    index: int,
+    fps: float,
+    jpeg_quality: int,
+    boundary: str,
+    start_offset: float | None = None,
+) -> dict[str, object]:
+    """Convert an MJPEG container file into a multipart MJPEG stream."""
+
+    effective_fps = float(fps) if fps and fps > 0 else 10.0
+    frame_base = float(start_offset) if isinstance(start_offset, (int, float)) else 0.0
+    boundary_bytes = boundary.encode("ascii")
+    first_timestamp: float | None = None
+    last_timestamp: float | None = None
+    frame_count = 0
+    with target_path.open("wb") as handle:
+        def _write_part(payload: bytes) -> None:
+            handle.write(b"--" + boundary_bytes + b"\r\n")
+            handle.write(b"Content-Type: image/jpeg\r\n")
+            handle.write(f"Content-Length: {len(payload)}\r\n\r\n".encode("ascii"))
+            handle.write(payload)
+            handle.write(b"\r\n")
+
+        with av.open(str(source_path), mode="r") as container:
+            video_stream = None
+            for stream in container.streams:
+                if getattr(stream, "type", "") == "video":
+                    video_stream = stream
+                    break
+            if video_stream is None:
+                raise RuntimeError("MJPEG chunk does not contain a video stream")
+            time_base = getattr(video_stream, "time_base", None)
+            for frame_index, frame in enumerate(container.decode(video_stream)):
+                try:
+                    array = frame.to_ndarray(format="rgb24")
+                except Exception as exc:
+                    raise RuntimeError("Unable to decode MJPEG frame") from exc
+                timestamp = None
+                pts = getattr(frame, "pts", None)
+                if pts is not None and time_base:
+                    try:
+                        timestamp = float(pts * time_base)
+                    except Exception:
+                        timestamp = None
+                if timestamp is None:
+                    frame_time = getattr(frame, "time", None)
+                    if frame_time is not None:
+                        try:
+                            timestamp = float(frame_time)
+                        except Exception:
+                            timestamp = None
+                if timestamp is None:
+                    timestamp = frame_index / effective_fps
+                absolute_time = frame_base + float(timestamp)
+                if first_timestamp is None:
+                    first_timestamp = float(absolute_time)
+                last_timestamp = float(absolute_time)
+                jpeg = simplejpeg.encode_jpeg(
+                    array,
+                    quality=max(1, min(100, int(jpeg_quality))),
+                    colorspace="RGB",
+                )
+                _write_part(jpeg)
+                frame_count += 1
+        handle.write(b"--" + boundary_bytes + b"--\r\n")
+
+    if frame_count <= 0:
+        try:
+            target_path.unlink()
+        except OSError:
+            pass
+        raise RuntimeError("MJPEG chunk did not contain any frames")
+
+    duration = 0.0
+    if first_timestamp is not None and last_timestamp is not None:
+        duration = max(0.0, float(last_timestamp - first_timestamp))
+    if frame_count and effective_fps > 0:
+        duration = max(duration, frame_count / effective_fps)
+
+    return {
+        "file": target_path.name,
+        "frame_count": frame_count,
+        "size_bytes": target_path.stat().st_size,
+        "duration_seconds": round(duration, 3),
+        "media_type": f"multipart/x-mixed-replace; boundary={boundary}",
+        "codec": "jpeg-fallback",
+        "start_offset_seconds": (
+            round(float(first_timestamp), 3)
+            if isinstance(first_timestamp, (int, float))
+            else None
+        ),
+    }
 
 
 @dataclass
@@ -798,13 +1357,14 @@ class RecordingManager:
     camera: BaseCamera
     pipeline: FramePipeline
     directory: Path
+    media_directory: Path = field(init=False)
+    preview_directory: Path = field(init=False)
     fps: int = 10
     jpeg_quality: int = 80
     boundary: str = "recording"
     max_frames: int | None = None
     chunk_duration_seconds: int | None = None
-    chunk_data_limit_bytes: int | None = 32 * 1024 * 1024
-    chunk_mp4_enabled: bool = False
+    chunk_data_limit_bytes: int | None = None
     storage_threshold_percent: float = 10.0
     motion_detection_enabled: bool = False
     motion_sensitivity: int = 50
@@ -818,17 +1378,8 @@ class RecordingManager:
     _state_lock: asyncio.Lock = field(init=False, default_factory=asyncio.Lock)
     _frame_interval: float = field(init=False)
     _recording_active: bool = field(init=False, default=False)
-    _active_chunk_frames: list[dict[str, object]] = field(init=False, default_factory=list)
-    _chunk_write_tasks: list["_ChunkTaskState"] = field(
-        init=False, default_factory=list
-    )
-    _completed_chunk_tasks: list[
-        tuple[dict[str, object], asyncio.Task[int], asyncio.Task[int] | None]
-    ] = field(init=False, default_factory=list)
-    _chunk_task_monitors: set[asyncio.Task[None]] = field(
-        init=False, default_factory=set
-    )
-    _chunk_backlog_limit: int = field(init=False, default=2)
+    _active_chunk: _ChunkWriter | None = field(init=False, default=None)
+    _chunk_entries: list[dict[str, object]] = field(init=False, default_factory=list)
     _chunk_index: int = field(init=False, default=0)
     _chunk_frame_limit: int = field(init=False, default=0)
     _chunk_byte_limit: int = field(init=False, default=0)
@@ -864,6 +1415,10 @@ class RecordingManager:
     _motion_event_pending_stop: float | None = field(init=False, default=None)
     _motion_state_hold_until: float | None = field(init=False, default=None)
     _active_chunk_bytes: int = field(init=False, default=0)
+    _preferred_video_codec: str | None = field(init=False, default=None)
+    _codec_failures: set[str] = field(init=False, default_factory=set)
+    _video_encoding_disabled: bool = field(init=False, default=False)
+    _codec_state_path: Path | None = field(init=False, default=None)
 
     def __post_init__(self) -> None:
         if self.fps <= 0:
@@ -871,6 +1426,10 @@ class RecordingManager:
         if not (1 <= self.jpeg_quality <= 100):
             raise ValueError("jpeg_quality must be between 1 and 100")
         self.directory.mkdir(parents=True, exist_ok=True)
+        self.media_directory = self.directory / "media"
+        self.preview_directory = self.directory / "previews"
+        self.media_directory.mkdir(parents=True, exist_ok=True)
+        self.preview_directory.mkdir(parents=True, exist_ok=True)
         self._frame_interval = 1.0 / float(self.fps)
         self.chunk_duration_seconds = self._normalise_chunk_duration(self.chunk_duration_seconds)
         self.storage_threshold_percent = self._normalise_storage_threshold(self.storage_threshold_percent)
@@ -891,14 +1450,12 @@ class RecordingManager:
             inactivity_timeout=self.motion_inactivity_timeout_seconds,
             frame_decimation=self.motion_frame_decimation,
         )
-        self.chunk_data_limit_bytes = self._normalise_chunk_byte_limit(
-            self.chunk_data_limit_bytes
-        )
-        self._chunk_byte_limit = (
-            0 if self.chunk_data_limit_bytes is None else int(self.chunk_data_limit_bytes)
-        )
-        self._chunk_frame_limit = self._calculate_chunk_frame_limit()
-        self.chunk_mp4_enabled = bool(self.chunk_mp4_enabled)
+        # Single-file recordings do not rotate, so disable chunk byte/frame limits
+        self.chunk_data_limit_bytes = None
+        self._chunk_byte_limit = 0
+        self._chunk_frame_limit = 0
+        self._codec_state_path = self.directory / ".codec_state.json"
+        self._load_codec_state()
 
     @property
     def media_type(self) -> str:
@@ -963,13 +1520,12 @@ class RecordingManager:
             self._motion_detector.reset()
             self._motion_state = "monitoring" if motion_enabled else None
             self._recording_active = True
-            self._active_chunk_frames = []
+            self._active_chunk = None
             self._active_chunk_bytes = 0
-            self._chunk_write_tasks.clear()
-            self._completed_chunk_tasks.clear()
-            self._chunk_task_monitors.clear()
+            self._chunk_entries.clear()
             self._chunk_index = 0
             self._total_frame_count = 0
+            self._video_encoding_disabled = False
             if motion_enabled and self._session_motion_override:
                 self._motion_event_base = name
                 self._motion_event_index = 0
@@ -1067,11 +1623,6 @@ class RecordingManager:
             load_recording_payload, self.directory, name, include_frames=include_frames
         )
 
-    async def get_recording_chunk(self, name: str, chunk_index: int) -> dict[str, object]:
-        return await asyncio.to_thread(
-            load_recording_chunk, self.directory, name, chunk_index
-        )
-
     async def remove_recording(self, name: str) -> None:
         await asyncio.to_thread(remove_recording_files, self.directory, name)
 
@@ -1080,80 +1631,68 @@ class RecordingManager:
         *,
         name: str,
         base_metadata: dict[str, object],
-        chunk_tasks: list[
-            tuple[dict[str, object], asyncio.Task[int], asyncio.Task[int] | None]
-        ],
+        chunk_entries: list[dict[str, object]],
         invoke_callback: bool = True,
     ) -> dict[str, object]:
         metadata = dict(base_metadata)
-        chunk_entries: list[dict[str, object]] = []
-        total_size = 0
         processing_error: str | None = None
+        entries: list[dict[str, object]] = []
+        for entry in chunk_entries:
+            if isinstance(entry, Mapping):
+                entries.append(dict(entry))
 
-        for entry, task, video_task in chunk_tasks:
-            size = 0
-            video_size: int | None = None
-            try:
-                size = await task
-            except asyncio.CancelledError:  # pragma: no cover - propagate cancellation
-                raise
-            except Exception as exc:  # pragma: no cover - defensive logging
-                logger.exception(
-                    "Failed to flush surveillance chunk %s for %s", entry.get("file"), name
+        primary_entry: dict[str, object] | None = entries[0] if entries else None
+        size_bytes = 0
+        if primary_entry is not None:
+            file_name = primary_entry.get("file")
+            if isinstance(file_name, str):
+                normalised_file, _, _ = _ensure_centralised_asset(
+                    self.directory, file_name, subdir="media"
                 )
-                processing_error = str(exc)
-            if video_task is not None:
+                if normalised_file != file_name:
+                    primary_entry["file"] = normalised_file
+                    entries[0] = dict(primary_entry)
+                metadata["file"] = normalised_file
+            media_type = primary_entry.get("media_type")
+            if isinstance(media_type, str):
+                metadata["media_type"] = media_type
+            codec_name = primary_entry.get("codec")
+            if isinstance(codec_name, str):
+                metadata["video_codec"] = codec_name
+            frame_total = primary_entry.get("frame_count")
+            if isinstance(frame_total, (int, float)):
+                metadata["frame_count"] = int(frame_total)
+            duration_value = primary_entry.get("duration_seconds")
+            if isinstance(duration_value, (int, float)):
+                metadata["duration_seconds"] = max(
+                    float(metadata.get("duration_seconds", 0.0)),
+                    float(duration_value),
+                )
+            size_value = primary_entry.get("size_bytes")
+            if isinstance(size_value, (int, float)):
+                size_bytes = int(size_value)
+        if size_bytes:
+            metadata["size_bytes"] = size_bytes
+        thumbnail_data = metadata.get("thumbnail")
+        if isinstance(thumbnail_data, str) and thumbnail_data:
+            try:
+                preview_bytes = base64.b64decode(thumbnail_data, validate=False)
+            except Exception:
+                preview_bytes = b""
+            if preview_bytes:
+                preview_name = f"{name}.jpg"
+                preview_path = self.preview_directory / preview_name
                 try:
-                    video_size = await video_task
-                except asyncio.CancelledError:  # pragma: no cover - propagate cancellation
-                    raise
-                except Exception as exc:  # pragma: no cover - defensive logging
-                    logger.exception(
-                        "Failed to render surveillance chunk video %s for %s",
-                        entry.get("video_file"),
-                        name,
-                    )
-                    processing_error = str(exc)
-            frame_entry = dict(entry)
-            frame_entry["size_bytes"] = int(size)
-            if video_size is not None:
-                frame_entry["video_size_bytes"] = int(video_size)
-            chunk_entries.append(frame_entry)
-            total_size += int(size)
-            if video_size is not None:
-                total_size += int(video_size)
-
-        if not chunk_entries:
-            filename = f"{name}.chunk001.json.gz"
-            try:
-                size = await self._write_chunk_payload(filename, [])
-            except asyncio.CancelledError:  # pragma: no cover - propagate cancellation
-                raise
-            except Exception as exc:  # pragma: no cover - defensive logging
-                logger.exception(
-                    "Failed to create placeholder surveillance chunk for %s", name
-                )
-                processing_error = str(exc)
-                size = 0
-            chunk_entries.append(
-                {
-                    "file": filename,
-                    "frame_count": 0,
-                    "size_bytes": int(size),
-                    "compression": "gzip",
-                }
-            )
-            total_size += int(size)
-
-        metadata["chunk_count"] = len(chunk_entries)
-        metadata["chunks"] = chunk_entries
-        metadata["size_bytes"] = total_size
-        metadata["chunk_compression"] = "gzip"
+                    preview_path.write_bytes(preview_bytes)
+                except OSError:  # pragma: no cover - best-effort write
+                    pass
+                else:
+                    metadata["preview_file"] = (Path("previews") / preview_name).as_posix()
         if processing_error:
             metadata["processing_error"] = processing_error
         meta_path = self.directory / f"{name}.meta.json"
         try:
-            await asyncio.to_thread(_dump_json_to_path, meta_path, metadata)
+            await asyncio.to_thread(_write_metadata, meta_path, metadata)
         except asyncio.CancelledError:  # pragma: no cover - propagate cancellation
             raise
         except Exception as exc:  # pragma: no cover - defensive logging
@@ -1197,14 +1736,13 @@ class RecordingManager:
         fps: int | None = None,
         jpeg_quality: int | None = None,
         chunk_duration_seconds: int | None = None,
-        chunk_mp4_enabled: bool | None = None,
         storage_threshold_percent: float | int | None = None,
         motion_detection_enabled: bool | None = None,
         motion_sensitivity: int | float | None = None,
         motion_frame_decimation: int | float | None = None,
         motion_post_event_seconds: float | int | None = None,
     ) -> None:
-        flush_request: tuple[str, int, list[dict[str, object]]] | None = None
+        flush_request: _ChunkWriter | None = None
         finalise_context: _FinaliseContext | None = None
         async with self._state_lock:
             chunk_limit_needs_update = False
@@ -1224,8 +1762,6 @@ class RecordingManager:
                 if new_duration != self.chunk_duration_seconds:
                     self.chunk_duration_seconds = new_duration
                     chunk_limit_needs_update = True
-            if chunk_mp4_enabled is not None:
-                self.chunk_mp4_enabled = bool(chunk_mp4_enabled)
             if storage_threshold_percent is not None:
                 self.storage_threshold_percent = self._normalise_storage_threshold(storage_threshold_percent)
             detector_updates: dict[str, object] = {}
@@ -1281,25 +1817,26 @@ class RecordingManager:
                 self._chunk_frame_limit = self._calculate_chunk_frame_limit()
                 if (
                     self._recording_active
-                    and self._active_chunk_frames
+                    and self._active_chunk is not None
                     and (
                         (
                             self._chunk_byte_limit
                             and self._active_chunk_bytes >= self._chunk_byte_limit
                         )
-                        or len(self._active_chunk_frames) >= self._chunk_frame_limit
+                        or (
+                            self._chunk_frame_limit
+                            and self._active_chunk.frame_count >= self._chunk_frame_limit
+                        )
                     )
                 ):
                     flush_request = self._pop_active_chunk_locked()
 
-        persisted_chunk: tuple[
-            dict[str, object], asyncio.Task[int], asyncio.Task[int] | None
-        ] | None = None
+        persisted_chunk: dict[str, object] | None = None
         if flush_request is not None:
-            persisted_chunk = await self._persist_chunk(*flush_request)
+            persisted_chunk = await self._persist_chunk(flush_request)
         if finalise_context is not None:
             if persisted_chunk is not None:
-                finalise_context.chunk_tasks.append(persisted_chunk)
+                finalise_context.chunk_entries.append(persisted_chunk)
             await self._process_finalise_context(finalise_context, track=False)
 
     async def aclose(self) -> None:
@@ -1409,7 +1946,7 @@ class RecordingManager:
         storage_limit_reached = False
         storage_status: dict[str, float | int] | None = None
         should_record = False
-        flush_request: tuple[str, int, list[dict[str, object]]] | None = None
+        flush_request: _ChunkWriter | None = None
         finalise_context: _FinaliseContext | None = None
         async with self._state_lock:
             if not self._recording_active:
@@ -1505,18 +2042,25 @@ class RecordingManager:
                 if start is None:
                     timestamp = 0.0
                 else:
-                    timestamp = max(0.0, frame_time - start)
-                encoded = base64.b64encode(payload).decode("ascii")
+                    delta = frame_time - start
+                    if delta < 0 and frame_time >= 0:
+                        timestamp = float(frame_time)
+                    else:
+                        timestamp = max(0.0, delta)
                 if self._thumbnail is None:
-                    self._thumbnail = encoded
-                frame_entry: dict[str, object] = {
-                    "timestamp": round(timestamp, 4),
-                    "jpeg": encoded,
-                }
-                self._active_chunk_frames.append(frame_entry)
-                self._active_chunk_bytes += len(encoded)
+                    self._thumbnail = base64.b64encode(payload).decode("ascii")
                 self._total_frame_count += 1
                 self._motion_detector.notify_recorded()
+                chunk_frame_count = 0
+                chunk_writer: _ChunkWriter | None = None
+                if _np is not None:
+                    chunk_writer = self._append_frame_to_chunk_locked(frame, timestamp)
+                if chunk_writer is not None:
+                    self._active_chunk_bytes = chunk_writer.bytes_written
+                    chunk_frame_count = chunk_writer.frame_count
+                elif self._active_chunk is not None:
+                    self._active_chunk_bytes = self._active_chunk.bytes_written
+                    chunk_frame_count = self._active_chunk.frame_count
                 if (
                     self._chunk_byte_limit
                     and self._active_chunk_bytes >= self._chunk_byte_limit
@@ -1524,7 +2068,7 @@ class RecordingManager:
                     flush_request = self._pop_active_chunk_locked()
                 elif (
                     self._chunk_frame_limit
-                    and len(self._active_chunk_frames) >= self._chunk_frame_limit
+                    and chunk_frame_count >= self._chunk_frame_limit
                 ):
                     flush_request = self._pop_active_chunk_locked()
                 if (
@@ -1538,14 +2082,12 @@ class RecordingManager:
             storage_status = self._compute_storage_status()
         if storage_limit_reached:
             self._schedule_auto_stop("storage_low")
-        persisted_chunk: tuple[
-            dict[str, object], asyncio.Task[int], asyncio.Task[int] | None
-        ] | None = None
+        persisted_chunk: dict[str, object] | None = None
         if flush_request is not None:
-            persisted_chunk = await self._persist_chunk(*flush_request)
+            persisted_chunk = await self._persist_chunk(flush_request)
         if finalise_context is not None:
             if persisted_chunk is not None:
-                finalise_context.chunk_tasks.append(persisted_chunk)
+                finalise_context.chunk_entries.append(persisted_chunk)
             await self._process_finalise_context(finalise_context, track=False)
         if not should_record:
             return
@@ -1569,11 +2111,9 @@ class RecordingManager:
         self._recording_name = event_name
         self._recording_started_at = started_at
         self._recording_started_monotonic = frame_time
-        self._active_chunk_frames = []
+        self._active_chunk = None
         self._active_chunk_bytes = 0
-        self._chunk_write_tasks.clear()
-        self._completed_chunk_tasks.clear()
-        self._chunk_task_monitors.clear()
+        self._chunk_entries.clear()
         self._chunk_index = 0
         self._total_frame_count = 0
         self._thumbnail = None
@@ -1633,10 +2173,8 @@ class RecordingManager:
                 return None
 
         pending_flush = self._pop_active_chunk_locked()
-        chunk_tasks = list(self._completed_chunk_tasks)
-        chunk_tasks.extend(state.as_tuple() for state in self._chunk_write_tasks)
-        self._chunk_write_tasks.clear()
-        self._completed_chunk_tasks.clear()
+        chunk_entries = list(self._chunk_entries)
+        self._chunk_entries.clear()
         storage_status = (
             dict(self._last_storage_status)
             if isinstance(self._last_storage_status, Mapping)
@@ -1648,13 +2186,12 @@ class RecordingManager:
             total_frames=self._total_frame_count,
             thumbnail=self._thumbnail,
             stop_reason=stop_reason,
-            chunk_tasks=chunk_tasks,
-            chunk_duration_seconds=self.chunk_duration_seconds,
             storage_status=storage_status,
             motion_snapshot=self._motion_detector.snapshot(),
             motion_event_index=self._current_motion_event_index or None,
             notify_stop_callback=notify_stop,
             pending_flush=pending_flush,
+            chunk_entries=chunk_entries,
         )
         self._total_frame_count = 0
         self._chunk_index = 0
@@ -1685,9 +2222,7 @@ class RecordingManager:
     ) -> dict[str, object]:
         pending_flush = context.pending_flush
         if pending_flush is not None:
-            await self._persist_chunk(
-                *pending_flush, task_list=context.chunk_tasks
-            )
+            await self._persist_chunk(pending_flush, task_list=context.chunk_entries)
         finished_at = _utcnow()
         duration = max(0.0, (finished_at - context.started_at).total_seconds())
         base_metadata: dict[str, object] = {
@@ -1701,8 +2236,6 @@ class RecordingManager:
         }
         if context.stop_reason:
             base_metadata["stop_reason"] = context.stop_reason
-        if context.chunk_duration_seconds:
-            base_metadata["chunk_duration_seconds"] = context.chunk_duration_seconds
         if context.storage_status:
             base_metadata["storage_status"] = context.storage_status
         motion_snapshot = dict(context.motion_snapshot)
@@ -1720,7 +2253,7 @@ class RecordingManager:
             self._run_recording_finalise(
                 name=context.name,
                 base_metadata=base_metadata,
-                chunk_tasks=context.chunk_tasks,
+                chunk_entries=context.chunk_entries,
                 invoke_callback=context.notify_stop_callback,
             )
         )
@@ -1823,152 +2356,328 @@ class RecordingManager:
         return header + payload + b"\r\n"
 
     def _calculate_chunk_frame_limit(self) -> int:
-        duration = self.chunk_duration_seconds
-        if duration is None or duration <= 0:
-            duration = 60
-        frame_limit = max(1, int(round(self.fps * duration)))
-        if self.max_frames is not None:
-            frame_limit = max(1, min(frame_limit, int(self.max_frames)))
-        return frame_limit
+        # Recording now uses a single MP4 container, so chunk rotation is disabled.
+        return 0
 
-    def _chunk_filename(self, name: str, index: int) -> str:
-        return f"{name}.chunk{index:03d}.json.gz"
+    def _chunk_filename(self, name: str, index: int, extension: str) -> str:
+        if not extension.startswith("."):
+            extension = f".{extension}"
+        if index <= 1:
+            return f"{name}{extension}"
+        return f"{name}.chunk{index:03d}{extension}"
 
-    def _chunk_video_filename(self, name: str, index: int) -> str:
-        return f"{name}.chunk{index:03d}.mp4"
-
-    def _pop_active_chunk_locked(
-        self,
-    ) -> tuple[str, int, list[dict[str, object]]] | None:
-        name = self._recording_name
-        frames = self._active_chunk_frames
-        if not name or not frames:
+    def _select_video_codec(self) -> str | None:
+        if self._video_encoding_disabled:
             return None
-        self._chunk_index += 1
-        self._active_chunk_frames = []
-        self._active_chunk_bytes = 0
-        return (name, self._chunk_index, frames)
+        codec = self._preferred_video_codec
+        if codec and codec not in self._codec_failures:
+            return codec
+        last_error: Exception | None = None
+        for candidate in _VIDEO_CODEC_CANDIDATES:
+            if candidate in self._codec_failures:
+                continue
+            try:
+                context = av.CodecContext.create(candidate, "w")
+            except av.FFmpegError as exc:  # pragma: no cover - codec probing failure
+                last_error = exc
+                self._mark_codec_failed(candidate)
+                continue
+            except Exception as exc:  # pragma: no cover - defensive guard
+                last_error = exc
+                self._mark_codec_failed(candidate)
+                continue
+            if not getattr(context, "is_encoder", True):
+                self._mark_codec_failed(candidate)
+                continue
+            self._preferred_video_codec = candidate
+            return candidate
+        if last_error is not None:
+            logger.warning("No usable surveillance video codec available: %s", last_error)
+        return None
 
-    async def _enforce_chunk_backlog_limit(self) -> None:
-        limit = int(self._chunk_backlog_limit)
-        if limit <= 0:
+    def _mark_codec_failed(self, codec: str) -> None:
+        if not codec:
             return
-        while len(self._chunk_write_tasks) >= limit:
-            state = self._chunk_write_tasks[0]
-            try:
-                await asyncio.shield(state.completion)
-            except asyncio.CancelledError:  # pragma: no cover - propagate cancellation
-                raise
+        if codec in self._codec_failures:
+            if self._preferred_video_codec == codec:
+                self._preferred_video_codec = None
+            return
+        self._codec_failures.add(codec)
+        if self._preferred_video_codec == codec:
+            self._preferred_video_codec = None
+        self._persist_codec_state()
 
-    def _track_chunk_task_state(self, state: _ChunkTaskState) -> None:
-        async def _monitor() -> None:
+    def _handle_chunk_failure(self, chunk: _ChunkWriter) -> None:
+        try:
+            chunk.abort()
+        finally:
+            self._active_chunk = None
+            self._active_chunk_bytes = 0
+            self._chunk_index = max(0, int(chunk.index) - 1)
+
+    def _get_or_create_chunk(
+        self, array: "_np.ndarray"
+    ) -> _ChunkWriter | None:
+        chunk = self._active_chunk
+        if chunk is not None:
+            return chunk
+        name = self._recording_name
+        if not name:
+            return None
+        next_index = self._chunk_index + 1
+        chunk = self._create_chunk_writer(name, next_index, array)
+        if chunk is None:
+            return None
+        self._chunk_index = next_index
+        self._active_chunk = chunk
+        return chunk
+
+    def _create_chunk_writer(
+        self, name: str, index: int, array: "_np.ndarray"
+    ) -> _ChunkWriter | None:
+        if self._video_encoding_disabled:
+            return None
+        frame_rate = 1.0 if self.fps <= 0 else float(self.fps)
+        frame_rate_fraction = Fraction(str(frame_rate)).limit_denominator(1000)
+        time_base = _select_time_base(frame_rate_fraction)
+        height, width = array.shape[:2]
+        filename = self._chunk_filename(name, index, "mp4")
+        relative_file = Path("media") / filename
+        path = self.media_directory / filename
+        last_error: Exception | None = None
+        if path.exists():
             try:
-                await self._finalise_chunk_task_state(state)
-            except asyncio.CancelledError:  # pragma: no cover - propagate cancellation
-                raise
+                path.unlink()
+            except OSError:  # pragma: no cover - defensive cleanup
+                pass
+        while True:
+            codec_name = self._select_video_codec()
+            if codec_name is None:
+                if last_error is not None:
+                    logger.error(
+                        "Disabling surveillance recording for %s: %s", name, last_error
+                    )
+                self._video_encoding_disabled = True
+                self._persist_codec_state()
+                return None
+            try:
+                codec_profile = _codec_profile(codec_name)
+                filename = self._chunk_filename(name, index, codec_profile["extension"])
+                relative_file = Path("media") / filename
+                path = self.media_directory / filename
+                if path.exists():
+                    try:
+                        path.unlink()
+                    except OSError:  # pragma: no cover - defensive cleanup
+                        pass
+                options = codec_profile.get("container_options")
+                if not isinstance(options, Mapping):
+                    options = None
+                container = av.open(
+                    str(path),
+                    mode="w",
+                    format=codec_profile["format"],
+                    options=options,
+                )
+            except Exception as exc:  # pragma: no cover - filesystem failure
+                last_error = exc
+                logger.error("Failed to open chunk container %s: %s", path, exc)
+                self._video_encoding_disabled = True
+                self._persist_codec_state()
+                return None
+            try:
+                stream = container.add_stream(codec_name, rate=frame_rate_fraction)
+            except Exception as exc:  # pragma: no cover - codec failure
+                last_error = exc
+                self._mark_codec_failed(codec_name)
+                try:
+                    container.close()
+                except Exception:  # pragma: no cover - defensive close
+                    pass
+                try:
+                    if path.exists():
+                        path.unlink()
+                except OSError:  # pragma: no cover - defensive cleanup
+                    pass
+                continue
+            target_width = int(width)
+            target_height = int(height)
+            if codec_name in _CODECS_REQUIRE_EVEN_DIMENSIONS:
+                if target_width % 2:
+                    target_width -= 1
+                if target_height % 2:
+                    target_height -= 1
+            if target_width <= 0 or target_height <= 0:
+                last_error = ValueError("invalid frame dimensions for video encoder")
+                self._mark_codec_failed(codec_name)
+                try:
+                    container.close()
+                except Exception:  # pragma: no cover - defensive close
+                    pass
+                try:
+                    if path.exists():
+                        path.unlink()
+                except OSError:  # pragma: no cover - defensive cleanup
+                    pass
+                continue
+            stream.width = target_width
+            stream.height = target_height
+            pixel_format = str(codec_profile.get("pixel_format", "yuv420p"))
+            stream.pix_fmt = pixel_format
+            stream.time_base = time_base
+            try:
+                # Some encoders (e.g. hardware H.264) require the codec context
+                # time base to match the stream for avcodec_send_frame().
+                stream.codec_context.time_base = time_base
+            except AttributeError:  # pragma: no cover - codec context optional
+                pass
+            try:
+                stream.average_rate = frame_rate_fraction
+            except Exception:  # pragma: no cover - best effort rate hint
+                pass
+            return _ActiveChunkWriter(
+                name=name,
+                index=index,
+                path=path,
+                container=container,
+                stream=stream,
+                time_base=time_base,
+                fps=frame_rate,
+                codec=codec_name,
+                media_type=codec_profile.get("media_type", "video/mp4"),
+                target_width=target_width,
+                target_height=target_height,
+                relative_file=relative_file.as_posix(),
+                pixel_format=pixel_format,
+            )
+
+    def _append_frame_to_chunk_locked(
+        self, frame_array: "_np.ndarray", timestamp: float
+    ) -> _ChunkWriter | None:
+        if _np is None:
+            return None
+        array = _np.asarray(frame_array)
+        if array.ndim != 3 or array.shape[2] != 3:
+            return None
+        array = _np.ascontiguousarray(array)
+        attempts = 0
+        max_attempts = max(1, len(_VIDEO_CODEC_CANDIDATES))
+        while attempts < max_attempts:
+            chunk = self._get_or_create_chunk(array)
+            if chunk is None:
+                return None
+            stream = getattr(chunk, "stream", None)
+            try:
+                chunk.add_frame(array, timestamp)
+            except av.FFmpegError as exc:  # pragma: no cover - codec failure path
+                logger.warning(
+                    "Video codec %s failed while encoding chunk %s for %s: %s",
+                    chunk.codec,
+                    chunk.index,
+                    chunk.name,
+                    exc,
+                )
+                if isinstance(chunk, _ActiveChunkWriter):
+                    self._mark_codec_failed(chunk.codec)
+                self._handle_chunk_failure(chunk)
+                attempts += 1
+                continue
             except Exception:  # pragma: no cover - defensive logging
                 logger.exception(
-                    "Failed to finalise surveillance chunk %s", state.entry.get("file")
+                    "Failed to encode surveillance frame for %s chunk %s",
+                    chunk.name,
+                    chunk.index,
                 )
-
-        task = asyncio.create_task(_monitor())
-        self._chunk_task_monitors.add(task)
-        task.add_done_callback(lambda fut, task=task: self._chunk_task_monitors.discard(task))
-
-    async def _finalise_chunk_task_state(self, state: _ChunkTaskState) -> None:
-        entry = state.entry
-        try:
-            size = await state.payload_task
-        except asyncio.CancelledError as exc:  # pragma: no cover - propagate cancellation
-            if not state.completion.done():
-                state.completion.set_exception(exc)
-            raise
-        except Exception as exc:  # pragma: no cover - defensive guard
-            entry.setdefault("size_error", str(exc))
-        else:
-            entry["size_bytes"] = int(size)
-
-        video_task = state.video_task
-        if video_task is not None:
-            try:
-                video_size = await video_task
-            except asyncio.CancelledError as exc:  # pragma: no cover - propagate cancellation
-                if not state.completion.done():
-                    state.completion.set_exception(exc)
-                raise
-            except Exception as exc:  # pragma: no cover - defensive guard
-                entry.setdefault("video_error", str(exc))
-            else:
-                entry["video_size_bytes"] = int(video_size)
-
-        try:
-            self._chunk_write_tasks.remove(state)
-        except ValueError:
-            pass
-        self._completed_chunk_tasks.append(state.as_tuple())
-        if not state.completion.done():
-            state.completion.set_result(None)
+                if isinstance(chunk, _ActiveChunkWriter):
+                    self._mark_codec_failed(chunk.codec)
+                self._handle_chunk_failure(chunk)
+                return None
+            return chunk
+        return None
+    def _pop_active_chunk_locked(self) -> _ChunkWriter | None:
+        chunk = self._active_chunk
+        if chunk is None or chunk.frame_count <= 0:
+            return None
+        self._active_chunk = None
+        self._active_chunk_bytes = 0
+        return chunk
 
     async def _persist_chunk(
         self,
-        name: str,
-        index: int,
-        frames: list[dict[str, object]],
+        chunk: _ChunkWriter,
         *,
-        task_list: list[
-            tuple[dict[str, object], asyncio.Task[int], asyncio.Task[int] | None]
-        ]
-        | None = None,
-    ) -> tuple[dict[str, object], asyncio.Task[int], asyncio.Task[int] | None] | None:
-        if not frames:
+        task_list: list[dict[str, object]] | None = None,
+    ) -> dict[str, object] | None:
+        try:
+            entry = await asyncio.to_thread(chunk.finalise)
+        except Exception:  # pragma: no cover - defensive logging
+            logger.exception(
+                "Failed to finalise surveillance chunk %s for %s",
+                chunk.index,
+                chunk.name,
+            )
             return None
-        using_manager_queue = task_list is None
-        if using_manager_queue:
-            await self._enforce_chunk_backlog_limit()
-        filename = self._chunk_filename(name, index)
-        entry = {
-            "file": filename,
-            "frame_count": len(frames),
-            "compression": "gzip",
+        entry = await self._prepare_chunk_entry(chunk, entry)
+        if task_list is not None:
+            task_list.append(entry)
+            note_entry = entry
+        else:
+            async with self._state_lock:
+                self._chunk_entries.append(entry)
+            note_entry = entry
+        if isinstance(chunk, _ActiveChunkWriter) and chunk.codec:
+            if chunk.codec not in self._codec_failures:
+                if self._preferred_video_codec != chunk.codec:
+                    self._preferred_video_codec = chunk.codec
+                    self._persist_codec_state()
+        return note_entry
+
+    async def _prepare_chunk_entry(
+        self, chunk: _ChunkWriter, entry: dict[str, object]
+    ) -> dict[str, object]:
+        return entry
+
+    def _codec_state_file(self) -> Path | None:
+        return self._codec_state_path
+
+    def _load_codec_state(self) -> None:
+        path = self._codec_state_file()
+        if path is None:
+            return
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return
+        except Exception:  # pragma: no cover - best-effort parsing
+            return
+        failed = payload.get("failed_codecs")
+        if isinstance(failed, list):
+            for item in failed:
+                if isinstance(item, str):
+                    self._codec_failures.add(item)
+        preferred = payload.get("preferred_codec")
+        if (
+            isinstance(preferred, str)
+            and preferred
+            and preferred not in self._codec_failures
+        ):
+            self._preferred_video_codec = preferred
+
+    def _persist_codec_state(self) -> None:
+        path = self._codec_state_file()
+        if path is None:
+            return
+        payload: dict[str, object] = {
+            "failed_codecs": sorted(self._codec_failures),
         }
-        task = asyncio.create_task(self._write_chunk_payload(filename, frames))
-        video_task: asyncio.Task[int] | None = None
-        if self.chunk_mp4_enabled:
-            video_filename = self._chunk_video_filename(name, index)
-            entry["video_file"] = video_filename
-            video_task = asyncio.create_task(
-                self._write_chunk_video(video_filename, frames)
-            )
-        result = (entry, task, video_task)
-        if using_manager_queue:
-            loop = asyncio.get_running_loop()
-            completion: asyncio.Future[None] = loop.create_future()
-            state = _ChunkTaskState(
-                entry=entry,
-                payload_task=task,
-                video_task=video_task,
-                completion=completion,
-            )
-            self._chunk_write_tasks.append(state)
-            self._track_chunk_task_state(state)
-            return state.as_tuple()
-        assert task_list is not None
-        task_list.append(result)
-        return result
-
-    async def _write_chunk_payload(
-        self, filename: str, frames: list[dict[str, object]]
-    ) -> int:
-        path = self.directory / filename
-        return await asyncio.to_thread(_dump_chunk_frames_to_path, path, frames)
-
-    async def _write_chunk_video(
-        self, filename: str, frames: list[dict[str, object]]
-    ) -> int:
-        path = self.directory / filename
-        return await asyncio.to_thread(
-            _dump_chunk_video_to_path, path, frames, float(self.fps)
-        )
+        codec = self._preferred_video_codec
+        if codec and codec not in self._codec_failures:
+            payload["preferred_codec"] = codec
+        try:
+            data = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
+            path.write_text(data, encoding="utf-8")
+        except OSError:  # pragma: no cover - best-effort persistence
+            pass
 
     def _normalise_chunk_duration(self, value: int | float | None) -> int | None:
         if value in (None, "", 0):
@@ -2067,8 +2776,9 @@ __all__ = [
     "MotionDetector",
     "RecordingManager",
     "build_recording_video",
+    "export_recording_media",
+    "resolve_recording_media_path",
     "iter_recording_frames",
-    "load_recording_chunk",
     "load_recording_metadata",
     "load_recording_payload",
     "remove_recording_files",
@@ -2084,13 +2794,10 @@ class _FinaliseContext:
     total_frames: int
     thumbnail: str | None
     stop_reason: str | None
-    chunk_tasks: list[
-        tuple[dict[str, object], asyncio.Task[int], asyncio.Task[int] | None]
-    ]
-    chunk_duration_seconds: int | None
+    chunk_entries: list[dict[str, object]]
     storage_status: dict[str, float | int] | None
     motion_snapshot: dict[str, object]
     motion_event_index: int | None
     notify_stop_callback: bool
-    pending_flush: tuple[str, int, list[dict[str, object]]] | None = None
+    pending_flush: _ChunkWriter | None = None
 

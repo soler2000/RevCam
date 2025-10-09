@@ -244,11 +244,20 @@
         box-shadow: 0 0 0 1px rgba(255, 214, 10, 0.35) inset, 0 10px 26px rgba(255, 214, 10, 0.25);
       }
       button.action.motion-alert,
-      button.action.recording-active {
+      button.action.recording-active,
+      #record-button[aria-pressed="true"] {
         background: linear-gradient(135deg, rgba(255, 69, 58, 0.9), rgba(255, 105, 97, 0.95));
         color: #fff;
         box-shadow: 0 0 0 1px rgba(255, 69, 58, 0.45) inset, 0 12px 28px rgba(255, 69, 58, 0.45);
         animation: motionAlertPulse 1.4s ease-in-out infinite;
+      }
+      button.action.recording-active:hover,
+      button.action.recording-active:focus-visible,
+      #record-button[aria-pressed="true"]:hover,
+      #record-button[aria-pressed="true"]:focus-visible {
+        background: linear-gradient(135deg, rgba(255, 69, 58, 0.9), rgba(255, 105, 97, 0.95));
+        color: #fff;
+        box-shadow: 0 0 0 1px rgba(255, 69, 58, 0.45) inset, 0 12px 28px rgba(255, 69, 58, 0.45);
       }
       button.action:disabled {
         opacity: 0.6;
@@ -490,7 +499,7 @@
       let lastStatusSnapshot = null;
       const STATUS_REFRESH_ACTIVE_MS = 2000;
       const STATUS_REFRESH_IDLE_MS = 5000;
-      const MANUAL_CONFIRMATION_GRACE_MS = 5000;
+      const MANUAL_CONFIRMATION_GRACE_MS = 20000;
       let statusRefreshHandle = null;
       let statusRequestSequence = 0;
       let latestRequestedStatusSequence = 0;
@@ -755,12 +764,13 @@
         const { processingActive = false, processingRecord = null } = options;
         sessionState = currentSession;
         if (recordButton) {
-          const manualActive = currentSession === "manual";
+          const manualActive = currentSession === "manual" || manualSessionPending;
           recordButton.textContent = manualActive ? "Stop recording" : "Start manual recording";
           recordButton.setAttribute("aria-pressed", String(manualActive));
           recordButton.disabled =
             currentSession === "motion-monitoring" || currentSession === "motion-recording";
           recordButton.classList.toggle("recording-active", manualActive);
+          recordButton.dataset.state = manualActive ? "stop" : "start";
         }
         if (motionRecordButton) {
           const motionSession =
@@ -1273,7 +1283,7 @@
           buttons.forEach((button) => {
             button.disabled = false;
           });
-          const expectedSession = stoppingManual ? "idle" : sessionState;
+          const expectedSession = stoppingManual ? "idle" : "manual";
           applySessionVisuals(expectedSession);
           const statusPromise = loadStatus({ showLoading: true });
           statusPromise.catch((error) => {

@@ -9,7 +9,7 @@ import shutil
 import string
 from enum import Enum
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Mapping
 from urllib.parse import quote as urlquote
 
 from datetime import datetime, timedelta, timezone
@@ -43,11 +43,12 @@ from .pipeline import FramePipeline
 from .recording import (
     RecordingManager,
     build_recording_video,
-    load_recording_chunk,
+    export_recording_media,
     load_recording_metadata,
     load_recording_payload,
     purge_recordings,
     remove_recording_files,
+    resolve_recording_media_path,
 )
 from .streaming import MJPEGStreamer, WebRTCManager, encode_frame_to_jpeg
 from .system_log import SystemLog
@@ -64,6 +65,16 @@ def _load_static(name: str) -> str:
     if not path.exists():  # pragma: no cover - sanity check
         raise FileNotFoundError(f"Static asset {name!r} missing")
     return path.read_text(encoding="utf-8")
+
+
+def _resolve_desktop_directory() -> Path:
+    env_value = os.environ.get("XDG_DESKTOP_DIR")
+    if env_value:
+        candidate = Path(env_value).expanduser()
+        if candidate.is_absolute():
+            return candidate
+    desktop = Path.home() / "Desktop"
+    return desktop
 
 
 def _project_ground_distance(
@@ -176,7 +187,6 @@ class SurveillanceSettingsPayload(BaseModel):
     expert_fps: int | None = None
     expert_jpeg_quality: int | None = None
     chunk_duration_seconds: int | None = None
-    chunk_mp4_enabled: bool | None = None
     overlays_enabled: bool | None = None
     remember_recording_state: bool | None = None
     motion_detection_enabled: bool | None = None
@@ -394,6 +404,8 @@ def create_app(
         )
     )
     RECORDINGS_DIR.mkdir(parents=True, exist_ok=True)
+    (RECORDINGS_DIR / "media").mkdir(parents=True, exist_ok=True)
+    (RECORDINGS_DIR / "previews").mkdir(parents=True, exist_ok=True)
     camera: BaseCamera | None = None
     streamer: MJPEGStreamer | None = None
     webrtc_manager: WebRTCManager | None = None
@@ -621,7 +633,6 @@ def create_app(
                 jpeg_quality=jpeg_quality,
                 directory=RECORDINGS_DIR,
                 chunk_duration_seconds=surveillance_settings.chunk_duration_seconds,
-                chunk_mp4_enabled=surveillance_settings.chunk_mp4_enabled,
                 storage_threshold_percent=surveillance_settings.storage_threshold_percent,
                 motion_detection_enabled=surveillance_settings.motion_detection_enabled,
                 motion_sensitivity=surveillance_settings.motion_sensitivity,
@@ -635,7 +646,6 @@ def create_app(
                 fps=fps,
                 jpeg_quality=jpeg_quality,
                 chunk_duration_seconds=surveillance_settings.chunk_duration_seconds,
-                chunk_mp4_enabled=surveillance_settings.chunk_mp4_enabled,
                 storage_threshold_percent=surveillance_settings.storage_threshold_percent,
                 motion_detection_enabled=surveillance_settings.motion_detection_enabled,
                 motion_sensitivity=surveillance_settings.motion_sensitivity,
@@ -1827,7 +1837,6 @@ def create_app(
                     fps=settings.resolved_fps,
                     jpeg_quality=settings.resolved_jpeg_quality,
                     chunk_duration_seconds=settings.chunk_duration_seconds,
-                    chunk_mp4_enabled=settings.chunk_mp4_enabled,
                     storage_threshold_percent=settings.storage_threshold_percent,
                     motion_detection_enabled=settings.motion_detection_enabled,
                     motion_sensitivity=settings.motion_sensitivity,
@@ -1961,25 +1970,42 @@ def create_app(
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Recording not found") from exc
 
-    @app.get("/api/surveillance/recordings/{name}/chunks/{chunk_index}")
-    async def fetch_surveillance_recording_chunk(name: str, chunk_index: int) -> dict[str, object]:
-        if chunk_index < 1:
-            raise HTTPException(status_code=404, detail="Recording chunk not found")
+    @app.get("/api/surveillance/recordings/{name}/media")
+    async def fetch_surveillance_recording_media(name: str) -> FileResponse:
         try:
             if recording_manager is None:
-                return await asyncio.to_thread(
-                    load_recording_chunk, RECORDINGS_DIR, name, chunk_index
+                payload = await asyncio.to_thread(
+                    load_recording_payload, RECORDINGS_DIR, name, include_frames=False
                 )
-            return await recording_manager.get_recording_chunk(name, chunk_index)
+            else:
+                payload = await recording_manager.get_recording(
+                    name, include_frames=False
+                )
         except FileNotFoundError as exc:
-            raise HTTPException(status_code=404, detail="Recording chunk not found") from exc
-        except Exception as exc:  # pragma: no cover - defensive logging
-            logger.exception(
-                "Failed to load surveillance chunk %s for %s", chunk_index, name
+            raise HTTPException(status_code=404, detail="Recording not found") from exc
+        if not isinstance(payload, Mapping):
+            raise HTTPException(status_code=500, detail="Invalid recording metadata")
+        try:
+            file_path = await asyncio.to_thread(
+                resolve_recording_media_path, RECORDINGS_DIR, payload
             )
-            raise HTTPException(
-                status_code=500, detail="Unable to load recording chunk"
-            ) from exc
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Recording not found") from exc
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.exception("Failed to resolve recording media for %s", name)
+            raise HTTPException(status_code=500, detail="Unable to load recording") from exc
+        media_type = payload.get("media_type")
+        if not isinstance(media_type, str):
+            media_type = "video/mp4"
+        response = FileResponse(file_path, media_type=media_type, filename=file_path.name)
+        try:
+            size = file_path.stat().st_size
+        except OSError:
+            size = None
+        if isinstance(size, int) and size > 0:
+            response.headers["Content-Length"] = str(size)
+        response.headers["Content-Disposition"] = f"inline; filename=\"{file_path.name}\""
+        return response
 
     @app.get("/api/surveillance/recordings/{name}/download")
     async def download_surveillance_recording(name: str) -> StreamingResponse:
@@ -2023,6 +2049,25 @@ def create_app(
         return StreamingResponse(
             _iterator(), media_type="video/mp4", headers={"Content-Disposition": disposition}
         )
+
+    @app.post("/api/surveillance/recordings/{name}/export")
+    async def export_surveillance_recording(name: str) -> dict[str, object]:
+        destination_root = _resolve_desktop_directory()
+        try:
+            destination = await asyncio.to_thread(
+                export_recording_media, RECORDINGS_DIR, name, destination_root
+            )
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Recording not found") from exc
+        except PermissionError as exc:
+            logger.warning("Permission denied while exporting %s: %s", name, exc)
+            raise HTTPException(
+                status_code=403, detail="Unable to write to desktop"
+            ) from exc
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.exception("Failed to export surveillance recording %s", name)
+            raise HTTPException(status_code=500, detail="Unable to export recording") from exc
+        return {"path": str(destination)}
 
     @app.delete("/api/surveillance/recordings/{name}")
     async def delete_surveillance_recording(name: str) -> dict[str, object]:
