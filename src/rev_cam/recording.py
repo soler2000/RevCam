@@ -1556,7 +1556,8 @@ class RecordingManager:
         if previous_error:
             if self._codec_failures:
                 self._codec_failures.clear()
-                self._preferred_video_codec = None
+            # Persist so the state file drops the stored error message while
+            # keeping any preferred codec that previously worked.
             self._persist_codec_state()
 
     @property

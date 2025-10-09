@@ -538,7 +538,7 @@ def test_finalise_marks_processing_error_when_media_missing(tmp_path: Path) -> N
     assert "file" not in metadata
 
 
-def test_reset_video_encoding_state_clears_persistent_failures(tmp_path: Path) -> None:
+def test_reset_video_encoding_state_clears_failures_but_preserves_preferred(tmp_path: Path) -> None:
     class _StubCamera:
         async def get_frame(self):  # pragma: no cover - not exercised
             return None
@@ -553,23 +553,28 @@ def test_reset_video_encoding_state_clears_persistent_failures(tmp_path: Path) -
         directory=tmp_path,
     )
     state_path = tmp_path / ".codec_state.json"
-    manager._codec_failures.update(recording._VIDEO_CODEC_CANDIDATES)
-    manager._preferred_video_codec = "h264"
+    manager._codec_failures.update(recording._VIDEO_CODEC_CANDIDATES[:-1])
+    manager._preferred_video_codec = recording._VIDEO_CODEC_CANDIDATES[-1]
     manager._last_video_initialisation_error = "Processing failed previously"
     manager._persist_codec_state()
 
     stored_state = json.loads(state_path.read_text(encoding="utf-8"))
     assert stored_state.get("failed_codecs")
+    assert stored_state.get("preferred_codec") == recording._VIDEO_CODEC_CANDIDATES[-1]
     assert stored_state.get("last_error")
 
     manager._reset_video_encoding_state()
 
     assert manager._codec_failures == set()
-    assert manager._preferred_video_codec is None
+    assert manager._preferred_video_codec == recording._VIDEO_CODEC_CANDIDATES[-1]
     assert manager._last_video_initialisation_error is None
 
     refreshed_state = json.loads(state_path.read_text(encoding="utf-8"))
     assert refreshed_state.get("failed_codecs") == []
+    assert (
+        refreshed_state.get("preferred_codec")
+        == recording._VIDEO_CODEC_CANDIDATES[-1]
+    )
     assert "last_error" not in refreshed_state
 
 
