@@ -48,6 +48,7 @@ def test_chunk_writer_pts_are_relative(tmp_path):
         media_type="video/mp4",
         codec="mpeg4",
         relative_file="media/chunk.mp4",
+        pixel_format="yuv420p",
     )
 
     frame = np.zeros((4, 4, 3), dtype=np.uint8)

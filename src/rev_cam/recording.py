@@ -59,13 +59,16 @@ _CODECS_REQUIRE_EVEN_DIMENSIONS: frozenset[str] = frozenset(
 )
 
 
-def _codec_profile(codec: str) -> Mapping[str, str]:
-    return {
+def _codec_profile(codec: str) -> Mapping[str, object]:
+    base: dict[str, object] = {
         "format": "mp4",
         "extension": ".mp4",
         "pixel_format": "yuv420p",
         "media_type": "video/mp4",
     }
+    if codec.startswith("h264") or codec == "libx264":
+        base["container_options"] = {"movflags": "+faststart"}
+    return base
 
 
 def _select_time_base(frame_rate: Fraction) -> Fraction:
@@ -1132,6 +1135,7 @@ class _ActiveChunkWriter:
     relative_file: str
     target_width: int
     target_height: int
+    pixel_format: str
     frame_count: int = 0
     first_timestamp: float | None = None
     last_timestamp: float | None = None
@@ -1169,7 +1173,10 @@ class _ActiveChunkWriter:
         frame = av.VideoFrame.from_ndarray(array, format="rgb24")
         target_width = self.target_width or frame.width
         target_height = self.target_height or frame.height
-        frame = frame.reformat(width=target_width, height=target_height, format="yuv420p")
+        pixel_format = self.pixel_format or "yuv420p"
+        frame = frame.reformat(
+            width=target_width, height=target_height, format=pixel_format
+        )
         frame.pts = self._compute_pts(timestamp)
         frame.time_base = self.time_base
         for packet in self.stream.encode(frame):
@@ -2463,7 +2470,15 @@ class RecordingManager:
                         path.unlink()
                     except OSError:  # pragma: no cover - defensive cleanup
                         pass
-                container = av.open(str(path), mode="w", format=codec_profile["format"])
+                options = codec_profile.get("container_options")
+                if not isinstance(options, Mapping):
+                    options = None
+                container = av.open(
+                    str(path),
+                    mode="w",
+                    format=codec_profile["format"],
+                    options=options,
+                )
             except Exception as exc:  # pragma: no cover - filesystem failure
                 last_error = exc
                 logger.error("Failed to open chunk container %s: %s", path, exc)
@@ -2507,8 +2522,8 @@ class RecordingManager:
                 continue
             stream.width = target_width
             stream.height = target_height
-            pixel_format = codec_profile.get("pixel_format")
-            stream.pix_fmt = pixel_format if pixel_format else "yuv420p"
+            pixel_format = str(codec_profile.get("pixel_format", "yuv420p"))
+            stream.pix_fmt = pixel_format
             stream.time_base = time_base
             try:
                 # Some encoders (e.g. hardware H.264) require the codec context
@@ -2520,8 +2535,6 @@ class RecordingManager:
                 stream.average_rate = frame_rate_fraction
             except Exception:  # pragma: no cover - best effort rate hint
                 pass
-            if codec_name.startswith("h264") or codec_name == "libx264":
-                stream.options = {"movflags": "+faststart"}
             return _ActiveChunkWriter(
                 name=name,
                 index=index,
@@ -2535,6 +2548,7 @@ class RecordingManager:
                 target_width=target_width,
                 target_height=target_height,
                 relative_file=relative_file.as_posix(),
+                pixel_format=pixel_format,
             )
 
     def _append_frame_to_chunk_locked(

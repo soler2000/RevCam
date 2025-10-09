@@ -324,7 +324,9 @@ async def test_even_dimension_frame_encoding(
         recording.RecordingManager, "_select_video_codec", lambda self: "h264"
     )
     monkeypatch.setattr(
-        av, "open", lambda path, mode="w", format=None: _DummyContainer(path, mode, format)
+        av,
+        "open",
+        lambda path, mode="w", format=None, **kwargs: _DummyContainer(path, mode, format),
     )
 
     await manager.start_recording()
