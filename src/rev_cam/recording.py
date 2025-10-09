@@ -1713,6 +1713,12 @@ class RecordingManager:
                     pass
                 else:
                     metadata["preview_file"] = (Path("previews") / preview_name).as_posix()
+        if not processing_error and not entries:
+            fallback = self._last_video_initialisation_error
+            if isinstance(fallback, str) and fallback.strip():
+                processing_error = fallback.strip()
+            elif self._video_encoding_disabled:
+                processing_error = "Video encoder initialisation failed"
         if processing_error:
             metadata["processing_error"] = processing_error
         meta_path = self.directory / f"{name}.meta.json"
@@ -2275,20 +2281,20 @@ class RecordingManager:
             motion_snapshot.setdefault("event_index", context.motion_event_index)
         base_metadata["motion_detection"] = motion_snapshot
         processing_error: str | None = None
-        if not context.chunk_entries:
-            candidate = context.processing_error
-            if isinstance(candidate, str):
-                candidate = candidate.strip()
+        candidate = context.processing_error
+        if isinstance(candidate, str):
+            candidate = candidate.strip()
             if candidate:
                 processing_error = candidate
-            elif context.total_frames > 0:
-                fallback = self._last_video_initialisation_error
-                if isinstance(fallback, str) and fallback.strip():
-                    processing_error = fallback.strip()
-                elif self._video_encoding_disabled:
+        if processing_error is None and not context.chunk_entries:
+            fallback = self._last_video_initialisation_error
+            if isinstance(fallback, str) and fallback.strip():
+                processing_error = fallback.strip()
+            elif context.total_frames > 0 or self._video_encoding_disabled:
+                if self._video_encoding_disabled:
                     processing_error = "Video encoder initialisation failed"
-            if processing_error:
-                base_metadata["processing_error"] = processing_error
+        if processing_error:
+            base_metadata["processing_error"] = processing_error
         processing_stub = dict(base_metadata)
         processing_stub["processing"] = True
 
