@@ -538,6 +538,41 @@ def test_finalise_marks_processing_error_when_media_missing(tmp_path: Path) -> N
     assert "file" not in metadata
 
 
+def test_reset_video_encoding_state_clears_persistent_failures(tmp_path: Path) -> None:
+    class _StubCamera:
+        async def get_frame(self):  # pragma: no cover - not exercised
+            return None
+
+    class _StubPipeline:
+        def process(self, frame):  # pragma: no cover - not exercised
+            return frame
+
+    manager = recording.RecordingManager(
+        camera=_StubCamera(),
+        pipeline=_StubPipeline(),
+        directory=tmp_path,
+    )
+    state_path = tmp_path / ".codec_state.json"
+    manager._codec_failures.update(recording._VIDEO_CODEC_CANDIDATES)
+    manager._preferred_video_codec = "h264"
+    manager._last_video_initialisation_error = "Processing failed previously"
+    manager._persist_codec_state()
+
+    stored_state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert stored_state.get("failed_codecs")
+    assert stored_state.get("last_error")
+
+    manager._reset_video_encoding_state()
+
+    assert manager._codec_failures == set()
+    assert manager._preferred_video_codec is None
+    assert manager._last_video_initialisation_error is None
+
+    refreshed_state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert refreshed_state.get("failed_codecs") == []
+    assert "last_error" not in refreshed_state
+
+
 def test_export_surveillance_recording_to_desktop(
     client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

@@ -1542,6 +1542,23 @@ class RecordingManager:
         self._codec_state_path = self.directory / ".codec_state.json"
         self._load_codec_state()
 
+    def _reset_video_encoding_state(self) -> None:
+        """Reset codec failure tracking when a new session begins."""
+
+        previous_error = (
+            str(self._last_video_initialisation_error).strip()
+            if isinstance(self._last_video_initialisation_error, str)
+            else None
+        )
+        self._video_encoding_disabled = False
+        self._last_failed_codecs = ()
+        self._last_video_initialisation_error = None
+        if previous_error:
+            if self._codec_failures:
+                self._codec_failures.clear()
+                self._preferred_video_codec = None
+            self._persist_codec_state()
+
     @property
     def media_type(self) -> str:
         return f"multipart/x-mixed-replace; boundary={self.boundary}"
@@ -1610,13 +1627,7 @@ class RecordingManager:
             self._chunk_entries.clear()
             self._chunk_index = 0
             self._total_frame_count = 0
-            self._video_encoding_disabled = False
-            self._last_failed_codecs = ()
-            if self._last_video_initialisation_error is not None:
-                self._last_video_initialisation_error = None
-                self._persist_codec_state()
-            else:
-                self._last_video_initialisation_error = None
+            self._reset_video_encoding_state()
             if motion_enabled and self._session_motion_override:
                 self._motion_event_base = name
                 self._motion_event_index = 0
