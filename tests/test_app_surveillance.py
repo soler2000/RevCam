@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 
 from rev_cam import app as app_module
 from rev_cam.config import ConfigManager, SURVEILLANCE_STANDARD_PRESETS
+from rev_cam.recording import load_recording_payload
 
 
 @pytest.fixture
@@ -213,6 +214,54 @@ def test_fetch_surveillance_recording_metadata_and_media(client: TestClient) -> 
     assert media_response.headers["content-type"].startswith("video/mp4")
     assert "inline" in media_response.headers["content-disposition"].lower()
     assert media_response.content == video_payload
+
+
+def test_load_recording_payload_migrates_legacy_assets(client: TestClient) -> None:
+    recordings_dir: Path = client.recordings_dir
+    name = "20251009-legacy"
+    legacy_video = recordings_dir / f"{name}.mp4"
+    legacy_preview = recordings_dir / f"{name}.jpg"
+    video_payload = b"legacy-video"
+    preview_payload = b"legacy-preview"
+    legacy_video.write_bytes(video_payload)
+    legacy_preview.write_bytes(preview_payload)
+
+    metadata = {
+        "name": name,
+        "file": legacy_video.name,
+        "media_type": "video/mp4",
+        "duration_seconds": 1.23,
+        "frame_count": 12,
+        "chunks": [
+            {
+                "file": legacy_video.name,
+                "media_type": "video/mp4",
+                "codec": "h264",
+                "duration_seconds": 1.23,
+                "frame_count": 12,
+                "size_bytes": len(video_payload),
+            }
+        ],
+        "preview_file": legacy_preview.name,
+    }
+    meta_path = recordings_dir / f"{name}.meta.json"
+    meta_path.write_text(json.dumps(metadata), encoding="utf-8")
+
+    payload = load_recording_payload(recordings_dir, name, include_frames=False)
+
+    assert payload["file"] == f"media/{legacy_video.name}"
+    media_path = recordings_dir / payload["file"]
+    assert media_path.exists()
+    assert media_path.read_bytes() == video_payload
+    assert not legacy_video.exists()
+    assert payload.get("preview_file") == f"previews/{legacy_preview.name}"
+    preview_path = recordings_dir / payload["preview_file"]
+    assert preview_path.exists()
+    assert preview_path.read_bytes() == preview_payload
+
+    stored_metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+    assert stored_metadata["file"] == payload["file"]
+    assert stored_metadata.get("preview_file") == payload["preview_file"]
 
 
 def test_fetch_surveillance_recording_media_for_legacy_mjpeg(

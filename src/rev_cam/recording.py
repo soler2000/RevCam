@@ -142,6 +142,87 @@ def _write_metadata(path: Path, payload: Mapping[str, object]) -> None:
     path.write_text(data, encoding="utf-8")
 
 
+def _ensure_centralised_asset(
+    directory: Path, value: str, *, subdir: str
+) -> tuple[str, Path, bool]:
+    """Ensure ``value`` points at ``directory/subdir`` and return its relative path.
+
+    If the referenced file exists outside of the target directory, it is moved into
+    ``directory/subdir``. When the file cannot be located the function still returns
+    the normalised relative path so metadata can be updated consistently.
+    """
+
+    if not isinstance(value, str) or not value:
+        target_dir = directory / subdir
+        target_dir.mkdir(parents=True, exist_ok=True)
+        return value, target_dir, False
+
+    raw_path = Path(value)
+    name = raw_path.name
+    target_dir = directory / subdir
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target_path = target_dir / name if name else target_dir
+
+    candidates: list[Path] = []
+    if raw_path.is_absolute():
+        candidates.append(raw_path)
+    else:
+        candidates.append(directory / raw_path)
+        if raw_path.parent != Path(subdir):
+            candidates.append(directory / raw_path.name)
+    candidates.append(target_path)
+
+    seen: set[Path] = set()
+    resolved_path = target_path
+    found = False
+
+    for candidate in candidates:
+        if not isinstance(candidate, Path):
+            continue
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        if not candidate.exists() or candidate.is_dir():
+            continue
+        found = True
+        if candidate.parent == target_dir:
+            resolved_path = candidate
+            break
+        target_candidate = target_dir / candidate.name
+        if target_candidate == candidate:
+            resolved_path = candidate
+            break
+        try:
+            if target_candidate.exists() and target_candidate != candidate:
+                target_candidate.unlink()
+        except OSError:
+            pass
+        try:
+            candidate.replace(target_candidate)
+            resolved_path = target_candidate
+            break
+        except OSError:
+            try:
+                shutil.copy2(candidate, target_candidate)
+                candidate.unlink()
+            except Exception:
+                resolved_path = candidate
+                break
+            else:
+                resolved_path = target_candidate
+                break
+
+    if not found and name:
+        resolved_path = target_dir / name
+
+    try:
+        relative = resolved_path.relative_to(directory).as_posix()
+    except ValueError:
+        relative = (Path(subdir) / name).as_posix() if name else str(value)
+
+    return relative, resolved_path, found
+
+
 def load_recording_metadata(directory: Path) -> list[dict[str, object]]:
     """Load recording metadata files from ``directory`` synchronously."""
 
@@ -234,6 +315,16 @@ def load_recording_payload(
         )
         for index, (entry, chunk_path) in enumerate(chunk_sources, start=1):
             chunk_entry = dict(entry)
+            file_name_value = chunk_entry.get("file")
+            if isinstance(file_name_value, str) and file_name_value:
+                normalised_file, resolved_path, _ = _ensure_centralised_asset(
+                    directory, file_name_value, subdir="media"
+                )
+                if normalised_file != file_name_value:
+                    chunk_entry["file"] = normalised_file
+                    updated_metadata_entries[index - 1] = dict(chunk_entry)
+                    metadata_dirty = True
+                chunk_path = resolved_path
             media_type_value = chunk_entry.get("media_type")
             if (
                 isinstance(media_type_value, str)
@@ -310,11 +401,26 @@ def load_recording_payload(
         if primary_chunk := (normalised_chunks[0] if normalised_chunks else None):
             file_name = primary_chunk.get("file")
             if isinstance(file_name, str):
-                if payload.get("file") != file_name:
-                    payload["file"] = file_name
+                normalised_file, resolved_path, _ = _ensure_centralised_asset(
+                    directory, file_name, subdir="media"
+                )
+                if normalised_file != file_name:
+                    primary_chunk["file"] = normalised_file
+                    normalised_chunks[0] = dict(primary_chunk)
                     if isinstance(metadata, dict):
-                        metadata["file"] = file_name
+                        raw_chunks = metadata.get("chunks")
+                        if isinstance(raw_chunks, list) and raw_chunks:
+                            first = raw_chunks[0]
+                            if isinstance(first, dict):
+                                first["file"] = normalised_file
                         metadata_dirty = True
+                if payload.get("file") != normalised_file:
+                    payload["file"] = normalised_file
+                    if isinstance(metadata, dict):
+                        metadata["file"] = normalised_file
+                        metadata_dirty = True
+                if resolved_path.exists() and resolved_path.is_file():
+                    payload["file_path"] = str(resolved_path)
             media_type = primary_chunk.get("media_type")
             if isinstance(media_type, str) and payload.get("media_type") != media_type:
                 payload["media_type"] = media_type
@@ -348,13 +454,21 @@ def load_recording_payload(
         return payload
     file_value = payload.get("file")
     if isinstance(file_value, str):
-        file_path = directory / file_value
+        normalised_file, resolved_path, found_asset = _ensure_centralised_asset(
+            directory, file_value, subdir="media"
+        )
+        if normalised_file != file_value:
+            payload["file"] = normalised_file
+            if isinstance(metadata, dict):
+                metadata["file"] = normalised_file
+                metadata_dirty = True
+        file_path = resolved_path
         if not file_path.exists() or not file_path.is_file():
-            if ".chunk001" in file_value:
-                base_name = file_value.replace(".chunk001", "", 1)
+            if ".chunk001" in normalised_file:
+                base_name = normalised_file.replace(".chunk001", "", 1)
                 candidate = directory / base_name
                 if candidate.exists() and candidate.is_file():
-                    file_value = base_name
+                    normalised_file = base_name
                     payload["file"] = base_name
                     file_path = candidate
                     if isinstance(metadata, dict):
@@ -366,33 +480,37 @@ def load_recording_payload(
                                 first["file"] = base_name
                         metadata_dirty = True
             if not file_path.exists() or not file_path.is_file():
-                media_candidate = directory / "media" / Path(file_value).name
+                media_candidate = directory / "media" / Path(normalised_file).name
                 if media_candidate.exists() and media_candidate.is_file():
-                    new_value = (Path("media") / media_candidate.name).as_posix()
-                    payload["file"] = new_value
-                    file_value = new_value
+                    normalised_file = (Path("media") / media_candidate.name).as_posix()
+                    payload["file"] = normalised_file
                     file_path = media_candidate
                     if isinstance(metadata, dict):
-                        metadata["file"] = new_value
+                        metadata["file"] = normalised_file
                         raw_chunks = metadata.get("chunks")
                         if isinstance(raw_chunks, list) and raw_chunks:
                             first = raw_chunks[0]
                             if isinstance(first, dict):
-                                first["file"] = new_value
+                                first["file"] = normalised_file
                         metadata_dirty = True
         if file_path.exists() and file_path.is_file():
             payload["file_path"] = str(file_path)
-            try:
-                size = file_path.stat().st_size
-            except OSError:
-                size = payload.get("size_bytes")
-            else:
-                payload["size_bytes"] = int(size)
+        try:
+            size = file_path.stat().st_size
+        except OSError:
+            size = payload.get("size_bytes")
+        else:
+            payload["size_bytes"] = int(size)
         preview_file = metadata.get("preview_file") if isinstance(metadata, Mapping) else None
         if isinstance(preview_file, str):
-            preview_path = directory / preview_file
+            normalised_preview, preview_path, _ = _ensure_centralised_asset(
+                directory, preview_file, subdir="previews"
+            )
+            if normalised_preview != preview_file and isinstance(metadata, dict):
+                metadata["preview_file"] = normalised_preview
+                metadata_dirty = True
             if preview_path.exists() and preview_path.is_file():
-                payload["preview_file"] = preview_file
+                payload["preview_file"] = normalised_preview
         media_type = payload.get("media_type")
         if not isinstance(media_type, str):
             payload["media_type"] = "video/mp4"
@@ -1359,7 +1477,13 @@ class RecordingManager:
         if primary_entry is not None:
             file_name = primary_entry.get("file")
             if isinstance(file_name, str):
-                metadata["file"] = file_name
+                normalised_file, _, _ = _ensure_centralised_asset(
+                    self.directory, file_name, subdir="media"
+                )
+                if normalised_file != file_name:
+                    primary_entry["file"] = normalised_file
+                    entries[0] = dict(primary_entry)
+                metadata["file"] = normalised_file
             media_type = primary_entry.get("media_type")
             if isinstance(media_type, str):
                 metadata["media_type"] = media_type
