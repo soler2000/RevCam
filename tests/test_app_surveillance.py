@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 
 from rev_cam import app as app_module
 from rev_cam.config import ConfigManager, SURVEILLANCE_STANDARD_PRESETS
+import rev_cam.recording as recording
 from rev_cam.recording import load_recording_payload
 
 
@@ -338,6 +339,64 @@ def test_fetch_surveillance_recording_media_not_found(client: TestClient) -> Non
 
     response = client.get(f"/api/surveillance/recordings/{name}/media")
     assert response.status_code == 404
+
+
+def test_fetch_surveillance_recording_media_uses_file_path(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recordings_dir: Path = client.recordings_dir
+    name = "20240101-010101"
+    video_file = recordings_dir / "media" / f"{name}.mp4"
+    payload = b"video-data"
+    video_file.write_bytes(payload)
+
+    def _fake_load(
+        directory: Path, requested_name: str, *, include_frames: bool = False
+    ) -> dict[str, object]:
+        assert directory == recordings_dir
+        assert requested_name == name
+        return {
+            "name": name,
+            "file": "media/missing.mp4",
+            "file_path": str(video_file),
+            "media_type": "video/mp4",
+        }
+
+    monkeypatch.setattr(app_module, "load_recording_payload", _fake_load)
+
+    response = client.get(f"/api/surveillance/recordings/{name}/media")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("video/mp4")
+    assert response.content == payload
+
+
+def test_download_surveillance_recording_streams_file_path(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recordings_dir: Path = client.recordings_dir
+    name = "20240102-020202"
+    video_file = recordings_dir / "media" / f"{name}.mp4"
+    payload = b"download-video"
+    video_file.write_bytes(payload)
+
+    def _fake_load(
+        directory: Path, requested_name: str, *, include_frames: bool = False
+    ) -> dict[str, object]:
+        assert directory == recordings_dir
+        assert requested_name == name
+        return {
+            "name": name,
+            "file": "",
+            "file_path": str(video_file),
+            "media_type": "video/mp4",
+        }
+
+    monkeypatch.setattr(recording, "load_recording_payload", _fake_load)
+
+    response = client.get(f"/api/surveillance/recordings/{name}/download")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("video/mp4")
+    assert response.content == payload
 
 
 def test_surveillance_status_storage(client: TestClient) -> None:

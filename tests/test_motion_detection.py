@@ -896,3 +896,33 @@ async def test_build_recording_video_exports_mp4(tmp_path: Path, anyio_backend) 
         assert decoded_frames >= finalised["frame_count"]
 
     handle.close()
+
+
+def test_build_recording_video_uses_file_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    name = "20240103-030303"
+    media_dir = tmp_path / "media"
+    media_dir.mkdir(parents=True, exist_ok=True)
+    video_file = media_dir / f"{name}.mp4"
+    payload = b"file-path-video"
+    video_file.write_bytes(payload)
+
+    def _fake_load(
+        directory: Path, requested_name: str, *, include_frames: bool = False
+    ) -> dict[str, object]:
+        assert directory == tmp_path
+        assert requested_name == name
+        return {
+            "name": name,
+            "file": "",
+            "file_path": str(video_file),
+            "media_type": "video/mp4",
+        }
+
+    monkeypatch.setattr(recording, "load_recording_payload", _fake_load)
+
+    safe_name, handle = build_recording_video(tmp_path, name)
+    assert safe_name == name
+    try:
+        assert handle.read() == payload
+    finally:
+        handle.close()

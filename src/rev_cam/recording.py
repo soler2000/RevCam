@@ -21,7 +21,9 @@ from typing import (
     Callable,
     Iterable,
     Mapping,
+    MutableMapping,
     Protocol,
+    Sequence,
 )
 
 import av
@@ -221,6 +223,93 @@ def _ensure_centralised_asset(
         relative = (Path(subdir) / name).as_posix() if name else str(value)
 
     return relative, resolved_path, found
+
+
+def resolve_recording_media_path(
+    directory: Path, payload: Mapping[str, object]
+) -> Path:
+    """Return the on-disk media path for ``payload`` within ``directory``.
+
+    The helper inspects the ``file_path`` and ``file`` metadata entries, falling
+    back to any chunk references and known centralised media locations. When a
+    file is located the payload is updated in-place (if mutable) so downstream
+    callers observe the normalised relative path.
+    """
+
+    if not isinstance(directory, Path):
+        raise TypeError("directory must be a pathlib.Path instance")
+
+    candidate_paths: list[Path] = []
+    seen: set[Path] = set()
+    target: MutableMapping[str, object] | None = (
+        payload if isinstance(payload, MutableMapping) else None
+    )
+
+    def _register(path: Path) -> None:
+        if path in seen:
+            return
+        seen.add(path)
+        candidate_paths.append(path)
+
+    def _coerce(path_value: str) -> Path:
+        path = Path(path_value)
+        return path if path.is_absolute() else directory / path
+
+    def _add_media_candidates(value: str) -> None:
+        if not value:
+            return
+        base_path = _coerce(value)
+        _register(base_path)
+        path_obj = Path(value)
+        if not path_obj.is_absolute():
+            _register(directory / "media" / path_obj.name)
+
+    file_path_value = payload.get("file_path") if isinstance(payload, Mapping) else None
+    if isinstance(file_path_value, str) and file_path_value:
+        _register(_coerce(file_path_value))
+
+    file_value = payload.get("file") if isinstance(payload, Mapping) else None
+    if isinstance(file_value, str) and file_value:
+        _add_media_candidates(file_value)
+
+    chunks = payload.get("chunks") if isinstance(payload, Mapping) else None
+    if isinstance(chunks, Sequence):
+        for entry in chunks:
+            if not isinstance(entry, Mapping):
+                continue
+            chunk_file = entry.get("file")
+            if isinstance(chunk_file, str) and chunk_file:
+                _add_media_candidates(chunk_file)
+
+    for candidate in candidate_paths:
+        if candidate.exists() and candidate.is_file():
+            _update_payload_media_fields(target, candidate, directory)
+            return candidate
+        if ".chunk001" in candidate.name:
+            base_name = candidate.name.replace(".chunk001", "", 1)
+            alternate = candidate.with_name(base_name)
+            if alternate.exists() and alternate.is_file():
+                _update_payload_media_fields(target, alternate, directory)
+                return alternate
+            alt_media = directory / "media" / base_name
+            if alt_media.exists() and alt_media.is_file():
+                _update_payload_media_fields(target, alt_media, directory)
+                return alt_media
+
+    raise FileNotFoundError("Recording media file not found")
+
+
+def _update_payload_media_fields(
+    payload: MutableMapping[str, object] | None, path: Path, directory: Path
+) -> None:
+    if payload is None:
+        return
+    payload["file_path"] = str(path)
+    try:
+        relative = path.relative_to(directory).as_posix()
+    except ValueError:
+        relative = path.name
+    payload["file"] = relative
 
 
 def load_recording_metadata(directory: Path) -> list[dict[str, object]]:
@@ -612,12 +701,12 @@ def build_recording_video(
 
     safe_name = _safe_recording_name(name)
     payload = load_recording_payload(directory, safe_name, include_frames=False)
-    file_name = payload.get("file")
-    if not isinstance(file_name, str) or not file_name:
-        raise ValueError("Recording is missing video output")
-    file_path = directory / file_name
-    if not file_path.exists() or not file_path.is_file():
-        raise FileNotFoundError(f"Recording file {file_name} not found")
+    try:
+        file_path = resolve_recording_media_path(directory, payload)
+    except FileNotFoundError as exc:
+        raise FileNotFoundError("Recording media file not found") from exc
+    except Exception as exc:  # pragma: no cover - defensive failure
+        raise FileNotFoundError("Recording media file not found") from exc
     handle = file_path.open("rb")
     return safe_name, handle
 
@@ -2600,6 +2689,7 @@ __all__ = [
     "MotionDetector",
     "RecordingManager",
     "build_recording_video",
+    "resolve_recording_media_path",
     "iter_recording_frames",
     "load_recording_metadata",
     "load_recording_payload",

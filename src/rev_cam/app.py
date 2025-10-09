@@ -47,6 +47,7 @@ from .recording import (
     load_recording_payload,
     purge_recordings,
     remove_recording_files,
+    resolve_recording_media_path,
 )
 from .streaming import MJPEGStreamer, WebRTCManager, encode_frame_to_jpeg
 from .system_log import SystemLog
@@ -1973,12 +1974,15 @@ def create_app(
             raise HTTPException(status_code=404, detail="Recording not found") from exc
         if not isinstance(payload, Mapping):
             raise HTTPException(status_code=500, detail="Invalid recording metadata")
-        file_name = payload.get("file")
-        if not isinstance(file_name, str):
-            raise HTTPException(status_code=404, detail="Recording not found")
-        file_path = RECORDINGS_DIR / file_name
-        if not file_path.exists() or not file_path.is_file():
-            raise HTTPException(status_code=404, detail="Recording not found")
+        try:
+            file_path = await asyncio.to_thread(
+                resolve_recording_media_path, RECORDINGS_DIR, payload
+            )
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Recording not found") from exc
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.exception("Failed to resolve recording media for %s", name)
+            raise HTTPException(status_code=500, detail="Unable to load recording") from exc
         media_type = payload.get("media_type")
         if not isinstance(media_type, str):
             media_type = "video/mp4"
