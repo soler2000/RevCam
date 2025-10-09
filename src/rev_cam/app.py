@@ -43,6 +43,7 @@ from .pipeline import FramePipeline
 from .recording import (
     RecordingManager,
     build_recording_video,
+    export_recording_media,
     load_recording_metadata,
     load_recording_payload,
     purge_recordings,
@@ -64,6 +65,16 @@ def _load_static(name: str) -> str:
     if not path.exists():  # pragma: no cover - sanity check
         raise FileNotFoundError(f"Static asset {name!r} missing")
     return path.read_text(encoding="utf-8")
+
+
+def _resolve_desktop_directory() -> Path:
+    env_value = os.environ.get("XDG_DESKTOP_DIR")
+    if env_value:
+        candidate = Path(env_value).expanduser()
+        if candidate.is_absolute():
+            return candidate
+    desktop = Path.home() / "Desktop"
+    return desktop
 
 
 def _project_ground_distance(
@@ -2038,6 +2049,25 @@ def create_app(
         return StreamingResponse(
             _iterator(), media_type="video/mp4", headers={"Content-Disposition": disposition}
         )
+
+    @app.post("/api/surveillance/recordings/{name}/export")
+    async def export_surveillance_recording(name: str) -> dict[str, object]:
+        destination_root = _resolve_desktop_directory()
+        try:
+            destination = await asyncio.to_thread(
+                export_recording_media, RECORDINGS_DIR, name, destination_root
+            )
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Recording not found") from exc
+        except PermissionError as exc:
+            logger.warning("Permission denied while exporting %s: %s", name, exc)
+            raise HTTPException(
+                status_code=403, detail="Unable to write to desktop"
+            ) from exc
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.exception("Failed to export surveillance recording %s", name)
+            raise HTTPException(status_code=500, detail="Unable to export recording") from exc
+        return {"path": str(destination)}
 
     @app.delete("/api/surveillance/recordings/{name}")
     async def delete_surveillance_recording(name: str) -> dict[str, object]:

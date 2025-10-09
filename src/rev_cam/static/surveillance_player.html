@@ -242,6 +242,8 @@
         </div>
       </div>
       <div class="footer-links muted">
+        <button type="button" id="save-to-desktop">Save to Desktop</button>
+        <span aria-hidden="true">·</span>
         <a class="link" id="download-link" href="#" download>Download recording</a>
         <span aria-hidden="true">·</span>
         <a class="link" href="/surveillance">Back to surveillance</a>
@@ -263,6 +265,7 @@
       const progressCurrent = document.getElementById("progress-current");
       const progressTotal = document.getElementById("progress-total");
       const downloadLink = document.getElementById("download-link");
+      const desktopButton = document.getElementById("save-to-desktop");
 
       let recordingMetadata = null;
       let isScrubbing = false;
@@ -464,6 +467,44 @@
           });
           progressSlider.addEventListener("pointerup", () => stopScrubbing(true));
           progressSlider.addEventListener("blur", () => stopScrubbing(false));
+        }
+        if (desktopButton) {
+          desktopButton.addEventListener("click", async () => {
+            if (!recordingName) return;
+            desktopButton.disabled = true;
+            setStatus("Saving to desktop…");
+            try {
+              const encodedName = encodeURIComponent(recordingName);
+              const response = await fetch(
+                `/api/surveillance/recordings/${encodedName}/export`,
+                { method: "POST" }
+              );
+              let payload = null;
+              try {
+                payload = await response.json();
+              } catch (error) {
+                payload = null;
+              }
+              if (!response.ok) {
+                const message =
+                  (payload && payload.detail) ||
+                  `Failed to save recording (${response.status})`;
+                throw new Error(message);
+              }
+              const exportedPath =
+                payload && typeof payload.path === "string" ? payload.path : null;
+              if (exportedPath) {
+                setStatus(`Saved to desktop: ${exportedPath}`);
+              } else {
+                setStatus("Saved to desktop.");
+              }
+            } catch (error) {
+              console.error(error);
+              setStatus("Unable to save to desktop", "error");
+            } finally {
+              desktopButton.disabled = false;
+            }
+          });
         }
       }
 

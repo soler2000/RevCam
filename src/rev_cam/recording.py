@@ -264,6 +264,10 @@ def resolve_recording_media_path(
         if not path_obj.is_absolute():
             _register(directory / "media" / path_obj.name)
 
+    desktop_value = payload.get("desktop_file") if isinstance(payload, Mapping) else None
+    if isinstance(desktop_value, str) and desktop_value:
+        _register(_coerce(desktop_value))
+
     file_path_value = payload.get("file_path") if isinstance(payload, Mapping) else None
     if isinstance(file_path_value, str) and file_path_value:
         _register(_coerce(file_path_value))
@@ -281,6 +285,33 @@ def resolve_recording_media_path(
             if isinstance(chunk_file, str) and chunk_file:
                 _add_media_candidates(chunk_file)
 
+    name_value = payload.get("name") if isinstance(payload, Mapping) else None
+    if isinstance(name_value, str) and name_value:
+        base_name = Path(name_value)
+        stems: set[str] = {base_name.name}
+        if base_name.suffix:
+            stems.add(base_name.stem)
+        for stem in stems:
+            if not stem:
+                continue
+            stem_path = Path(stem)
+            suffix = stem_path.suffix.lower()
+            candidates: list[str] = []
+            if suffix:
+                candidates.append(stem_path.name)
+                candidates.append(stem_path.stem)
+            else:
+                candidates.append(stem)
+            for candidate_name in list(candidates):
+                base_stem = Path(candidate_name).stem or candidate_name
+                for extension in (".mp4", ".mjpeg", ".avi", ".mov"):
+                    composed = f"{base_stem}{extension}"
+                    _register(directory / "media" / composed)
+                    _register(directory / composed)
+            for candidate_name in candidates:
+                _register(directory / "media" / candidate_name)
+                _register(directory / candidate_name)
+
     for candidate in candidate_paths:
         if candidate.exists() and candidate.is_file():
             _update_payload_media_fields(target, candidate, directory)
@@ -295,6 +326,21 @@ def resolve_recording_media_path(
             if alt_media.exists() and alt_media.is_file():
                 _update_payload_media_fields(target, alt_media, directory)
                 return alt_media
+
+    # As a final fallback, probe the central media directory using the recording
+    # name and common file extensions even when metadata has not yet been
+    # normalised.
+    if isinstance(name_value, str) and name_value:
+        stem = Path(name_value).stem or name_value
+        for extension in (".mp4", ".mjpeg", ".avi", ".mov"):
+            candidate = directory / "media" / f"{stem}{extension}"
+            if candidate.exists() and candidate.is_file():
+                _update_payload_media_fields(target, candidate, directory)
+                return candidate
+            candidate = directory / f"{stem}{extension}"
+            if candidate.exists() and candidate.is_file():
+                _update_payload_media_fields(target, candidate, directory)
+                return candidate
 
     raise FileNotFoundError("Recording media file not found")
 
@@ -709,6 +755,33 @@ def build_recording_video(
         raise FileNotFoundError("Recording media file not found") from exc
     handle = file_path.open("rb")
     return safe_name, handle
+
+
+def export_recording_media(
+    directory: Path,
+    name: str,
+    target_directory: Path | None = None,
+) -> Path:
+    """Copy the recording media for ``name`` into ``target_directory``.
+
+    Returns the destination path of the copied file. ``target_directory`` defaults
+    to the user's desktop directory when omitted.
+    """
+
+    safe_name = _safe_recording_name(name)
+    payload = load_recording_payload(directory, safe_name, include_frames=False)
+    file_path = resolve_recording_media_path(directory, payload)
+    destination_root = target_directory
+    if destination_root is None:
+        destination_root = Path.home() / "Desktop"
+    destination_root.mkdir(parents=True, exist_ok=True)
+    destination = destination_root / file_path.name
+    if destination.resolve() == file_path.resolve():
+        # Ensure the file exists at the destination even if it's already in the
+        # requested directory.
+        return destination
+    shutil.copy2(file_path, destination)
+    return destination
 
 
 def remove_recording_files(directory: Path, name: str) -> None:
@@ -2689,6 +2762,7 @@ __all__ = [
     "MotionDetector",
     "RecordingManager",
     "build_recording_video",
+    "export_recording_media",
     "resolve_recording_media_path",
     "iter_recording_frames",
     "load_recording_metadata",

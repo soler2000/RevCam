@@ -370,6 +370,69 @@ def test_fetch_surveillance_recording_media_uses_file_path(
     assert response.content == payload
 
 
+def test_fetch_surveillance_recording_media_recovers_missing_metadata(
+    client: TestClient,
+) -> None:
+    recordings_dir: Path = client.recordings_dir
+    name = "20240202-020202"
+    legacy_chunk = recordings_dir / f"{name}.chunk001.mp4"
+    legacy_chunk.write_bytes(b"legacy")
+    final_path = recordings_dir / "media" / f"{name}.mp4"
+    payload = b"modern"
+    final_path.write_bytes(payload)
+
+    meta = recordings_dir / f"{name}.meta.json"
+    meta.write_text(
+        json.dumps(
+            {
+                "name": name,
+                "file": legacy_chunk.name,
+                "chunks": [
+                    {
+                        "file": legacy_chunk.name,
+                        "media_type": "video/mp4",
+                        "size_bytes": len(payload),
+                    }
+                ],
+                "media_type": "video/mp4",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    response = client.get(f"/api/surveillance/recordings/{name}/media")
+    assert response.status_code == 200
+    assert response.content == payload
+    stored = json.loads(meta.read_text(encoding="utf-8"))
+    assert stored["file"].startswith("media/")
+
+
+def test_export_surveillance_recording_to_desktop(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    recordings_dir: Path = client.recordings_dir
+    name = "20240303-030303"
+    video_file = recordings_dir / "media" / f"{name}.mp4"
+    payload = b"export-me"
+    video_file.write_bytes(payload)
+    meta = recordings_dir / f"{name}.meta.json"
+    meta.write_text(
+        json.dumps({"name": name, "file": f"media/{video_file.name}", "media_type": "video/mp4"}),
+        encoding="utf-8",
+    )
+
+    desktop_dir = tmp_path / "Desktop"
+    monkeypatch.setattr(app_module, "_resolve_desktop_directory", lambda: desktop_dir)
+
+    response = client.post(f"/api/surveillance/recordings/{name}/export")
+    assert response.status_code == 200
+    payload_json = response.json()
+    exported_path = desktop_dir / video_file.name
+    assert exported_path.exists()
+    assert exported_path.read_bytes() == payload
+    assert payload_json["path"].endswith(video_file.name)
+
+
 def test_download_surveillance_recording_streams_file_path(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
