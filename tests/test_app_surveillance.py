@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -405,6 +408,80 @@ def test_fetch_surveillance_recording_media_recovers_missing_metadata(
     assert response.content == payload
     stored = json.loads(meta.read_text(encoding="utf-8"))
     assert stored["file"].startswith("media/")
+
+
+def test_surveillance_recording_codec_failure_surfaces_to_clients(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recordings_dir: Path = client.recordings_dir
+    name = "20240505-050505"
+    codec_message = "Hardware encoder initialisation failed"
+
+    class _StubCamera:
+        async def get_frame(self):  # pragma: no cover - not exercised
+            return None
+
+    class _StubPipeline:
+        def process(self, frame):  # pragma: no cover - not exercised
+            return frame
+
+    def _failing_chunk_writer(self, *_args, **_kwargs):
+        self._video_encoding_disabled = True
+        self._last_video_initialisation_error = codec_message
+        self._persist_codec_state()
+        return None
+
+    monkeypatch.setattr(
+        recording.RecordingManager, "_create_chunk_writer", _failing_chunk_writer
+    )
+
+    manager = recording.RecordingManager(
+        camera=_StubCamera(),
+        pipeline=_StubPipeline(),
+        directory=recordings_dir,
+    )
+    manager._recording_active = True
+    manager._recording_name = name
+    manager._recording_started_at = datetime.now(timezone.utc)
+    manager._recording_started_monotonic = time.perf_counter()
+    manager._total_frame_count = 3
+
+    manager._create_chunk_writer(name, 1, None)
+    context = manager._capture_finalise_context_locked(
+        stop_reason=None, deactivate_session=True, notify_stop=True
+    )
+    assert context is not None
+
+    async def _finalise() -> dict[str, object] | None:
+        await manager._process_finalise_context(context, track=False)
+        metadata = await manager.wait_for_processing()
+        await manager.aclose()
+        return metadata
+
+    metadata = asyncio.run(_finalise())
+    assert metadata is not None
+    assert metadata.get("processing_error") == codec_message
+
+    meta_path = recordings_dir / f"{name}.meta.json"
+    assert meta_path.exists()
+    stored_metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+    assert stored_metadata.get("processing_error") == codec_message
+
+    media_response = client.get(f"/api/surveillance/recordings/{name}/media")
+    assert media_response.status_code == 409
+    assert media_response.json()["detail"] == codec_message
+
+    download_response = client.get(
+        f"/api/surveillance/recordings/{name}/download"
+    )
+    assert download_response.status_code == 409
+    assert download_response.json()["detail"] == codec_message
+
+    export_response = client.post(
+        f"/api/surveillance/recordings/{name}/export"
+    )
+    assert export_response.status_code == 409
+    assert export_response.json()["detail"] == codec_message
 
 
 def test_export_surveillance_recording_to_desktop(

@@ -41,6 +41,10 @@ from .pipeline import FramePipeline
 logger = logging.getLogger(__name__)
 
 
+class RecordingProcessingError(RuntimeError):
+    """Raised when a recording failed to produce usable media."""
+
+
 _VIDEO_CODEC_CANDIDATES: tuple[str, ...] = (
     "h264_v4l2m2m",
     "h264_omx",
@@ -750,6 +754,11 @@ def build_recording_video(
 
     safe_name = _safe_recording_name(name)
     payload = load_recording_payload(directory, safe_name, include_frames=False)
+    processing_error = payload.get("processing_error") if isinstance(payload, Mapping) else None
+    if isinstance(processing_error, str):
+        processing_error = processing_error.strip()
+        if processing_error:
+            raise RecordingProcessingError(processing_error)
     try:
         file_path = resolve_recording_media_path(directory, payload)
     except FileNotFoundError as exc:
@@ -773,6 +782,11 @@ def export_recording_media(
 
     safe_name = _safe_recording_name(name)
     payload = load_recording_payload(directory, safe_name, include_frames=False)
+    processing_error = payload.get("processing_error") if isinstance(payload, Mapping) else None
+    if isinstance(processing_error, str):
+        processing_error = processing_error.strip()
+        if processing_error:
+            raise RecordingProcessingError(processing_error)
     file_path = resolve_recording_media_path(directory, payload)
     destination_root = target_directory
     if destination_root is None:
@@ -1418,6 +1432,7 @@ class RecordingManager:
     _preferred_video_codec: str | None = field(init=False, default=None)
     _codec_failures: set[str] = field(init=False, default_factory=set)
     _video_encoding_disabled: bool = field(init=False, default=False)
+    _last_video_initialisation_error: str | None = field(init=False, default=None)
     _codec_state_path: Path | None = field(init=False, default=None)
 
     def __post_init__(self) -> None:
@@ -1526,6 +1541,11 @@ class RecordingManager:
             self._chunk_index = 0
             self._total_frame_count = 0
             self._video_encoding_disabled = False
+            if self._last_video_initialisation_error is not None:
+                self._last_video_initialisation_error = None
+                self._persist_codec_state()
+            else:
+                self._last_video_initialisation_error = None
             if motion_enabled and self._session_motion_override:
                 self._motion_event_base = name
                 self._motion_event_index = 0
@@ -1636,6 +1656,11 @@ class RecordingManager:
     ) -> dict[str, object]:
         metadata = dict(base_metadata)
         processing_error: str | None = None
+        existing_error = metadata.get("processing_error")
+        if isinstance(existing_error, str):
+            existing_error = existing_error.strip()
+            if existing_error:
+                processing_error = existing_error
         entries: list[dict[str, object]] = []
         for entry in chunk_entries:
             if isinstance(entry, Mapping):
@@ -2180,6 +2205,11 @@ class RecordingManager:
             if isinstance(self._last_storage_status, Mapping)
             else None
         )
+        processing_error: str | None = None
+        if isinstance(self._last_video_initialisation_error, str):
+            candidate = self._last_video_initialisation_error.strip()
+            if candidate:
+                processing_error = candidate
         context = _FinaliseContext(
             name=name,
             started_at=self._recording_started_at or _utcnow(),
@@ -2192,6 +2222,7 @@ class RecordingManager:
             notify_stop_callback=notify_stop,
             pending_flush=pending_flush,
             chunk_entries=chunk_entries,
+            processing_error=processing_error,
         )
         self._total_frame_count = 0
         self._chunk_index = 0
@@ -2243,6 +2274,21 @@ class RecordingManager:
             base_metadata["motion_event_index"] = context.motion_event_index
             motion_snapshot.setdefault("event_index", context.motion_event_index)
         base_metadata["motion_detection"] = motion_snapshot
+        processing_error: str | None = None
+        if not context.chunk_entries:
+            candidate = context.processing_error
+            if isinstance(candidate, str):
+                candidate = candidate.strip()
+            if candidate:
+                processing_error = candidate
+            elif context.total_frames > 0:
+                fallback = self._last_video_initialisation_error
+                if isinstance(fallback, str) and fallback.strip():
+                    processing_error = fallback.strip()
+                elif self._video_encoding_disabled:
+                    processing_error = "Video encoder initialisation failed"
+            if processing_error:
+                base_metadata["processing_error"] = processing_error
         processing_stub = dict(base_metadata)
         processing_stub["processing"] = True
 
@@ -2453,11 +2499,16 @@ class RecordingManager:
         while True:
             codec_name = self._select_video_codec()
             if codec_name is None:
+                message: str | None = None
                 if last_error is not None:
                     logger.error(
                         "Disabling surveillance recording for %s: %s", name, last_error
                     )
+                    message = str(last_error).strip()
+                if not message:
+                    message = "No usable surveillance video codec available"
                 self._video_encoding_disabled = True
+                self._last_video_initialisation_error = message
                 self._persist_codec_state()
                 return None
             try:
@@ -2483,6 +2534,9 @@ class RecordingManager:
                 last_error = exc
                 logger.error("Failed to open chunk container %s: %s", path, exc)
                 self._video_encoding_disabled = True
+                self._last_video_initialisation_error = str(exc).strip() or (
+                    "Failed to open recording container"
+                )
                 self._persist_codec_state()
                 return None
             try:
@@ -2662,6 +2716,9 @@ class RecordingManager:
             and preferred not in self._codec_failures
         ):
             self._preferred_video_codec = preferred
+        last_error = payload.get("last_error")
+        if isinstance(last_error, str) and last_error.strip():
+            self._last_video_initialisation_error = last_error.strip()
 
     def _persist_codec_state(self) -> None:
         path = self._codec_state_file()
@@ -2673,6 +2730,9 @@ class RecordingManager:
         codec = self._preferred_video_codec
         if codec and codec not in self._codec_failures:
             payload["preferred_codec"] = codec
+        error_message = self._last_video_initialisation_error
+        if isinstance(error_message, str) and error_message.strip():
+            payload["last_error"] = error_message.strip()
         try:
             data = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
             path.write_text(data, encoding="utf-8")
@@ -2775,6 +2835,7 @@ class RecordingManager:
 __all__ = [
     "MotionDetector",
     "RecordingManager",
+    "RecordingProcessingError",
     "build_recording_video",
     "export_recording_media",
     "resolve_recording_media_path",
@@ -2800,4 +2861,5 @@ class _FinaliseContext:
     motion_event_index: int | None
     notify_stop_callback: bool
     pending_flush: _ChunkWriter | None = None
+    processing_error: str | None = None
 
