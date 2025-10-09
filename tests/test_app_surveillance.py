@@ -461,11 +461,16 @@ def test_surveillance_recording_codec_failure_surfaces_to_clients(
     metadata = asyncio.run(_finalise())
     assert metadata is not None
     assert metadata.get("processing_error") == codec_message
+    assert metadata.get("media_available") is False
 
     meta_path = recordings_dir / f"{name}.meta.json"
     assert meta_path.exists()
     stored_metadata = json.loads(meta_path.read_text(encoding="utf-8"))
     assert stored_metadata.get("processing_error") == codec_message
+    assert stored_metadata.get("media_available") is False
+
+    media_file = recordings_dir / "media" / f"{name}.mp4"
+    assert not media_file.exists()
 
     media_response = client.get(f"/api/surveillance/recordings/{name}/media")
     assert media_response.status_code == 409
@@ -575,3 +580,11 @@ def test_surveillance_timeline_page(client: TestClient) -> None:
     response = client.get("/surveillance/timeline")
     assert response.status_code == 200
     assert "Recording timeline" in response.text
+
+
+def test_compose_codec_failure_message_notes_attempts() -> None:
+    message = recording._compose_codec_failure_message(
+        None, ["h264_v4l2m2m", "libx264", "h264_v4l2m2m"]
+    )
+    assert "attempted codecs: h264_v4l2m2m, libx264" in message
+    assert message.endswith("No video file was created.")
