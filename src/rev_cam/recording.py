@@ -78,7 +78,7 @@ def _codec_profile(codec: str) -> Mapping[str, object]:
 def _compose_codec_failure_message(
     last_error: Exception | str | None, attempted_codecs: Sequence[str]
 ) -> str:
-    """Return a detailed codec initialisation failure message."""
+    """Return a detailed codec initialisation failure message with guidance."""
 
     detail: str | None
     if isinstance(last_error, Exception):
@@ -105,8 +105,25 @@ def _compose_codec_failure_message(
 
     message = f"{detail}{attempt_suffix}".rstrip()
     if message.endswith("."):
-        return f"{message} No video file was created."
-    return f"{message}. No video file was created."
+        message = f"{message} No video file was created."
+    else:
+        message = f"{message}. No video file was created."
+
+    guidance_parts = [
+        (
+            "Install FFmpeg with H.264 encoder support (e.g. sudo apt install ffmpeg"
+            " libavcodec-extra) and ensure Raspberry Pi hardware video encoding is enabled."
+        )
+    ]
+    if ordered_unique:
+        guidance_parts.append(
+            f"Confirm that FFmpeg exposes one of: {', '.join(ordered_unique)}."
+        )
+
+    guidance = " ".join(guidance_parts).strip()
+    if guidance:
+        message = f"{message} {guidance}".rstrip()
+    return message
 
 
 def _select_time_base(frame_rate: Fraction) -> Fraction:

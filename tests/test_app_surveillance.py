@@ -464,6 +464,7 @@ def test_surveillance_recording_codec_failure_surfaces_to_clients(
     assert metadata.get("media_available") is False
     assert "file" not in metadata
     assert "No video file was created." in codec_message
+    assert "Install FFmpeg with H.264 encoder support" in codec_message
 
     meta_path = recordings_dir / f"{name}.meta.json"
     assert meta_path.exists()
@@ -531,7 +532,9 @@ def test_finalise_marks_processing_error_when_media_missing(tmp_path: Path) -> N
 
     metadata = asyncio.run(_finalise())
     assert metadata["media_available"] is False
-    assert metadata["processing_error"].endswith("No video file was created.")
+    error_message = metadata["processing_error"]
+    assert "No video file was created." in error_message
+    assert "Install FFmpeg with H.264 encoder support" in error_message
     assert "file" not in metadata
 
 
@@ -633,4 +636,6 @@ def test_compose_codec_failure_message_notes_attempts() -> None:
         None, ["h264_v4l2m2m", "libx264", "h264_v4l2m2m"]
     )
     assert "attempted codecs: h264_v4l2m2m, libx264" in message
-    assert message.endswith("No video file was created.")
+    assert message.endswith(
+        "No video file was created. Install FFmpeg with H.264 encoder support (e.g. sudo apt install ffmpeg libavcodec-extra) and ensure Raspberry Pi hardware video encoding is enabled. Confirm that FFmpeg exposes one of: h264_v4l2m2m, libx264."
+    )
