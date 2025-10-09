@@ -415,7 +415,7 @@ def test_surveillance_recording_codec_failure_surfaces_to_clients(
 ) -> None:
     recordings_dir: Path = client.recordings_dir
     name = "20240505-050505"
-    codec_message = "Hardware encoder initialisation failed"
+    codec_message = recording._compose_codec_failure_message(None, [])
 
     class _StubCamera:
         async def get_frame(self):  # pragma: no cover - not exercised
@@ -462,12 +462,15 @@ def test_surveillance_recording_codec_failure_surfaces_to_clients(
     assert metadata is not None
     assert metadata.get("processing_error") == codec_message
     assert metadata.get("media_available") is False
+    assert "file" not in metadata
+    assert "No video file was created." in codec_message
 
     meta_path = recordings_dir / f"{name}.meta.json"
     assert meta_path.exists()
     stored_metadata = json.loads(meta_path.read_text(encoding="utf-8"))
     assert stored_metadata.get("processing_error") == codec_message
     assert stored_metadata.get("media_available") is False
+    assert "file" not in stored_metadata
 
     media_file = recordings_dir / "media" / f"{name}.mp4"
     assert not media_file.exists()
@@ -487,6 +490,49 @@ def test_surveillance_recording_codec_failure_surfaces_to_clients(
     )
     assert export_response.status_code == 409
     assert export_response.json()["detail"] == codec_message
+
+
+def test_finalise_marks_processing_error_when_media_missing(tmp_path: Path) -> None:
+    class _StubCamera:
+        async def get_frame(self):  # pragma: no cover - not exercised
+            return None
+
+    class _StubPipeline:
+        def process(self, frame):  # pragma: no cover - not exercised
+            return frame
+
+    manager = recording.RecordingManager(
+        camera=_StubCamera(),
+        pipeline=_StubPipeline(),
+        directory=tmp_path,
+    )
+    name = "20240101-010101"
+    base_metadata = {
+        "name": name,
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "ended_at": datetime.now(timezone.utc).isoformat(),
+        "duration_seconds": 1.0,
+        "fps": manager.fps,
+        "frame_count": 5,
+        "thumbnail": None,
+    }
+    chunk_entries = [{"file": "media/does-not-exist.mp4", "media_type": "video/mp4"}]
+    manager._video_encoding_disabled = True
+
+    async def _finalise() -> dict[str, object]:
+        result = await manager._run_recording_finalise(
+            name=name,
+            base_metadata=base_metadata,
+            chunk_entries=chunk_entries,
+            invoke_callback=False,
+        )
+        await manager.aclose()
+        return result
+
+    metadata = asyncio.run(_finalise())
+    assert metadata["media_available"] is False
+    assert metadata["processing_error"].endswith("No video file was created.")
+    assert "file" not in metadata
 
 
 def test_export_surveillance_recording_to_desktop(
