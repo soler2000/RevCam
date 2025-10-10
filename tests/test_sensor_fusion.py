@@ -29,11 +29,15 @@ def test_smooth_angle_alpha_bounds():
 def _make_static_sample(roll_deg: float, pitch_deg: float) -> SensorSample:
     roll_rad = math.radians(roll_deg)
     pitch_rad = math.radians(pitch_deg)
-    board_ax = -math.sin(pitch_rad)
-    board_ay = math.sin(roll_rad) * math.cos(pitch_rad)
-    board_az = math.cos(roll_rad) * math.cos(pitch_rad)
+    trailer_ax = -math.sin(pitch_rad)
+    trailer_ay = math.sin(roll_rad) * math.cos(pitch_rad)
+    trailer_az = math.cos(roll_rad) * math.cos(pitch_rad)
     return SensorSample(
-        accelerometer=Vector3(x=board_ax, y=board_ay, z=board_az),
+        accelerometer=Vector3(
+            x=trailer_ay,
+            y=trailer_az,
+            z=trailer_ax,
+        ),
         gyroscope=Vector3(x=0.0, y=0.0, z=0.0),
         magnetometer=Vector3(x=0.0, y=0.0, z=0.0),
     )
@@ -47,9 +51,9 @@ def _make_dynamic_sample(
     yaw_rate: float = 0.0,
 ) -> SensorSample:
     base = _make_static_sample(roll_deg, pitch_deg)
-    board_gx = roll_rate
-    board_gy = pitch_rate
-    board_gz = yaw_rate
+    board_gx = pitch_rate  # IMU X axis tracks trailer pitch rate.
+    board_gy = yaw_rate
+    board_gz = roll_rate   # IMU Z axis tracks trailer roll rate.
     return SensorSample(
         accelerometer=base.accelerometer,
         gyroscope=Vector3(x=board_gx, y=board_gy, z=board_gz),

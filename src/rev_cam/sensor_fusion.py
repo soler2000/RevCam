@@ -102,15 +102,23 @@ class Gy85KalmanFilter:
 
         if dt is None or not math.isfinite(dt) or dt <= 0:
             dt = 0.02
-        ax, ay, az = sample.accelerometer.x, sample.accelerometer.y, sample.accelerometer.z
+        # Remap the sensor axes into the trailer coordinate system.  The trailer
+        # roll corresponds to the IMU's X axis while pitch follows the IMU's Z
+        # axis as requested by the hardware layout.  The remaining axis becomes
+        # the trailer's vertical component.
+        trailer_ax = sample.accelerometer.z
+        trailer_ay = sample.accelerometer.x
+        trailer_az = sample.accelerometer.y
+
         gx_raw, gy_raw, gz_raw = sample.gyroscope.x, sample.gyroscope.y, sample.gyroscope.z
 
         # ``p`` denotes roll rate, ``q`` pitch rate and ``r`` yaw rate.  Even
         # though the application does not expose yaw we still use ``r`` to remove
         # the geometric coupling between roll and pitch.
-        p = gx_raw
-        q = gy_raw
-        r = gz_raw
+        # Trailer roll aligns with the IMU's Z axis, pitch with X and yaw with Y.
+        p = gz_raw
+        q = gx_raw
+        r = gy_raw
 
         roll_rad = math.radians(self._smoothed_orientation.roll)
         pitch_rad = math.radians(self._smoothed_orientation.pitch)
@@ -125,11 +133,13 @@ class Gy85KalmanFilter:
         roll_rate = p + q * sin_roll * tan_pitch + r * cos_roll * tan_pitch
         pitch_rate = q * cos_roll - r * sin_roll
         # Accelerometer-based roll and pitch (degrees)
-        # Roll is derived from the board's Y axis (lateral/"a" axis) and pitch
-        # from the X axis so the displayed angles follow the trailer layout.
-        roll_measure = math.degrees(math.atan2(ay, az)) if ay or az else 0.0
-        denominator = math.sqrt(ay * ay + az * az)
-        pitch_measure = math.degrees(math.atan2(-ax, denominator)) if denominator else 0.0
+        # Roll is derived from the IMU's X axis and pitch from the Z axis so the
+        # displayed angles follow the trailer layout.
+        roll_measure = math.degrees(math.atan2(trailer_ay, trailer_az)) if trailer_ay or trailer_az else 0.0
+        denominator = math.sqrt(trailer_ay * trailer_ay + trailer_az * trailer_az)
+        pitch_measure = (
+            math.degrees(math.atan2(-trailer_ax, denominator)) if denominator else 0.0
+        )
 
         roll = self._roll.update(roll_rate, roll_measure, dt)
         pitch = self._pitch.update(pitch_rate, pitch_measure, dt)
