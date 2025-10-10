@@ -102,8 +102,17 @@ class Gy85KalmanFilter:
 
         if dt is None or not math.isfinite(dt) or dt <= 0:
             dt = 0.02
-        ax, ay, az = sample.accelerometer.x, sample.accelerometer.y, sample.accelerometer.z
-        gx, gy = sample.gyroscope.x, sample.gyroscope.y
+        ax_raw, ay_raw, az = sample.accelerometer.x, sample.accelerometer.y, sample.accelerometer.z
+        gx_raw, gy_raw = sample.gyroscope.x, sample.gyroscope.y
+
+        # The IMU is mounted rotated 90° around the Z axis relative to the trailer,
+        # so the board's X axis aligns with the trailer's lateral axis (roll) and
+        # the board's Y axis aligns with the trailer's longitudinal axis (pitch).
+        # Remap the axes so downstream calculations operate in trailer space.
+        ax = ay_raw
+        ay = ax_raw
+        gx = gy_raw
+        gy = gx_raw
         # Accelerometer-based roll and pitch (degrees)
         roll_measure = math.degrees(math.atan2(ay, az)) if ay or az else 0.0
         denominator = math.sqrt(ay * ay + az * az)
