@@ -677,7 +677,7 @@
       let pendingSample = false;
       let hardwareAvailable = false;
       let latestOrientation = { roll: 0, pitch: 0 };
-      let scene, renderer, camera, controls, trailer;
+      let scene, renderer, camera, controls, trailer, placeholder;
 
       async function refreshSensorStatus() {
         if (!sensorStatus) {
@@ -1090,7 +1090,26 @@
         camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 100);
         camera.position.set(2.8, 1.8, 2.8);
 
-        renderer = new THREE.WebGLRenderer({ antialias: true });
+        if (!window.WebGLRenderingContext) {
+          if (analysisStatus) {
+            analysisStatus.textContent = "WebGL unsupported in this browser";
+            analysisStatus.classList.remove("success", "live");
+            analysisStatus.classList.add("error");
+          }
+          return;
+        }
+
+        try {
+          renderer = new THREE.WebGLRenderer({ antialias: true });
+        } catch (error) {
+          console.error(error);
+          if (analysisStatus) {
+            analysisStatus.textContent = "Unable to initialise WebGL renderer";
+            analysisStatus.classList.remove("success", "live");
+            analysisStatus.classList.add("error");
+          }
+          return;
+        }
         renderer.setPixelRatio(window.devicePixelRatio);
         renderer.setSize(width, height);
         container.appendChild(renderer.domElement);
@@ -1116,10 +1135,41 @@
         plane.rotation.x = -Math.PI / 2;
         scene.add(plane);
 
+        const placeholderMaterial = new THREE.MeshStandardMaterial({
+          color: 0x4f586b,
+          metalness: 0.2,
+          roughness: 0.6,
+          transparent: true,
+          opacity: 0.85,
+        });
+        placeholder = new THREE.Mesh(
+          new THREE.BoxGeometry(2.6, 0.8, 0.9),
+          placeholderMaterial
+        );
+        placeholder.position.set(0, 0.4, 0);
+        scene.add(placeholder);
+        if (analysisStatus) {
+          analysisStatus.textContent = "Rendering placeholder trailer";
+          analysisStatus.classList.remove("error", "success");
+          analysisStatus.classList.add("live");
+        }
+
         const loader = new STLLoader();
+        let loaderSettled = false;
+        const loaderTimeout = window.setTimeout(() => {
+          if (loaderSettled || !analysisStatus) {
+            return;
+          }
+          analysisStatus.textContent =
+            "Waiting for trailer model… displaying placeholder";
+          analysisStatus.classList.remove("error", "success");
+          analysisStatus.classList.add("live");
+        }, 4000);
         loader.load(
           "/models/airstream_trailer.stl",
           (geometry) => {
+            loaderSettled = true;
+            window.clearTimeout(loaderTimeout);
             const material = new THREE.MeshStandardMaterial({
               color: 0xbcc9d6,
               metalness: 0.65,
@@ -1133,13 +1183,30 @@
             geometry.computeBoundingBox();
             const adjustedBox = geometry.boundingBox;
             trailer.position.y = -adjustedBox.min.y;
+            if (placeholder) {
+              scene.remove(placeholder);
+              placeholder.geometry.dispose();
+              placeholder.material.dispose();
+              placeholder = undefined;
+            }
             scene.add(trailer);
+            if (analysisStatus) {
+              analysisStatus.textContent = "Loaded trailer model";
+              analysisStatus.classList.remove("error", "live");
+              analysisStatus.classList.add("success");
+            }
           },
           undefined,
           (error) => {
+            loaderSettled = true;
+            window.clearTimeout(loaderTimeout);
             console.error(error);
-            analysisStatus.textContent = "Unable to load trailer model";
-            analysisStatus.classList.add("error");
+            if (analysisStatus) {
+              analysisStatus.textContent =
+                "Unable to load trailer model – showing placeholder";
+              analysisStatus.classList.remove("success", "live");
+              analysisStatus.classList.add("error");
+            }
           }
         );
 
