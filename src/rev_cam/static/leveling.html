@@ -467,9 +467,7 @@
                       <div class="hitch-callout" role="group" aria-labelledby="hitch-guidance-heading">
                         <h4 id="hitch-guidance-heading">Hitch guidance</h4>
                         <p id="hitch-message" class="hitch-primary">—</p>
-                        <p id="hitch-assumption" class="hitch-note">
-                          Hitch guidance assumes the trailer stays hitched.
-                        </p>
+                        <p id="hitch-assumption" class="hitch-note">—</p>
                       </div>
                     </div>
                     <dl class="stats">
@@ -763,8 +761,8 @@
           }
         }
         hitchMessage.textContent = hitchCallout;
-        const notice = unhitched.hitch_notice || "Hitch guidance assumes the trailer stays hitched.";
-        hitchAssumption.textContent = notice;
+        const notice = unhitched.hitch_notice;
+        hitchAssumption.textContent = notice || "—";
 
         if (meta) {
           const { modeLabel, analysisMessage } = meta;
