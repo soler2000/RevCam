@@ -1,6 +1,7 @@
 from fractions import Fraction
 
 import numpy as np
+import pytest
 
 from rev_cam import recording
 
@@ -105,3 +106,38 @@ def test_prepare_frame_for_encoding_trims_extra_channels():
     assert prepared is not None
     assert prepared.shape == (4, 4, 3)
     assert np.all(prepared == 255)
+
+
+def test_select_time_base_matches_frame_duration():
+    result = recording._select_time_base(Fraction(30, 1))
+    assert result == Fraction(1, 30)
+
+
+def test_single_frame_duration_respects_time_base(tmp_path):
+    path = tmp_path / "chunk.mp4"
+    path.write_bytes(b"\x00")
+    time_base = Fraction(1, 30)
+    stream = _DummyStream(time_base)
+    container = _DummyContainer()
+    writer = recording._ActiveChunkWriter(
+        name="test",
+        index=1,
+        path=path,
+        container=container,
+        stream=stream,
+        time_base=time_base,
+        target_width=4,
+        target_height=4,
+        fps=30.0,
+        media_type="video/mp4",
+        codec="libx264",
+        relative_file="media/chunk.mp4",
+        pixel_format="yuv420p",
+    )
+
+    frame = np.zeros((4, 4, 3), dtype=np.uint8)
+    writer.add_frame(frame, timestamp=0.0)
+    entry = writer.finalise()
+
+    assert entry["frame_count"] == 1
+    assert entry["duration_seconds"] == pytest.approx(1 / 30, abs=1e-3)

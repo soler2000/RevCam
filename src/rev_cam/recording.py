@@ -199,15 +199,11 @@ def _select_time_base(frame_rate: Fraction) -> Fraction:
 
     numerator = frame_rate.numerator
     denominator = frame_rate.denominator
-    if numerator <= 0:
-        numerator = 1
-    if denominator <= 0:
-        denominator = 1
-    # Use millisecond granularity relative to the FPS to preserve pacing while
-    # staying within encoder-friendly bounds (e.g. V4L2 H.264).
-    time_base = Fraction(denominator, numerator * 1000)
+    if numerator <= 0 or denominator <= 0:
+        return Fraction(1, 30)
+    time_base = Fraction(denominator, numerator)
     if time_base <= 0:
-        return Fraction(1, 1000)
+        return Fraction(1, 30)
     return time_base.limit_denominator(90_000)
 
 
