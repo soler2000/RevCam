@@ -425,6 +425,8 @@
                       <dd id="leveling-raise">—</dd>
                       <dt>Ramp travel</dt>
                       <dd id="leveling-ramp">—</dd>
+                      <dt>Hitch adjustment</dt>
+                      <dd id="leveling-hitch">—</dd>
                     </dl>
                   </div>
                 </section>
@@ -458,6 +460,7 @@
       const levelingSide = document.getElementById("leveling-side");
       const levelingRaise = document.getElementById("leveling-raise");
       const levelingRamp = document.getElementById("leveling-ramp");
+      const levelingHitch = document.getElementById("leveling-hitch");
       let lastSampleTime = performance.now();
       let inFlight = false;
       let pendingSample = false;
@@ -694,6 +697,21 @@
             : travelText;
         } else {
           levelingRamp.textContent = "—";
+        }
+
+        const hitchDirection = unhitched?.hitch_direction;
+        const hitchAdjustment = unhitched?.hitch_adjustment_m;
+        if (!hitchDirection) {
+          levelingHitch.textContent = "—";
+        } else if (hitchDirection === "level" || !Number.isFinite(hitchAdjustment) || hitchAdjustment === 0) {
+          if (hitchDirection === "level" || hitchAdjustment === 0) {
+            levelingHitch.textContent = "Level";
+          } else {
+            levelingHitch.textContent = "Adjustment exceeds range";
+          }
+        } else {
+          const action = hitchDirection === "raise" ? "Raise" : "Lower";
+          levelingHitch.textContent = `${action} by ${formatDistance(hitchAdjustment)}`;
         }
 
         analysisStatus.textContent = "Receiving leveling data";
