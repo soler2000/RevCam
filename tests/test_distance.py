@@ -127,6 +127,22 @@ def test_distance_monitor_reports_unavailable_when_sensor_missing() -> None:
     assert monitor.last_error == "sensor offline"
 
 
+def test_distance_monitor_reports_missing_driver(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delitem(sys.modules, "adafruit_vl53l1x", raising=False)
+
+    monitor = DistanceMonitor(
+        update_interval=0.0,
+        auto_start=False,
+    )
+
+    reading = monitor.refresh()
+
+    assert reading.available is False
+    assert reading.error is not None
+    assert "install adafruit-circuitpython-vl53l1x" in reading.error
+    assert monitor.last_error == reading.error
+
+
 def test_distance_monitor_read_does_not_sample_sensor() -> None:
     sensor = _SequenceSensor([200.0])
     monitor = DistanceMonitor(

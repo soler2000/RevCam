@@ -191,18 +191,31 @@ class DistanceMonitor:
         return self._last_error
 
     def _create_default_sensor(self) -> object:
+        attempts: list[str] = []
+
+        def _fail(exc: Exception | None = None) -> None:
+            detail = "; ".join(attempts) if attempts else "required drivers are missing"
+            message = f"VL53L1X driver unavailable ({detail})"
+            raise _DriverUnavailableError(message) from exc
+
         try:  # pragma: no cover - hardware dependency
             import adafruit_vl53l1x  # type: ignore
+        except ModuleNotFoundError as exc:  # pragma: no cover - optional dependency
+            attempts.append("install adafruit-circuitpython-vl53l1x")
+            _fail(exc)
         except Exception as exc:  # pragma: no cover - hardware dependency
-            raise _DriverUnavailableError("VL53L1X driver unavailable") from exc
+            attempts.append(f"adafruit VL53L1X import failed: {exc}")
+            _fail(exc)
 
         if self._i2c_bus is not None:
             try:  # pragma: no cover - optional dependency
                 from adafruit_extended_bus import ExtendedI2C  # type: ignore
+            except ModuleNotFoundError as exc:  # pragma: no cover - optional dependency
+                attempts.append("install adafruit-circuitpython-extended-bus for custom I2C buses")
+                _fail(exc)
             except Exception as exc:  # pragma: no cover - optional dependency
-                raise _DriverUnavailableError(
-                    "Extended I2C support unavailable; install adafruit-circuitpython-extended-bus"
-                ) from exc
+                attempts.append(f"ExtendedI2C unavailable: {exc}")
+                _fail(exc)
 
             try:  # pragma: no cover - hardware dependency
                 i2c = ExtendedI2C(self._i2c_bus)
@@ -213,8 +226,12 @@ class DistanceMonitor:
         else:
             try:  # pragma: no cover - hardware dependency
                 import board  # type: ignore
+            except ModuleNotFoundError as exc:  # pragma: no cover - optional dependency
+                attempts.append("install adafruit-blinka to access board.I2C")
+                _fail(exc)
             except Exception as exc:  # pragma: no cover - hardware dependency
-                raise _DriverUnavailableError("VL53L1X driver unavailable") from exc
+                attempts.append(f"board.I2C unavailable: {exc}")
+                _fail(exc)
 
             try:  # pragma: no cover - hardware dependency
                 i2c = board.I2C()  # type: ignore[attr-defined]
