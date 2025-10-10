@@ -296,48 +296,6 @@
         font-size: 1.05rem;
       }
 
-      .support-stats {
-        margin: 0;
-        display: grid;
-        gap: var(--space-sm);
-      }
-
-      .support-stats div {
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-xs);
-        padding: 0.55rem 0.75rem;
-        border-radius: var(--radius-md);
-        border: 1px solid var(--border-subtle);
-        background: rgba(255, 255, 255, 0.02);
-      }
-
-      .support-stats dt {
-        font-size: 0.85rem;
-        font-weight: 600;
-        color: var(--text-muted);
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-      }
-
-      .support-stats dd {
-        margin: 0;
-        display: flex;
-        flex-direction: column;
-        gap: 0.2rem;
-      }
-
-      .support-primary {
-        font-size: 1.1rem;
-        font-weight: 600;
-        color: var(--text-primary);
-      }
-
-      .support-secondary {
-        font-size: 0.85rem;
-        color: var(--text-muted);
-      }
-
       #viewer {
         position: relative;
         width: 100%;
@@ -464,39 +422,6 @@
                     <dd id="leveling-hitch">—</dd>
                   </dl>
                 </section>
-                <section class="support-section">
-                  <h3>Support adjustments</h3>
-                  <dl class="support-stats" id="support-points">
-                    <div data-point="left_wheel">
-                      <dt>Left wheel</dt>
-                      <dd>
-                        <span class="support-primary">—</span>
-                        <span class="support-secondary">Offset: —</span>
-                      </dd>
-                    </div>
-                    <div data-point="right_wheel">
-                      <dt>Right wheel</dt>
-                      <dd>
-                        <span class="support-primary">—</span>
-                        <span class="support-secondary">Offset: —</span>
-                      </dd>
-                    </div>
-                    <div data-point="hitch">
-                      <dt>Hitch jack</dt>
-                      <dd>
-                        <span class="support-primary">—</span>
-                        <span class="support-secondary">Offset: —</span>
-                      </dd>
-                    </div>
-                    <div data-point="rear_stabilizer">
-                      <dt>Rear stabilizer</dt>
-                      <dd>
-                        <span class="support-primary">—</span>
-                        <span class="support-secondary">Offset: —</span>
-                      </dd>
-                    </div>
-                  </dl>
-                </section>
               </div>
             </div>
             <aside class="visualiser-panel">
@@ -527,19 +452,6 @@
       const levelingRaise = document.getElementById("leveling-raise");
       const levelingRamp = document.getElementById("leveling-ramp");
       const levelingHitch = document.getElementById("leveling-hitch");
-      const supportElements = new Map();
-      const supportRoot = document.getElementById("support-points");
-      if (supportRoot) {
-        for (const element of supportRoot.querySelectorAll("[data-point]")) {
-          const key = element.dataset.point;
-          if (!key) continue;
-          supportElements.set(key, {
-            primary: element.querySelector(".support-primary"),
-            secondary: element.querySelector(".support-secondary"),
-          });
-        }
-      }
-
       let currentMode = "hitched";
       let lastSampleTime = performance.now();
       let inFlight = false;
@@ -657,54 +569,11 @@
         return value.charAt(0).toUpperCase() + value.slice(1);
       }
 
-      function formatOffset(value) {
-        if (!Number.isFinite(value)) {
-          return "Offset: —";
-        }
-        const centimetres = value * 100;
-        const sign = centimetres >= 0 ? "+" : "−";
-        return `Offset: ${sign}${Math.abs(centimetres).toFixed(1)} cm`;
-      }
-
-      function updateSupportPoints(points) {
-        if (!supportElements.size) {
-          return;
-        }
-        for (const [key, refs] of supportElements.entries()) {
-          const primary = refs.primary;
-          const secondary = refs.secondary;
-          if (!(primary instanceof HTMLElement) || !(secondary instanceof HTMLElement)) {
-            continue;
-          }
-          const entry = points && typeof points === "object" ? points[key] : null;
-          if (!entry) {
-            primary.textContent = "—";
-            secondary.textContent = "Offset: —";
-            continue;
-          }
-          const action = entry.action;
-          const adjustment = Number(entry.adjustment_m);
-          const offset = Number(entry.offset_m);
-          let primaryText = "—";
-          if (action === "level" || !Number.isFinite(adjustment) || Math.abs(adjustment) < 1e-4) {
-            primaryText = "Level";
-          } else if (action === "raise") {
-            primaryText = `Raise ${formatDistance(adjustment)}`;
-          } else if (action === "lower") {
-            primaryText = `Lower ${formatDistance(adjustment)}`;
-          } else {
-            primaryText = formatSide(action);
-          }
-          primary.textContent = primaryText;
-          secondary.textContent = Number.isFinite(offset) ? formatOffset(offset) : "Offset: —";
-        }
-      }
-
-      function updateDisplays(evaluation, meta) {
+     function updateDisplays(evaluation, meta) {
         if (!evaluation) {
           return;
         }
-        const { orientation, hitched, unhitched, support_points: supportPoints } = evaluation;
+        const { orientation, hitched, unhitched } = evaluation;
         latestOrientation = {
           roll: Number(orientation?.roll) || 0,
           pitch: Number(orientation?.pitch) || 0,
@@ -735,8 +604,6 @@
           const direction = formatSide(hitchDir);
           levelingHitch.textContent = `${direction} ${hitchAmount}`;
         }
-
-        updateSupportPoints(supportPoints);
 
         if (meta) {
           const { modeLabel, analysisMessage } = meta;
@@ -816,7 +683,6 @@
               orientation: data.orientation,
               hitched: data.hitched,
               unhitched: data.unhitched,
-              support_points: data.support_points,
             },
             { modeLabel, analysisMessage }
           );
