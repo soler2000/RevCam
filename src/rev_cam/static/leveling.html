@@ -1041,8 +1041,49 @@
 
       function initThree() {
         const container = document.getElementById("viewer");
-        const width = container.clientWidth;
-        const height = container.clientHeight;
+        if (!container) {
+          return;
+        }
+
+        const measureViewerSize = () => {
+          const rect = container.getBoundingClientRect();
+          let width = rect.width;
+          if (!width) {
+            width = container.clientWidth;
+          }
+          if (!width) {
+            width = container.offsetWidth;
+          }
+          if (!width && container.parentElement) {
+            const parentRect = container.parentElement.getBoundingClientRect();
+            width = parentRect.width || container.parentElement.clientWidth;
+          }
+          if (!width) {
+            width = window.innerWidth || 640;
+          }
+          width = Math.max(1, width);
+
+          let height = rect.height;
+          if (!height) {
+            height = container.clientHeight;
+          }
+          if (!height) {
+            height = container.offsetHeight;
+          }
+          if (!height && container.parentElement) {
+            const parentRect = container.parentElement.getBoundingClientRect();
+            height = parentRect.height || container.parentElement.clientHeight;
+          }
+          if (!height) {
+            height = width * (9 / 16);
+          }
+          height = Math.max(1, height);
+
+          return { width, height };
+        };
+
+        const { width, height } = measureViewerSize();
+
         scene = new THREE.Scene();
         scene.background = new THREE.Color(0x0b0d13);
 
@@ -1102,13 +1143,18 @@
           }
         );
 
-        window.addEventListener("resize", () => {
-          const w = container.clientWidth;
-          const h = container.clientHeight;
+        const updateRendererSize = () => {
+          const { width: w, height: h } = measureViewerSize();
           camera.aspect = w / h;
           camera.updateProjectionMatrix();
           renderer.setSize(w, h);
-        });
+        };
+
+        window.addEventListener("resize", updateRendererSize);
+        if ("ResizeObserver" in window) {
+          const observer = new ResizeObserver(() => updateRendererSize());
+          observer.observe(container);
+        }
 
         function animate() {
           requestAnimationFrame(animate);
