@@ -38,6 +38,7 @@ from .diagnostics import collect_diagnostics
 from .distance import DistanceCalibration, DistanceMonitor, create_distance_overlay
 from .led_matrix import LedRing
 from .reversing_aids import create_reversing_aids_overlay
+from .gy85 import Gy85Error, Gy85Sensor, Gy85UnavailableError
 from .sensor_fusion import Gy85KalmanFilter, SensorSample, Vector3
 from .pipeline import FramePipeline
 from .recording import (
@@ -356,6 +357,19 @@ def create_app(
         calibration=config_manager.get_distance_calibration(),
         system_log=shared_system_log,
     )
+
+    level_sensor: Gy85Sensor | None
+    level_sensor_error: str | None = None
+    try:
+        level_sensor = Gy85Sensor(i2c_bus=i2c_bus_override)
+    except Gy85UnavailableError as exc:
+        level_sensor = None
+        level_sensor_error = str(exc)
+        logger.warning("GY-85 sensor unavailable: %s", exc)
+    except Gy85Error as exc:
+        level_sensor = None
+        level_sensor_error = str(exc)
+        logger.exception("Failed to initialise GY-85 sensor")
 
     current_mode: StreamMode = StreamMode.REVCAM
 
@@ -1070,6 +1084,8 @@ def create_app(
             await camera.close()
         await battery_supervisor.aclose()
         distance_monitor.close()
+        if level_sensor is not None:
+            await run_in_threadpool(level_sensor.close)
         battery_monitor.close()
         if hasattr(wifi_manager, "close"):
             await run_in_threadpool(wifi_manager.close)
@@ -1209,6 +1225,47 @@ def create_app(
             "flip_vertical": orientation.flip_vertical,
         }
 
+    @app.get("/api/leveling/status")
+    async def get_leveling_status() -> dict[str, object | None]:
+        return {
+            "sensor": {
+                "available": level_sensor is not None,
+                "error": level_sensor_error,
+            }
+        }
+
+    @app.get("/api/leveling/live")
+    async def get_leveling_live(mode: Literal["hitched", "unhitched"] = "hitched") -> dict[str, object]:
+        nonlocal level_sensor_error
+        if level_sensor is None:
+            detail = level_sensor_error or "GY-85 sensor unavailable"
+            raise HTTPException(status_code=503, detail=detail)
+        try:
+            reading = await run_in_threadpool(level_sensor.read)
+        except Gy85Error as exc:
+            logger.warning("Failed to read GY-85 sensor: %s", exc)
+            level_sensor_error = str(exc)
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        else:
+            level_sensor_error = None
+        captured_at = datetime.now(timezone.utc)
+        async with level_filter_lock:
+            orientation = level_filter.update(reading.sample, dt=reading.interval_s)
+        settings = config_manager.get_leveling_settings()
+        evaluation = evaluate_leveling(orientation, settings)
+        mode_key = "hitched" if mode == "hitched" else "unhitched"
+        return {
+            "mode": mode,
+            "orientation": evaluation["orientation"],
+            "analysis": evaluation[mode_key],
+            "hitched": evaluation["hitched"],
+            "unhitched": evaluation["unhitched"],
+            "support_points": evaluation["support_points"],
+            "settings": settings.to_dict(),
+            "interval_s": reading.interval_s,
+            "captured_at": captured_at.isoformat(),
+        }
+
     @app.get("/api/leveling/config")
     async def get_leveling_config() -> dict[str, object]:
         settings = config_manager.get_leveling_settings()
@@ -1261,6 +1318,8 @@ def create_app(
             "unhitched": evaluation["unhitched"],
             "support_points": evaluation["support_points"],
             "settings": settings.to_dict(),
+            "interval_s": payload.dt,
+            "captured_at": datetime.now(timezone.utc).isoformat(),
         }
 
     @app.get("/api/camera")

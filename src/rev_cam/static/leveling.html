@@ -65,6 +65,10 @@
         box-sizing: border-box;
       }
 
+      .hidden {
+        display: none !important;
+      }
+
       body {
         margin: 0;
         font-family: var(--font-family);
@@ -483,9 +487,12 @@
       </header>
       <main>
         <div class="panel-grid">
-        <article class="card">
+        <article class="card" id="sensor-card">
           <h2>Sensor Simulator</h2>
-          <p>Use sliders to emulate the GY-85 outputs until the hardware is connected. Values are fed through a Kalman filter to estimate orientation.</p>
+          <p>
+            Adjust the sliders to emulate the GY-85 outputs when the hardware sensor is
+            unavailable. Values are fed through a Kalman filter to estimate orientation.
+          </p>
           <div class="mode-toggle" role="radiogroup" aria-label="Operating mode">
             <label><input type="radio" name="mode" value="hitched" checked /> Hitched</label>
             <label><input type="radio" name="mode" value="unhitched" /> Unhitched</label>
@@ -541,6 +548,7 @@
 
         <article class="card">
           <h2>Leveling Analysis</h2>
+          <p class="status" id="sensor-status" aria-live="polite">Detecting GY-85 sensor…</p>
           <p class="status" id="analysis-status">Awaiting sensor data…</p>
           <div class="orientation-readout">
             <div>
@@ -637,6 +645,8 @@
       const SAMPLE_INTERVAL = 300;
       const sampleRateDisplay = document.getElementById("sample-rate");
       const analysisStatus = document.getElementById("analysis-status");
+      const sensorStatus = document.getElementById("sensor-status");
+      const sensorCard = document.getElementById("sensor-card");
       const rollDisplay = document.getElementById("roll-display");
       const pitchDisplay = document.getElementById("pitch-display");
       const yawDisplay = document.getElementById("yaw-display");
@@ -670,8 +680,60 @@
       let lastSampleTime = performance.now();
       let inFlight = false;
       let pendingSample = false;
+      let hardwareAvailable = false;
       let latestOrientation = { roll: 0, pitch: 0, yaw: 0 };
       let scene, renderer, camera, controls, trailer;
+
+      async function refreshSensorStatus() {
+        if (!sensorStatus) {
+          hardwareAvailable = false;
+          return;
+        }
+        try {
+          const response = await fetch("/api/leveling/status");
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+          const data = await response.json();
+          const available = Boolean(data?.sensor?.available);
+          const errorMessage = data?.sensor?.error ?? "";
+          hardwareAvailable = available;
+          sensorStatus.classList.remove("error", "success", "live");
+          if (available) {
+            sensorStatus.textContent = "GY-85 hardware sensor connected";
+            sensorStatus.classList.add("success");
+            if (sensorCard) {
+              sensorCard.classList.add("hidden");
+            }
+          } else {
+            const fallbackMessage = errorMessage
+              ? `GY-85 sensor unavailable – ${errorMessage}`
+              : "GY-85 sensor not detected – using simulator";
+            sensorStatus.textContent = fallbackMessage;
+            sensorStatus.classList.add("error");
+            if (sensorCard) {
+              sensorCard.classList.remove("hidden");
+            }
+          }
+        } catch (error) {
+          console.error(error);
+          hardwareAvailable = false;
+          sensorStatus.textContent = "Unable to determine sensor status";
+          sensorStatus.classList.remove("success", "live");
+          sensorStatus.classList.add("error");
+          if (sensorCard) {
+            sensorCard.classList.remove("hidden");
+          }
+        }
+        analysisStatus.classList.remove("live", "error", "loading");
+        analysisStatus.removeAttribute("aria-busy");
+        analysisStatus.textContent = hardwareAvailable
+          ? "Awaiting sensor data…"
+          : "Awaiting simulator input…";
+        if (!hardwareAvailable) {
+          sampleRateDisplay.textContent = "Simulator ready";
+        }
+      }
 
       function formatDistance(value) {
         if (!Number.isFinite(value)) return "—";
@@ -802,10 +864,69 @@
           return;
         }
         pendingSample = false;
-        void sendSample();
+        if (hardwareAvailable) {
+          void fetchHardwareSample();
+        } else {
+          void sendManualSample();
+        }
       }
 
-      async function sendSample() {
+      async function fetchHardwareSample() {
+        inFlight = true;
+        analysisStatus.classList.add("loading");
+        analysisStatus.setAttribute("aria-busy", "true");
+        analysisStatus.classList.remove("error");
+        try {
+          const response = await fetch(`/api/leveling/live?mode=${encodeURIComponent(currentMode)}`);
+          if (response.status === 503) {
+            hardwareAvailable = false;
+            pendingSample = true;
+            await refreshSensorStatus();
+            throw new Error("GY-85 sensor unavailable");
+          }
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+          const data = await response.json();
+          const modeLabel = data.mode === "hitched" ? "Hitched mode" : "Unhitched mode";
+          const analysisMessage = data.analysis?.message ?? "";
+          updateDisplays(
+            {
+              orientation: data.orientation,
+              hitched: data.hitched,
+              unhitched: data.unhitched,
+              support_points: data.support_points,
+            },
+            { modeLabel, analysisMessage }
+          );
+          const now = performance.now();
+          const intervalMs =
+            typeof data.interval_s === "number" && Number.isFinite(data.interval_s)
+              ? data.interval_s * 1000
+              : now - lastSampleTime;
+          lastSampleTime = now;
+          const timestamp = new Date();
+          sampleRateDisplay.textContent = `Last update ${timestamp.toLocaleTimeString()} • Δ ${Math.round(intervalMs)} ms`;
+        } catch (error) {
+          console.error(error);
+          if (hardwareAvailable) {
+            analysisStatus.textContent = "Unable to reach leveling API";
+            analysisStatus.classList.remove("live");
+            analysisStatus.classList.add("error");
+            sampleRateDisplay.textContent = "Waiting for connection…";
+          }
+        } finally {
+          analysisStatus.classList.remove("loading");
+          analysisStatus.removeAttribute("aria-busy");
+          inFlight = false;
+          if (pendingSample) {
+            pendingSample = false;
+            requestSample();
+          }
+        }
+      }
+
+      async function sendManualSample() {
         inFlight = true;
         analysisStatus.classList.add("loading");
         analysisStatus.setAttribute("aria-busy", "true");
@@ -836,19 +957,22 @@
             support_points: data.support_points,
           }, { modeLabel, analysisMessage });
           const now = performance.now();
-          const delta = now - lastSampleTime;
+          const intervalMs =
+            typeof data.interval_s === "number" && Number.isFinite(data.interval_s)
+              ? data.interval_s * 1000
+              : now - lastSampleTime;
           lastSampleTime = now;
           const timestamp = new Date();
-          sampleRateDisplay.textContent = `Last update ${timestamp.toLocaleTimeString()} • Δ ${Math.round(delta)} ms`;
+          sampleRateDisplay.textContent = `Last update ${timestamp.toLocaleTimeString()} • Δ ${Math.round(intervalMs)} ms`;
         } catch (error) {
           console.error(error);
           analysisStatus.textContent = "Unable to reach leveling API";
           analysisStatus.classList.remove("live");
           analysisStatus.classList.add("error");
-          analysisStatus.classList.remove("loading");
-          analysisStatus.removeAttribute("aria-busy");
           sampleRateDisplay.textContent = "Waiting for connection…";
         } finally {
+          analysisStatus.classList.remove("loading");
+          analysisStatus.removeAttribute("aria-busy");
           inFlight = false;
           if (pendingSample) {
             pendingSample = false;
@@ -867,7 +991,7 @@
           const value = parseFloat(input.value);
           display.textContent = formatter(value);
           target(value);
-          if (triggerSample) {
+          if (triggerSample && !hardwareAvailable) {
             requestSample();
           }
         };
@@ -977,11 +1101,17 @@
         animate();
       }
 
-      initSliders();
-      initModeToggle();
-      initThree();
-      setInterval(requestSample, SAMPLE_INTERVAL);
-      requestSample();
+      async function initialise() {
+        initSliders();
+        initModeToggle();
+        initThree();
+        await refreshSensorStatus();
+        setInterval(requestSample, SAMPLE_INTERVAL);
+        setInterval(refreshSensorStatus, 10000);
+        requestSample();
+      }
+
+      void initialise();
     </script>
   </body>
 </html>
