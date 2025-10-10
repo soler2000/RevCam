@@ -271,41 +271,19 @@ def compute_hitched_leveling(orientation: OrientationAngles, settings: LevelingS
 
 
 def compute_unhitched_leveling(orientation: OrientationAngles, settings: LevelingSettings) -> dict[str, object]:
-    """Return levelling guidance for a free-standing trailer."""
+    """Return levelling guidance when treating the trailer as remaining hitched."""
 
-    side, required_raise, difference = _compute_side_adjustment(
-        orientation.roll, settings.geometry.axle_width_m
-    )
-    ramp_usage = _compute_ramp_usage(required_raise, settings.ramp)
-    pitch_rad = math.radians(orientation.pitch)
-    hitch_adjustment = math.tan(pitch_rad) * settings.geometry.hitch_to_axle_m
-    if abs(hitch_adjustment) < 1e-4:
-        hitch_direction = "level"
-    elif hitch_adjustment > 0:
-        hitch_direction = "lower"
-    else:
-        hitch_direction = "raise"
-    summary: list[str] = []
-    if side == "level":
-        summary.append("Side-to-side level achieved")
-    else:
-        summary.append(f"Raise the {side} side by {required_raise * 100:.1f} cm")
-    if hitch_direction == "level":
-        summary.append("Hitch height is level")
-    else:
-        summary.append(
-            f"{hitch_direction.capitalize()} the hitch by {abs(hitch_adjustment) * 100:.1f} cm"
-        )
+    hitched_guidance = compute_hitched_leveling(orientation, settings)
     max_deviation = max(abs(orientation.roll), abs(orientation.pitch))
     score = max(0.0, 1.0 - min(max_deviation / 10.0, 1.0))
+    message = (
+        f"{hitched_guidance['message']} Hitch guidance assumes the trailer stays hitched."
+    )
     return {
-        "side_to_raise": side,
-        "required_raise_m": required_raise,
-        "height_difference_m": difference,
-        "ramp": ramp_usage,
-        "hitch_adjustment_m": abs(hitch_adjustment),
-        "hitch_direction": hitch_direction,
-        "message": ". ".join(summary),
+        **hitched_guidance,
+        "message": message,
+        "hitch_adjustment_m": 0.0,
+        "hitch_direction": "level",
         "level_score": score,
         "max_deviation_deg": max_deviation,
     }
@@ -325,7 +303,6 @@ def evaluate_leveling(orientation: OrientationAngles, settings: LevelingSettings
     relative_orientation = raw_orientation.relative_to(settings.reference)
     hitched = compute_hitched_leveling(relative_orientation, settings)
     unhitched = compute_unhitched_leveling(relative_orientation, settings)
-    support_points = _compute_support_point_adjustments(relative_orientation, settings)
     rounded_orientation = {
         "roll": _round_orientation_value(relative_orientation.roll),
         "pitch": _round_orientation_value(relative_orientation.pitch),
@@ -340,45 +317,5 @@ def evaluate_leveling(orientation: OrientationAngles, settings: LevelingSettings
         "raw_orientation": rounded_raw_orientation,
         "hitched": hitched,
         "unhitched": unhitched,
-        "support_points": support_points,
-    }
-
-
-def _compute_support_point_adjustments(
-    orientation: OrientationAngles, settings: LevelingSettings
-) -> dict[str, dict[str, float | str]]:
-    """Return the raise/lower amount for key support locations."""
-
-    geometry = settings.geometry
-    half_width = geometry.axle_width_m / 2.0
-    rear_offset = max(geometry.length_m - geometry.hitch_to_axle_m, 0.0)
-    roll_rad = math.radians(orientation.roll)
-    pitch_rad = math.radians(orientation.pitch)
-    tan_roll = math.tan(roll_rad)
-    tan_pitch = math.tan(pitch_rad)
-
-    def analyse_point(x_offset: float, y_offset: float) -> dict[str, float | str]:
-        elevation = tan_roll * x_offset + tan_pitch * y_offset
-        threshold = 1e-4
-        if abs(elevation) <= threshold:
-            action = "level"
-            adjustment = 0.0
-        elif elevation < 0:
-            action = "raise"
-            adjustment = abs(elevation)
-        else:
-            action = "lower"
-            adjustment = abs(elevation)
-        return {
-            "offset_m": elevation,
-            "action": action,
-            "adjustment_m": adjustment,
-        }
-
-    return {
-        "left_wheel": analyse_point(-half_width, 0.0),
-        "right_wheel": analyse_point(half_width, 0.0),
-        "hitch": analyse_point(0.0, geometry.hitch_to_axle_m),
-        "rear_stabilizer": analyse_point(0.0, -rear_offset),
     }
 

@@ -38,15 +38,19 @@ def test_hitched_leveling_respects_ramp_limits():
     assert result["ramp"]["limited"] is True
 
 
-def test_unhitched_leveling_pitch_direction():
+def test_unhitched_leveling_matches_hitched_guidance():
     settings = LevelingSettings(
         geometry=TrailerGeometry(axle_width_m=2.5, hitch_to_axle_m=5.0, length_m=8.0),
         ramp=RampSpecification(length_m=0.7, height_m=0.1),
     )
     orientation = OrientationAngles(roll=0.0, pitch=3.0)
-    result = compute_unhitched_leveling(orientation, settings)
-    assert result["hitch_direction"] == "lower"
-    assert pytest.approx(result["hitch_adjustment_m"], rel=1e-3) == math.tan(math.radians(3.0)) * 5.0
+    hitched = compute_hitched_leveling(orientation, settings)
+    unhitched = compute_unhitched_leveling(orientation, settings)
+    assert unhitched["hitch_direction"] == "level"
+    assert unhitched["hitch_adjustment_m"] == pytest.approx(0.0)
+    assert unhitched["side_to_raise"] == hitched["side_to_raise"]
+    assert unhitched["required_raise_m"] == pytest.approx(hitched["required_raise_m"])
+    assert unhitched["message"].startswith(hitched["message"])  # combined guidance
 
 
 def test_evaluate_leveling_returns_both_modes():
@@ -59,34 +63,6 @@ def test_evaluate_leveling_returns_both_modes():
     assert set(result["raw_orientation"].keys()) == {"roll", "pitch"}
     assert result["orientation"]["pitch"] == pytest.approx(-165.0)
     assert result["raw_orientation"]["pitch"] == pytest.approx(-165.0)
-    assert set(result["support_points"].keys()) == {
-        "left_wheel",
-        "right_wheel",
-        "hitch",
-        "rear_stabilizer",
-    }
-
-
-def test_support_point_adjustments_reflect_orientation():
-    settings = LevelingSettings(
-        geometry=TrailerGeometry(axle_width_m=2.6, hitch_to_axle_m=5.2, length_m=8.6),
-        ramp=RampSpecification(length_m=0.8, height_m=0.12),
-    )
-    orientation = OrientationAngles(roll=5.0, pitch=-3.0)
-    result = evaluate_leveling(orientation, settings)
-    supports = result["support_points"]
-    left = supports["left_wheel"]
-    right = supports["right_wheel"]
-    hitch = supports["hitch"]
-    rear = supports["rear_stabilizer"]
-    assert left["action"] == "raise"
-    assert right["action"] == "lower"
-    assert hitch["action"] == "raise"
-    assert rear["action"] == "lower"
-    assert left["adjustment_m"] > 0
-    assert right["adjustment_m"] > 0
-    assert hitch["adjustment_m"] > 0
-    assert rear["adjustment_m"] > 0
 
 
 def test_evaluate_leveling_applies_reference():
