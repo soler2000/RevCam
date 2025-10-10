@@ -166,8 +166,13 @@ class Gy85Sensor:
         buffer = bytearray(length)
         try:
             with device as dev:
-                dev.write(bytes((register & 0xFF,)), stop=False)
-                dev.readinto(buffer)
+                # ``write_then_readinto`` performs a repeated-start transaction so the
+                # register pointer can be set without issuing a stop condition. Recent
+                # versions of ``I2CDevice.write`` no longer accept the ``stop`` keyword
+                # argument, which previously allowed the same behaviour. Using the
+                # combined helper keeps compatibility across driver versions while still
+                # issuing the single bus transaction required by the sensors.
+                dev.write_then_readinto(bytes((register & 0xFF,)), buffer)
         except Exception as exc:  # pragma: no cover - hardware specific
             raise Gy85Error(f"Failed to read register 0x{register:02X}: {exc}") from exc
         return bytes(buffer)
