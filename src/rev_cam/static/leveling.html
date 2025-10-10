@@ -279,6 +279,57 @@
         margin-bottom: var(--space-sm);
       }
 
+      .guidance-layout {
+        display: grid;
+        gap: var(--space-lg);
+      }
+
+      @media (min-width: 720px) {
+        .guidance-layout {
+          grid-template-columns: minmax(0, 7fr) minmax(0, 6fr);
+          align-items: start;
+        }
+      }
+
+      .guidance-summary {
+        display: grid;
+        gap: var(--space-md);
+        align-content: start;
+      }
+
+      .guidance-message {
+        font-size: 1.05rem;
+        line-height: 1.5;
+        margin: 0;
+      }
+
+      .hitch-callout {
+        background: rgba(61, 72, 110, 0.18);
+        border-left: 4px solid var(--accent);
+        border-radius: var(--radius-md);
+        padding: var(--space-md) var(--space-lg);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+      }
+
+      .hitch-callout h4 {
+        margin: 0 0 var(--space-xs);
+        font-size: 0.95rem;
+        letter-spacing: 0.01em;
+        text-transform: uppercase;
+      }
+
+      .hitch-primary {
+        font-size: 1rem;
+        font-weight: 600;
+        margin: 0 0 var(--space-xs);
+      }
+
+      .hitch-note {
+        margin: 0;
+        font-size: 0.85rem;
+        color: var(--text-muted);
+      }
+
       dl.stats {
         margin: 0;
         display: grid;
@@ -410,17 +461,26 @@
               <div class="analysis-section">
                 <section>
                   <h3>Leveling guidance</h3>
-                  <p id="leveling-message">—</p>
-                  <dl class="stats">
-                    <dt>Side to raise</dt>
-                    <dd id="leveling-side">—</dd>
-                    <dt>Raise amount</dt>
-                    <dd id="leveling-raise">—</dd>
-                    <dt>Ramp travel</dt>
-                    <dd id="leveling-ramp">—</dd>
-                    <dt>Hitch adjustment</dt>
-                    <dd id="leveling-hitch">—</dd>
-                  </dl>
+                  <div class="guidance-layout">
+                    <div class="guidance-summary">
+                      <p id="leveling-message" class="guidance-message">—</p>
+                      <div class="hitch-callout" role="group" aria-labelledby="hitch-guidance-heading">
+                        <h4 id="hitch-guidance-heading">Hitch guidance</h4>
+                        <p id="hitch-message" class="hitch-primary">—</p>
+                        <p id="hitch-assumption" class="hitch-note">
+                          Hitch guidance assumes the trailer stays hitched.
+                        </p>
+                      </div>
+                    </div>
+                    <dl class="stats">
+                      <dt>Side to raise</dt>
+                      <dd id="leveling-side">—</dd>
+                      <dt>Raise amount</dt>
+                      <dd id="leveling-raise">—</dd>
+                      <dt>Ramp travel</dt>
+                      <dd id="leveling-ramp">—</dd>
+                    </dl>
+                  </div>
                 </section>
               </div>
             </div>
@@ -452,7 +512,8 @@
       const levelingSide = document.getElementById("leveling-side");
       const levelingRaise = document.getElementById("leveling-raise");
       const levelingRamp = document.getElementById("leveling-ramp");
-      const levelingHitch = document.getElementById("leveling-hitch");
+      const hitchMessage = document.getElementById("hitch-message");
+      const hitchAssumption = document.getElementById("hitch-assumption");
       let currentMode = "hitched";
       let lastSampleTime = performance.now();
       let inFlight = false;
@@ -674,7 +735,8 @@
         rollDisplay.textContent = formatAngle(latestOrientation.roll);
         pitchDisplay.textContent = formatAngle(latestOrientation.pitch);
 
-        levelingMessage.textContent = unhitched.message || hitched.message;
+        const primaryMessage = unhitched.guidance_message || hitched.message;
+        levelingMessage.textContent = primaryMessage || "—";
         levelingSide.textContent = formatSide(hitched.side_to_raise);
         levelingRaise.textContent = formatDistance(hitched.required_raise_m);
         if (hitched.ramp) {
@@ -691,12 +753,18 @@
 
         const hitchDir = unhitched.hitch_direction;
         const hitchAmount = formatDistance(unhitched.hitch_adjustment_m);
-        if (hitchDir === "level") {
-          levelingHitch.textContent = "Level";
-        } else {
-          const direction = formatSide(hitchDir);
-          levelingHitch.textContent = `${direction} ${hitchAmount}`;
+        let hitchCallout = unhitched.hitch_message;
+        if (!hitchCallout) {
+          if (hitchDir === "level") {
+            hitchCallout = "Hitch is level relative to the axle.";
+          } else {
+            const direction = hitchDir === "lower" ? "Lower" : "Raise";
+            hitchCallout = `${direction} the hitch by ${hitchAmount}.`;
+          }
         }
+        hitchMessage.textContent = hitchCallout;
+        const notice = unhitched.hitch_notice || "Hitch guidance assumes the trailer stays hitched.";
+        hitchAssumption.textContent = notice;
 
         if (meta) {
           const { modeLabel, analysisMessage } = meta;

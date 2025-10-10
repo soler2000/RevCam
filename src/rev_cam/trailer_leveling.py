@@ -310,15 +310,16 @@ def compute_unhitched_leveling(orientation: OrientationAngles, settings: Levelin
                 f"{action} the hitch until level; pitch angle exceeds supported range."
             )
 
-    message = (
-        f"{hitched_guidance['message']} {hitch_message}"
-        " Hitch guidance assumes the trailer stays hitched."
-    )
+    hitch_notice = "Hitch guidance assumes the trailer stays hitched."
+    message = f"{hitched_guidance['message']} {hitch_message} {hitch_notice}"
     return {
         **hitched_guidance,
         "message": message,
+        "guidance_message": hitched_guidance["message"],
         "hitch_adjustment_m": hitch_adjustment,
         "hitch_direction": hitch_direction,
+        "hitch_message": hitch_message,
+        "hitch_notice": hitch_notice,
         "level_score": score,
         "max_deviation_deg": max_deviation,
     }
