@@ -1136,17 +1136,136 @@
 
         const trailerMaterial = new THREE.MeshStandardMaterial({
           color: 0xa7b5c7,
-          metalness: 0.45,
-          roughness: 0.55,
+          metalness: 0.5,
+          roughness: 0.4,
         });
-        trailer = new THREE.Mesh(
-          new THREE.BoxGeometry(2.6, 0.9, 1.0),
-          trailerMaterial
+        const accentMaterial = new THREE.MeshStandardMaterial({
+          color: 0x6c7a8c,
+          metalness: 0.3,
+          roughness: 0.6,
+        });
+        const glassMaterial = new THREE.MeshStandardMaterial({
+          color: 0x9ad6ff,
+          metalness: 0.8,
+          roughness: 0.15,
+          transparent: true,
+          opacity: 0.75,
+        });
+
+        const caravan = new THREE.Group();
+
+        const profile = new THREE.Shape();
+        profile.moveTo(-1.5, 0);
+        profile.lineTo(1.35, 0);
+        profile.lineTo(1.35, 0.65);
+        profile.quadraticCurveTo(1.35, 1.15, 0.75, 1.15);
+        profile.lineTo(-0.95, 1.15);
+        profile.quadraticCurveTo(-1.5, 1.1, -1.5, 0.55);
+        profile.closePath();
+
+        const bodyDepth = 1.5;
+        const bodyGeometry = new THREE.ExtrudeGeometry(profile, {
+          depth: bodyDepth,
+          bevelEnabled: false,
+        });
+        bodyGeometry.computeBoundingBox();
+        const bodyBox = bodyGeometry.boundingBox;
+        const centerX = (bodyBox.max.x + bodyBox.min.x) / 2;
+        const centerY = (bodyBox.max.y + bodyBox.min.y) / 2;
+        const centerZ = (bodyBox.max.z + bodyBox.min.z) / 2;
+        bodyGeometry.translate(-centerX, -centerY, -centerZ);
+        const caravanBody = new THREE.Mesh(bodyGeometry, trailerMaterial);
+        caravan.add(caravanBody);
+
+        const bodyHeight = bodyBox.max.y - bodyBox.min.y;
+        const halfDepth = bodyDepth / 2;
+        const frontEdge = bodyBox.max.x - centerX;
+
+        const belt = new THREE.Mesh(
+          new THREE.BoxGeometry(2.2, 0.12, bodyDepth + 0.02),
+          accentMaterial
         );
-        trailer.position.set(0, 0.45, 0);
+        belt.position.set(-0.25, -0.15, 0);
+        caravan.add(belt);
+
+        const window = new THREE.Mesh(
+          new THREE.BoxGeometry(0.9, 0.45, 0.04),
+          glassMaterial
+        );
+        window.position.set(-0.6, 0.2, halfDepth - 0.12);
+        caravan.add(window);
+
+        const door = new THREE.Mesh(
+          new THREE.BoxGeometry(0.45, 0.85, 0.05),
+          accentMaterial
+        );
+        door.position.set(0.55, -0.05, halfDepth - 0.15);
+        caravan.add(door);
+
+        const hitchBar = new THREE.Mesh(
+          new THREE.BoxGeometry(0.9, 0.08, 0.08),
+          accentMaterial
+        );
+        hitchBar.position.set(frontEdge + 0.4, -0.55, 0);
+        caravan.add(hitchBar);
+
+        const hitchBall = new THREE.Mesh(
+          new THREE.SphereGeometry(0.09, 24, 16),
+          accentMaterial
+        );
+        hitchBall.position.set(frontEdge + 0.78, -0.55, 0);
+        caravan.add(hitchBall);
+
+        const wheelMaterial = new THREE.MeshStandardMaterial({
+          color: 0x1d1f24,
+          metalness: 0.1,
+          roughness: 0.8,
+        });
+        const rimMaterial = new THREE.MeshStandardMaterial({
+          color: 0xbfc6d1,
+          metalness: 0.7,
+          roughness: 0.3,
+        });
+
+        const wheelRadius = 0.32;
+        const wheelWidth = 0.24;
+        const wheelGeometry = new THREE.CylinderGeometry(
+          wheelRadius,
+          wheelRadius,
+          wheelWidth,
+          28
+        );
+        wheelGeometry.rotateX(Math.PI / 2);
+
+        const rimGeometry = new THREE.CylinderGeometry(
+          wheelRadius * 0.55,
+          wheelRadius * 0.55,
+          wheelWidth + 0.01,
+          24
+        );
+        rimGeometry.rotateX(Math.PI / 2);
+
+        const wheelY = -bodyHeight / 2 + wheelRadius;
+        const wheelXOffset = -0.25;
+        const wheelZOffset = halfDepth + wheelWidth / 2 + 0.04;
+
+        const addWheel = (zSign) => {
+          const wheel = new THREE.Mesh(wheelGeometry, wheelMaterial);
+          wheel.position.set(wheelXOffset, wheelY, zSign * wheelZOffset);
+          caravan.add(wheel);
+
+          const rim = new THREE.Mesh(rimGeometry, rimMaterial);
+          rim.position.copy(wheel.position);
+          caravan.add(rim);
+        };
+        addWheel(1);
+        addWheel(-1);
+
+        trailer = caravan;
+        trailer.position.set(0, bodyHeight / 2, 0);
         scene.add(trailer);
         if (analysisStatus) {
-          analysisStatus.textContent = "Rendering simplified trailer";
+          analysisStatus.textContent = "Rendering caravan preview";
           analysisStatus.classList.remove("error");
           analysisStatus.classList.add("live");
         }
