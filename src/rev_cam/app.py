@@ -42,6 +42,7 @@ from .sensor_fusion import Gy85KalmanFilter, SensorSample, Vector3
 from .pipeline import FramePipeline
 from .recording import (
     RecordingManager,
+    RecordingProcessingError,
     build_recording_video,
     export_recording_media,
     load_recording_metadata,
@@ -1985,6 +1986,11 @@ def create_app(
             raise HTTPException(status_code=404, detail="Recording not found") from exc
         if not isinstance(payload, Mapping):
             raise HTTPException(status_code=500, detail="Invalid recording metadata")
+        processing_error = payload.get("processing_error")
+        if isinstance(processing_error, str):
+            processing_error = processing_error.strip()
+            if processing_error:
+                raise HTTPException(status_code=409, detail=processing_error)
         try:
             file_path = await asyncio.to_thread(
                 resolve_recording_media_path, RECORDINGS_DIR, payload
@@ -2009,6 +2015,25 @@ def create_app(
 
     @app.get("/api/surveillance/recordings/{name}/download")
     async def download_surveillance_recording(name: str) -> StreamingResponse:
+        try:
+            if recording_manager is None:
+                payload = await asyncio.to_thread(
+                    load_recording_payload, RECORDINGS_DIR, name, include_frames=False
+                )
+            else:
+                payload = await recording_manager.get_recording(
+                    name, include_frames=False
+                )
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Recording not found") from exc
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.exception("Failed to load surveillance recording %s", name)
+            raise HTTPException(status_code=500, detail="Unable to download recording") from exc
+        processing_error = payload.get("processing_error") if isinstance(payload, Mapping) else None
+        if isinstance(processing_error, str):
+            processing_error = processing_error.strip()
+            if processing_error:
+                raise HTTPException(status_code=409, detail=processing_error)
         archive = None
         try:
             safe_name, archive = await asyncio.to_thread(
@@ -2016,6 +2041,8 @@ def create_app(
             )
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Recording not found") from exc
+        except RecordingProcessingError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         except ValueError as exc:
             logger.warning(
                 "Recording %s is not ready for download: %s", name, exc, exc_info=True
@@ -2059,6 +2086,8 @@ def create_app(
             )
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Recording not found") from exc
+        except RecordingProcessingError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         except PermissionError as exc:
             logger.warning("Permission denied while exporting %s: %s", name, exc)
             raise HTTPException(

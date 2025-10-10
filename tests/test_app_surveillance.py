@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -407,6 +410,174 @@ def test_fetch_surveillance_recording_media_recovers_missing_metadata(
     assert stored["file"].startswith("media/")
 
 
+def test_surveillance_recording_codec_failure_surfaces_to_clients(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recordings_dir: Path = client.recordings_dir
+    name = "20240505-050505"
+    codec_message = recording._compose_codec_failure_message(None, [])
+
+    class _StubCamera:
+        async def get_frame(self):  # pragma: no cover - not exercised
+            return None
+
+    class _StubPipeline:
+        def process(self, frame):  # pragma: no cover - not exercised
+            return frame
+
+    def _failing_chunk_writer(self, *_args, **_kwargs):
+        self._video_encoding_disabled = True
+        self._last_video_initialisation_error = codec_message
+        self._persist_codec_state()
+        return None
+
+    monkeypatch.setattr(
+        recording.RecordingManager, "_create_chunk_writer", _failing_chunk_writer
+    )
+
+    manager = recording.RecordingManager(
+        camera=_StubCamera(),
+        pipeline=_StubPipeline(),
+        directory=recordings_dir,
+    )
+    manager._recording_active = True
+    manager._recording_name = name
+    manager._recording_started_at = datetime.now(timezone.utc)
+    manager._recording_started_monotonic = time.perf_counter()
+    manager._total_frame_count = 3
+
+    manager._create_chunk_writer(name, 1, None)
+    context = manager._capture_finalise_context_locked(
+        stop_reason=None, deactivate_session=True, notify_stop=True
+    )
+    assert context is not None
+
+    async def _finalise() -> dict[str, object] | None:
+        await manager._process_finalise_context(context, track=False)
+        metadata = await manager.wait_for_processing()
+        await manager.aclose()
+        return metadata
+
+    metadata = asyncio.run(_finalise())
+    assert metadata is not None
+    assert metadata.get("processing_error") == codec_message
+    assert metadata.get("media_available") is False
+    assert "file" not in metadata
+    assert "No video file was created." in codec_message
+    assert "Install FFmpeg with H.264 encoder support" in codec_message
+
+    meta_path = recordings_dir / f"{name}.meta.json"
+    assert meta_path.exists()
+    stored_metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+    assert stored_metadata.get("processing_error") == codec_message
+    assert stored_metadata.get("media_available") is False
+    assert "file" not in stored_metadata
+
+    media_file = recordings_dir / "media" / f"{name}.mp4"
+    assert not media_file.exists()
+
+    media_response = client.get(f"/api/surveillance/recordings/{name}/media")
+    assert media_response.status_code == 409
+    assert media_response.json()["detail"] == codec_message
+
+    download_response = client.get(
+        f"/api/surveillance/recordings/{name}/download"
+    )
+    assert download_response.status_code == 409
+    assert download_response.json()["detail"] == codec_message
+
+    export_response = client.post(
+        f"/api/surveillance/recordings/{name}/export"
+    )
+    assert export_response.status_code == 409
+    assert export_response.json()["detail"] == codec_message
+
+
+def test_finalise_marks_processing_error_when_media_missing(tmp_path: Path) -> None:
+    class _StubCamera:
+        async def get_frame(self):  # pragma: no cover - not exercised
+            return None
+
+    class _StubPipeline:
+        def process(self, frame):  # pragma: no cover - not exercised
+            return frame
+
+    manager = recording.RecordingManager(
+        camera=_StubCamera(),
+        pipeline=_StubPipeline(),
+        directory=tmp_path,
+    )
+    name = "20240101-010101"
+    base_metadata = {
+        "name": name,
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "ended_at": datetime.now(timezone.utc).isoformat(),
+        "duration_seconds": 1.0,
+        "fps": manager.fps,
+        "frame_count": 5,
+        "thumbnail": None,
+    }
+    chunk_entries = [{"file": "media/does-not-exist.mp4", "media_type": "video/mp4"}]
+    manager._video_encoding_disabled = True
+
+    async def _finalise() -> dict[str, object]:
+        result = await manager._run_recording_finalise(
+            name=name,
+            base_metadata=base_metadata,
+            chunk_entries=chunk_entries,
+            invoke_callback=False,
+        )
+        await manager.aclose()
+        return result
+
+    metadata = asyncio.run(_finalise())
+    assert metadata["media_available"] is False
+    error_message = metadata["processing_error"]
+    assert "No video file was created." in error_message
+    assert "Install FFmpeg with H.264 encoder support" in error_message
+    assert "file" not in metadata
+
+
+def test_reset_video_encoding_state_clears_failures_but_preserves_preferred(tmp_path: Path) -> None:
+    class _StubCamera:
+        async def get_frame(self):  # pragma: no cover - not exercised
+            return None
+
+    class _StubPipeline:
+        def process(self, frame):  # pragma: no cover - not exercised
+            return frame
+
+    manager = recording.RecordingManager(
+        camera=_StubCamera(),
+        pipeline=_StubPipeline(),
+        directory=tmp_path,
+    )
+    state_path = tmp_path / ".codec_state.json"
+    manager._codec_failures.update(recording._VIDEO_CODEC_CANDIDATES[:-1])
+    manager._preferred_video_codec = recording._VIDEO_CODEC_CANDIDATES[-1]
+    manager._last_video_initialisation_error = "Processing failed previously"
+    manager._persist_codec_state()
+
+    stored_state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert stored_state.get("failed_codecs")
+    assert stored_state.get("preferred_codec") == recording._VIDEO_CODEC_CANDIDATES[-1]
+    assert stored_state.get("last_error")
+
+    manager._reset_video_encoding_state()
+
+    assert manager._codec_failures == set()
+    assert manager._preferred_video_codec == recording._VIDEO_CODEC_CANDIDATES[-1]
+    assert manager._last_video_initialisation_error is None
+
+    refreshed_state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert refreshed_state.get("failed_codecs") == []
+    assert (
+        refreshed_state.get("preferred_codec")
+        == recording._VIDEO_CODEC_CANDIDATES[-1]
+    )
+    assert "last_error" not in refreshed_state
+
+
 def test_export_surveillance_recording_to_desktop(
     client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -498,3 +669,13 @@ def test_surveillance_timeline_page(client: TestClient) -> None:
     response = client.get("/surveillance/timeline")
     assert response.status_code == 200
     assert "Recording timeline" in response.text
+
+
+def test_compose_codec_failure_message_notes_attempts() -> None:
+    message = recording._compose_codec_failure_message(
+        None, ["h264_v4l2m2m", "libx264", "h264_v4l2m2m"]
+    )
+    assert "attempted codecs: h264_v4l2m2m, libx264" in message
+    assert message.endswith(
+        "No video file was created. Install FFmpeg with H.264 encoder support (e.g. sudo apt install ffmpeg libavcodec-extra) and ensure Raspberry Pi hardware video encoding is enabled. Confirm that FFmpeg exposes one of: h264_v4l2m2m, libx264."
+    )
