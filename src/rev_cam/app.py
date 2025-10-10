@@ -1242,17 +1242,22 @@ def create_app(
             raise HTTPException(status_code=503, detail=detail)
         try:
             reading = await run_in_threadpool(level_sensor.read)
+            captured_at = datetime.now(timezone.utc)
+            async with level_filter_lock:
+                orientation = level_filter.update(reading.sample, dt=reading.interval_s)
+            settings = config_manager.get_leveling_settings()
+            evaluation = evaluate_leveling(orientation, settings)
         except Gy85Error as exc:
             logger.warning("Failed to read GY-85 sensor: %s", exc)
             level_sensor_error = str(exc)
             raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.exception("Unexpected error while generating leveling data")
+            message = str(exc).strip() or "Unexpected leveling failure"
+            level_sensor_error = message
+            raise HTTPException(status_code=500, detail=message) from exc
         else:
             level_sensor_error = None
-        captured_at = datetime.now(timezone.utc)
-        async with level_filter_lock:
-            orientation = level_filter.update(reading.sample, dt=reading.interval_s)
-        settings = config_manager.get_leveling_settings()
-        evaluation = evaluate_leveling(orientation, settings)
         mode_key = "hitched" if mode == "hitched" else "unhitched"
         return {
             "mode": mode,
