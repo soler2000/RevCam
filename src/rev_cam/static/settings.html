@@ -599,6 +599,37 @@
         gap: var(--space-sm);
         font-size: 0.95rem;
       }
+      .trailer-reference-block {
+        margin-top: var(--stack-gap-lg);
+        padding-top: var(--stack-gap-lg);
+        border-top: 1px solid var(--border-subtle);
+        display: flex;
+        flex-direction: column;
+        gap: var(--stack-gap);
+      }
+      .trailer-reference-display {
+        display: grid;
+        gap: var(--space-md);
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        margin: 0;
+        padding: 0;
+      }
+      .trailer-reference-display div {
+        display: flex;
+        flex-direction: column;
+        gap: 0.2rem;
+      }
+      .trailer-reference-display dt {
+        font-weight: 600;
+        color: var(--muted-foreground);
+      }
+      .trailer-reference-display dd {
+        margin: 0;
+        font-variant-numeric: tabular-nums;
+      }
+      .trailer-reference-actions {
+        justify-content: flex-start;
+      }
       .stream-settings input[type="range"] {
         width: 100%;
       }
@@ -2157,6 +2188,34 @@
               <button type="submit">Save trailer settings</button>
               <span id="trailer-settings-status" class="muted helper-text status-text" role="status"></span>
             </div>
+            <div class="trailer-reference-block" aria-live="polite">
+              <h3>Level reference</h3>
+              <p class="muted helper-text">
+                Capture the trailer’s current orientation as the zero level. Live leveling readings will
+                then show the offset from this reference.
+              </p>
+              <dl class="trailer-reference-display">
+                <div>
+                  <dt>Roll offset</dt>
+                  <dd id="trailer-reference-roll">0°</dd>
+                </div>
+                <div>
+                  <dt>Pitch offset</dt>
+                  <dd id="trailer-reference-pitch">0°</dd>
+                </div>
+              </dl>
+              <div class="form-actions trailer-reference-actions">
+                <button type="button" id="trailer-reference-capture">Set current orientation as level</button>
+                <button type="button" id="trailer-reference-clear" class="secondary-button">
+                  Clear reference
+                </button>
+                <span
+                  id="trailer-reference-status"
+                  class="muted helper-text status-text"
+                  role="status"
+                ></span>
+              </div>
+            </div>
           </form>
         </section>
 
@@ -2910,6 +2969,10 @@
           length_m: 0.8,
           height_m: 0.12,
         },
+        reference: {
+          roll: 0,
+          pitch: 0,
+        },
       };
       const ledSummary = document.getElementById("led-summary");
       const ledForm = document.getElementById("led-form");
@@ -2958,6 +3021,11 @@
         : null;
       const trailerSettingsForm = document.getElementById("trailer-settings-form");
       const trailerSettingsStatus = document.getElementById("trailer-settings-status");
+      const trailerReferenceRoll = document.getElementById("trailer-reference-roll");
+      const trailerReferencePitch = document.getElementById("trailer-reference-pitch");
+      const trailerReferenceStatus = document.getElementById("trailer-reference-status");
+      const trailerReferenceCaptureButton = document.getElementById("trailer-reference-capture");
+      const trailerReferenceClearButton = document.getElementById("trailer-reference-clear");
       const trailerInputs = trailerSettingsForm
         ? {
             axleWidth: trailerSettingsForm.querySelector('input[name="axle_width_m"]'),
@@ -2976,6 +3044,8 @@
             scale: distanceCalibrationForm.querySelector('input[name="scale"]'),
           }
         : null;
+      let trailerReferenceSaving = false;
+      let trailerReferenceStatusTimer = null;
       let trailerStatusTimer = null;
       let trailerSaving = false;
       let distanceLoading = false;
@@ -3110,6 +3180,68 @@
             setTrailerStatus(`Error: ${message}`, { persistent: true });
           } finally {
             trailerSaving = false;
+          }
+        });
+      }
+      if (trailerReferenceCaptureButton) {
+        trailerReferenceCaptureButton.addEventListener("click", async () => {
+          if (trailerReferenceSaving) {
+            return;
+          }
+          trailerReferenceSaving = true;
+          setTrailerReferenceButtonsDisabled(true);
+          setTrailerReferenceStatus("Capturing current orientation…", { persistent: true });
+          try {
+            const response = await fetch("/api/leveling/live?mode=hitched");
+            if (!response.ok) {
+              let detail = "Unable to capture current orientation.";
+              try {
+                const error = await response.json();
+                if (error && typeof error.detail === "string") {
+                  detail = error.detail;
+                }
+              } catch (err) {
+                console.error(err);
+              }
+              throw new Error(detail);
+            }
+            const data = await response.json();
+            const orientation =
+              data && typeof data.raw_orientation === "object"
+                ? data.raw_orientation
+                : data?.orientation;
+            await saveTrailerReference(orientation);
+            setTrailerReferenceStatus("Level reference updated");
+          } catch (error) {
+            console.error(error);
+            const message =
+              error instanceof Error ? error.message : "Unable to update level reference.";
+            setTrailerReferenceStatus(`Error: ${message}`, { persistent: true });
+          } finally {
+            trailerReferenceSaving = false;
+            setTrailerReferenceButtonsDisabled(false);
+          }
+        });
+      }
+      if (trailerReferenceClearButton) {
+        trailerReferenceClearButton.addEventListener("click", async () => {
+          if (trailerReferenceSaving) {
+            return;
+          }
+          trailerReferenceSaving = true;
+          setTrailerReferenceButtonsDisabled(true);
+          setTrailerReferenceStatus("Clearing reference…", { persistent: true });
+          try {
+            await saveTrailerReference(DEFAULT_TRAILER_SETTINGS.reference);
+            setTrailerReferenceStatus("Level reference cleared");
+          } catch (error) {
+            console.error(error);
+            const message =
+              error instanceof Error ? error.message : "Unable to clear level reference.";
+            setTrailerReferenceStatus(`Error: ${message}`, { persistent: true });
+          } finally {
+            trailerReferenceSaving = false;
+            setTrailerReferenceButtonsDisabled(false);
           }
         });
       }
@@ -4372,6 +4504,25 @@
               trailerSettingsStatus.textContent = "";
             }
             trailerStatusTimer = null;
+          }, 4000);
+        }
+      }
+
+      function setTrailerReferenceStatus(message, options = {}) {
+        if (!trailerReferenceStatus) {
+          return;
+        }
+        if (trailerReferenceStatusTimer) {
+          window.clearTimeout(trailerReferenceStatusTimer);
+          trailerReferenceStatusTimer = null;
+        }
+        trailerReferenceStatus.textContent = message || "";
+        if (message && options.persistent !== true) {
+          trailerReferenceStatusTimer = window.setTimeout(() => {
+            if (trailerReferenceStatus && trailerReferenceStatus.textContent === message) {
+              trailerReferenceStatus.textContent = "";
+            }
+            trailerReferenceStatusTimer = null;
           }, 4000);
         }
       }
@@ -8041,9 +8192,6 @@
       }
 
       function applyTrailerSettings(settings, options = {}) {
-        if (!trailerInputs) {
-          return;
-        }
         const geometrySource =
           settings && typeof settings.geometry === "object"
             ? settings.geometry
@@ -8051,28 +8199,100 @@
         const rampSource =
           settings && typeof settings.ramp === "object" ? settings.ramp : DEFAULT_TRAILER_SETTINGS.ramp;
         const forceUpdate = options.force === true;
-        const pairs = [
-          [trailerInputs.axleWidth, geometrySource.axle_width_m ?? DEFAULT_TRAILER_SETTINGS.geometry.axle_width_m],
-          [trailerInputs.hitchToAxle, geometrySource.hitch_to_axle_m ?? DEFAULT_TRAILER_SETTINGS.geometry.hitch_to_axle_m],
-          [trailerInputs.length, geometrySource.length_m ?? DEFAULT_TRAILER_SETTINGS.geometry.length_m],
-          [trailerInputs.rampLength, rampSource.length_m ?? DEFAULT_TRAILER_SETTINGS.ramp.length_m],
-          [trailerInputs.rampHeight, rampSource.height_m ?? DEFAULT_TRAILER_SETTINGS.ramp.height_m],
-        ];
-        for (const [input, value] of pairs) {
-          if (!(input instanceof HTMLInputElement)) {
-            continue;
+        if (trailerInputs) {
+          const pairs = [
+            [
+              trailerInputs.axleWidth,
+              geometrySource.axle_width_m ?? DEFAULT_TRAILER_SETTINGS.geometry.axle_width_m,
+            ],
+            [
+              trailerInputs.hitchToAxle,
+              geometrySource.hitch_to_axle_m ?? DEFAULT_TRAILER_SETTINGS.geometry.hitch_to_axle_m,
+            ],
+            [trailerInputs.length, geometrySource.length_m ?? DEFAULT_TRAILER_SETTINGS.geometry.length_m],
+            [trailerInputs.rampLength, rampSource.length_m ?? DEFAULT_TRAILER_SETTINGS.ramp.length_m],
+            [trailerInputs.rampHeight, rampSource.height_m ?? DEFAULT_TRAILER_SETTINGS.ramp.height_m],
+          ];
+          for (const [input, value] of pairs) {
+            if (!(input instanceof HTMLInputElement)) {
+              continue;
+            }
+            if (!forceUpdate && input.dataset.userEdited === "true") {
+              continue;
+            }
+            if (Number.isFinite(value)) {
+              input.value = String(Number(value));
+            } else if (forceUpdate) {
+              input.value = "";
+            }
+            if (forceUpdate) {
+              delete input.dataset.userEdited;
+            }
           }
-          if (!forceUpdate && input.dataset.userEdited === "true") {
-            continue;
+        }
+        const referenceSource =
+          settings && typeof settings.reference === "object"
+            ? settings.reference
+            : DEFAULT_TRAILER_SETTINGS.reference;
+        updateTrailerReferenceDisplay(referenceSource);
+      }
+
+      function formatOrientationValue(value) {
+        const numeric = Number(value);
+        if (!Number.isFinite(numeric)) {
+          return "—";
+        }
+        const rounded = Math.abs(numeric) < 0.5 ? 0 : numeric;
+        return `${rounded.toFixed(0)}°`;
+      }
+
+      function updateTrailerReferenceDisplay(reference) {
+        const source =
+          reference && typeof reference === "object"
+            ? reference
+            : DEFAULT_TRAILER_SETTINGS.reference;
+        if (trailerReferenceRoll) {
+          trailerReferenceRoll.textContent = formatOrientationValue(source.roll);
+        }
+        if (trailerReferencePitch) {
+          trailerReferencePitch.textContent = formatOrientationValue(source.pitch);
+        }
+      }
+
+      async function saveTrailerReference(reference) {
+        const roll = Number(reference?.roll);
+        const pitch = Number(reference?.pitch);
+        if (![roll, pitch].every((value) => Number.isFinite(value))) {
+          throw new Error("Orientation data unavailable.");
+        }
+        const response = await fetch("/api/leveling/config", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ reference: { roll, pitch } }),
+        });
+        if (!response.ok) {
+          let detail = "Unable to save level reference.";
+          try {
+            const error = await response.json();
+            if (error && typeof error.detail === "string") {
+              detail = error.detail;
+            }
+          } catch (err) {
+            console.error(err);
           }
-          if (Number.isFinite(value)) {
-            input.value = String(Number(value));
-          } else if (forceUpdate) {
-            input.value = "";
-          }
-          if (forceUpdate) {
-            delete input.dataset.userEdited;
-          }
+          throw new Error(detail);
+        }
+        const data = await response.json();
+        applyTrailerSettings(data);
+        return data;
+      }
+
+      function setTrailerReferenceButtonsDisabled(disabled) {
+        if (trailerReferenceCaptureButton) {
+          trailerReferenceCaptureButton.disabled = disabled;
+        }
+        if (trailerReferenceClearButton) {
+          trailerReferenceClearButton.disabled = disabled;
         }
       }
 

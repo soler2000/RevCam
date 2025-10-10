@@ -54,23 +54,11 @@ class RampSpecification:
 
 
 @dataclass(frozen=True, slots=True)
-class LevelingSettings:
-    """Aggregated settings for the trailer levelling system."""
-
-    geometry: TrailerGeometry = TrailerGeometry()
-    ramp: RampSpecification = RampSpecification()
-
-    def to_dict(self) -> dict[str, object]:
-        return {"geometry": self.geometry.to_dict(), "ramp": self.ramp.to_dict()}
-
-
-@dataclass(frozen=True, slots=True)
 class OrientationAngles:
-    """Orientation expressed using roll, pitch and yaw (in degrees)."""
+    """Orientation expressed using roll and pitch angles (in degrees)."""
 
     roll: float
     pitch: float
-    yaw: float
 
     def normalised(self) -> "OrientationAngles":
         """Normalise angles to the range [-180, 180]."""
@@ -78,8 +66,37 @@ class OrientationAngles:
         return OrientationAngles(
             roll=_wrap_degrees(self.roll),
             pitch=_wrap_degrees(self.pitch),
-            yaw=_wrap_degrees(self.yaw),
         )
+
+    def relative_to(self, reference: "OrientationAngles") -> "OrientationAngles":
+        """Return the orientation expressed relative to a reference."""
+
+        return OrientationAngles(
+            roll=self.roll - reference.roll,
+            pitch=self.pitch - reference.pitch,
+        ).normalised()
+
+    def to_dict(self) -> dict[str, float]:
+        return {
+            "roll": float(self.roll),
+            "pitch": float(self.pitch),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class LevelingSettings:
+    """Aggregated settings for the trailer levelling system."""
+
+    geometry: TrailerGeometry = TrailerGeometry()
+    ramp: RampSpecification = RampSpecification()
+    reference: OrientationAngles = OrientationAngles(0.0, 0.0)
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "geometry": self.geometry.to_dict(),
+            "ramp": self.ramp.to_dict(),
+            "reference": self.reference.to_dict(),
+        }
 
 
 def _wrap_degrees(value: float) -> float:
@@ -89,7 +106,8 @@ def _wrap_degrees(value: float) -> float:
 
 DEFAULT_TRAILER_GEOMETRY = TrailerGeometry()
 DEFAULT_RAMP_SPECIFICATION = RampSpecification()
-DEFAULT_LEVELING_SETTINGS = LevelingSettings()
+DEFAULT_LEVEL_REFERENCE = OrientationAngles(0.0, 0.0)
+DEFAULT_LEVELING_SETTINGS = LevelingSettings(reference=DEFAULT_LEVEL_REFERENCE)
 
 
 def _parse_geometry(payload: Mapping[str, Any] | TrailerGeometry, *, default: TrailerGeometry) -> TrailerGeometry:
@@ -113,6 +131,31 @@ def _parse_ramp(payload: Mapping[str, Any] | RampSpecification, *, default: Ramp
     return RampSpecification(length, height)
 
 
+def _parse_reference(
+    payload: Mapping[str, Any] | OrientationAngles | None, *, default: OrientationAngles
+) -> OrientationAngles:
+    if payload is None:
+        return default
+    if isinstance(payload, OrientationAngles):
+        return payload
+    if not isinstance(payload, Mapping):
+        raise ValueError("Level reference must be provided as a mapping")
+
+    def _component(name: str, fallback: float) -> float:
+        value = payload.get(name, fallback)
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError) as exc:  # pragma: no cover - defensive branch
+            raise ValueError(f"Level reference {name} must be numeric") from exc
+        if not math.isfinite(numeric):
+            raise ValueError(f"Level reference {name} must be a finite value")
+        return numeric
+
+    roll = _component("roll", default.roll)
+    pitch = _component("pitch", default.pitch)
+    return OrientationAngles(roll=roll, pitch=pitch).normalised()
+
+
 def parse_leveling_settings(
     value: Mapping[str, Any] | LevelingSettings | None, *, default: LevelingSettings
 ) -> LevelingSettings:
@@ -124,11 +167,27 @@ def parse_leveling_settings(
         return value
     if not isinstance(value, Mapping):
         raise ValueError("Levelling settings must be provided as a mapping")
-    geometry_payload = value.get("geometry", value)
-    ramp_payload = value.get("ramp", value)
-    geometry = _parse_geometry(geometry_payload, default=default.geometry)
-    ramp = _parse_ramp(ramp_payload, default=default.ramp)
-    return LevelingSettings(geometry=geometry, ramp=ramp)
+    geometry_payload = value.get("geometry")
+    ramp_payload = value.get("ramp")
+    reference_payload = value.get("reference")
+
+    if geometry_payload is None and any(
+        key in value for key in ("axle_width_m", "hitch_to_axle_m", "length_m")
+    ):
+        geometry_payload = value
+    if ramp_payload is None and any(key in value for key in ("length_m", "height_m")):
+        ramp_payload = value
+    if reference_payload is None and any(key in value for key in ("roll", "pitch")):
+        reference_payload = value
+
+    geometry = (
+        _parse_geometry(geometry_payload, default=default.geometry)
+        if geometry_payload is not None
+        else default.geometry
+    )
+    ramp = _parse_ramp(ramp_payload, default=default.ramp) if ramp_payload is not None else default.ramp
+    reference = _parse_reference(reference_payload, default=default.reference)
+    return LevelingSettings(geometry=geometry, ramp=ramp, reference=reference)
 
 
 def _compute_side_adjustment(roll_deg: float, width_m: float) -> tuple[str, float, float]:
@@ -252,19 +311,33 @@ def compute_unhitched_leveling(orientation: OrientationAngles, settings: Levelin
     }
 
 
+def _round_orientation_value(value: float, *, decimals: int = 0) -> float:
+    rounded = round(float(value), decimals)
+    if rounded == 0:
+        return 0.0
+    return rounded
+
+
 def evaluate_leveling(orientation: OrientationAngles, settings: LevelingSettings) -> dict[str, object]:
     """Return a summary of levelling recommendations."""
 
-    orientation = orientation.normalised()
-    hitched = compute_hitched_leveling(orientation, settings)
-    unhitched = compute_unhitched_leveling(orientation, settings)
-    support_points = _compute_support_point_adjustments(orientation, settings)
+    raw_orientation = orientation.normalised()
+    relative_orientation = raw_orientation.relative_to(settings.reference)
+    hitched = compute_hitched_leveling(relative_orientation, settings)
+    unhitched = compute_unhitched_leveling(relative_orientation, settings)
+    support_points = _compute_support_point_adjustments(relative_orientation, settings)
+    rounded_orientation = {
+        "roll": _round_orientation_value(relative_orientation.roll),
+        "pitch": _round_orientation_value(relative_orientation.pitch),
+    }
+    rounded_raw_orientation = {
+        "roll": _round_orientation_value(raw_orientation.roll),
+        "pitch": _round_orientation_value(raw_orientation.pitch),
+    }
+
     return {
-        "orientation": {
-            "roll": orientation.roll,
-            "pitch": orientation.pitch,
-            "yaw": orientation.yaw,
-        },
+        "orientation": rounded_orientation,
+        "raw_orientation": rounded_raw_orientation,
         "hitched": hitched,
         "unhitched": unhitched,
         "support_points": support_points,

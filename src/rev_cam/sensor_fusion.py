@@ -84,50 +84,87 @@ class _AxisKalmanFilter:
 
 
 class Gy85KalmanFilter:
-    """Fusion filter combining gyro, accelerometer and magnetometer data."""
+    """Fusion filter combining gyro and accelerometer data for orientation."""
 
     def __init__(self) -> None:
         self._roll = _AxisKalmanFilter()
         self._pitch = _AxisKalmanFilter()
-        self._yaw = _AxisKalmanFilter(r_measure=0.5)
-        self._last_orientation = OrientationAngles(0.0, 0.0, 0.0)
+        self._smoothed_orientation = OrientationAngles(0.0, 0.0)
+        self._smoothing_alpha = 0.2
 
     def reset(self) -> None:
         self._roll.reset()
         self._pitch.reset()
-        self._yaw.reset()
-        self._last_orientation = OrientationAngles(0.0, 0.0, 0.0)
+        self._smoothed_orientation = OrientationAngles(0.0, 0.0)
 
     def update(self, sample: SensorSample, dt: Optional[float] = None) -> OrientationAngles:
         """Update the filter with a new sensor sample."""
 
         if dt is None or not math.isfinite(dt) or dt <= 0:
             dt = 0.02
-        ax, ay, az = sample.accelerometer.x, sample.accelerometer.y, sample.accelerometer.z
-        gx, gy, gz = sample.gyroscope.x, sample.gyroscope.y, sample.gyroscope.z
-        mx, my, mz = sample.magnetometer.x, sample.magnetometer.y, sample.magnetometer.z
+        # Remap the sensor axes into the trailer coordinate system.  The trailer
+        # roll corresponds to the IMU's X axis while pitch follows the IMU's Z
+        # axis as requested by the hardware layout.  The remaining axis becomes
+        # the trailer's vertical component.
+        trailer_ax = sample.accelerometer.z
+        trailer_ay = sample.accelerometer.x
+        trailer_az = sample.accelerometer.y
 
-        # Accelerometer-based roll and pitch (degrees)
-        roll_measure = math.degrees(math.atan2(az, ay)) if ay or az else 0.0
-        denominator = math.sqrt(ay * ay + az * az)
-        pitch_measure = math.degrees(math.atan2(-ax, denominator)) if denominator else 0.0
+        gx_raw, gy_raw, gz_raw = sample.gyroscope.x, sample.gyroscope.y, sample.gyroscope.z
 
-        roll = self._roll.update(gx, roll_measure, dt)
-        pitch = self._pitch.update(gy, pitch_measure, dt)
+        # ``p`` denotes roll rate, ``q`` pitch rate and ``r`` yaw rate.  Even
+        # though the application does not expose yaw we still use ``r`` to remove
+        # the geometric coupling between roll and pitch.
+        # Trailer roll aligns with the IMU's Z axis, pitch with X and yaw with Y.
+        p = gz_raw
+        q = gx_raw
+        r = gy_raw
 
-        # Tilt compensation for magnetometer to derive yaw
-        roll_rad = math.radians(roll)
-        pitch_rad = math.radians(pitch)
+        roll_rad = math.radians(self._smoothed_orientation.roll)
+        pitch_rad = math.radians(self._smoothed_orientation.pitch)
         sin_roll = math.sin(roll_rad)
         cos_roll = math.cos(roll_rad)
-        sin_pitch = math.sin(pitch_rad)
+        tan_pitch = math.tan(pitch_rad)
         cos_pitch = math.cos(pitch_rad)
-        compensated_x = mx * cos_pitch + mz * sin_pitch
-        compensated_y = mx * sin_roll * sin_pitch + my * cos_roll - mz * sin_roll * cos_pitch
-        yaw_measure = math.degrees(math.atan2(-compensated_y, compensated_x)) if compensated_x or compensated_y else self._last_orientation.yaw
+        if abs(cos_pitch) < 1e-6:
+            tan_pitch = 0.0
+        else:
+            tan_pitch = max(min(tan_pitch, 50.0), -50.0)
+        roll_rate = p + q * sin_roll * tan_pitch + r * cos_roll * tan_pitch
+        pitch_rate = q * cos_roll - r * sin_roll
+        # Accelerometer-based roll and pitch (degrees)
+        # Roll is derived from the IMU's X axis and pitch from the Z axis so the
+        # displayed angles follow the trailer layout.
+        roll_measure = math.degrees(math.atan2(trailer_ay, trailer_az)) if trailer_ay or trailer_az else 0.0
+        denominator = math.sqrt(trailer_ay * trailer_ay + trailer_az * trailer_az)
+        pitch_measure = (
+            math.degrees(math.atan2(-trailer_ax, denominator)) if denominator else 0.0
+        )
 
-        yaw = self._yaw.update(gz, yaw_measure, dt)
-        orientation = OrientationAngles(roll=roll, pitch=pitch, yaw=yaw).normalised()
-        self._last_orientation = orientation
-        return orientation
+        roll = self._roll.update(roll_rate, roll_measure, dt)
+        pitch = self._pitch.update(pitch_rate, pitch_measure, dt)
+
+        raw_orientation = OrientationAngles(roll=roll, pitch=pitch).normalised()
+        smoothed = OrientationAngles(
+            roll=_smooth_angle(self._smoothed_orientation.roll, raw_orientation.roll, self._smoothing_alpha),
+            pitch=_smooth_angle(
+                self._smoothed_orientation.pitch, raw_orientation.pitch, self._smoothing_alpha
+            ),
+        ).normalised()
+        self._smoothed_orientation = smoothed
+        return smoothed
+
+
+def _smooth_angle(previous: float, current: float, alpha: float) -> float:
+    """Return an exponentially smoothed angle while respecting wrap-around."""
+
+    previous = float(previous)
+    current = float(current)
+    alpha = float(alpha)
+    if alpha <= 0:
+        return previous
+    if alpha >= 1:
+        return current
+    delta = ((current - previous + 180.0) % 360.0) - 180.0
+    return previous + alpha * delta
 

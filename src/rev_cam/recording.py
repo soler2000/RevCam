@@ -203,13 +203,23 @@ def _select_time_base(frame_rate: Fraction) -> Fraction:
         numerator = 1
     if denominator <= 0:
         denominator = 1
-    # Prefer a direct reciprocal of the frame rate so encoded packets advance by
-    # one tick per frame, avoiding accelerated playback and ensuring durations
-    # match the recorded timeline.
-    time_base = Fraction(denominator, numerator)
+    frame_rate_value = Fraction(numerator, denominator)
+    if frame_rate_value <= 0:
+        return Fraction(1, 30)
+    # Prefer a high-resolution reciprocal for very low frame rates so encoded
+    # packets advance in millisecond-scale increments. This avoids accelerated
+    # playback and improves timing precision when working with slow capture
+    # intervals.
+    if frame_rate_value <= 5:
+        ticks_per_second = frame_rate_value * 1000
+        if ticks_per_second.numerator <= 0:
+            return Fraction(1, 30)
+        time_base = Fraction(ticks_per_second.denominator, ticks_per_second.numerator)
+    else:
+        time_base = Fraction(denominator, numerator)
     if time_base <= 0:
         return Fraction(1, 30)
-    return time_base.limit_denominator(1_000)
+    return time_base.limit_denominator(1_000_000)
 
 
 def _apply_stream_timing(

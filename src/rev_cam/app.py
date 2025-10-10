@@ -260,9 +260,15 @@ class LevelingRampPayload(BaseModel):
     height_m: float | None = None
 
 
+class LevelingReferencePayload(BaseModel):
+    roll: float | None = None
+    pitch: float | None = None
+
+
 class LevelingConfigPayload(BaseModel):
     geometry: LevelingGeometryPayload | None = None
     ramp: LevelingRampPayload | None = None
+    reference: LevelingReferencePayload | None = None
 
 
 class LevelingSamplePayload(BaseModel):
@@ -1262,6 +1268,7 @@ def create_app(
         return {
             "mode": mode,
             "orientation": evaluation["orientation"],
+            "raw_orientation": evaluation["raw_orientation"],
             "analysis": evaluation[mode_key],
             "hitched": evaluation["hitched"],
             "unhitched": evaluation["unhitched"],
@@ -1295,6 +1302,14 @@ def create_app(
             }
             if ramp_data:
                 update_payload["ramp"] = ramp_data
+        if payload.reference is not None:
+            reference_data = {
+                key: value
+                for key, value in payload.reference.model_dump().items()
+                if value is not None
+            }
+            if reference_data:
+                update_payload["reference"] = reference_data
         if not update_payload:
             raise HTTPException(status_code=400, detail="No levelling values provided")
         try:
@@ -1318,6 +1333,7 @@ def create_app(
         return {
             "mode": payload.mode,
             "orientation": evaluation["orientation"],
+            "raw_orientation": evaluation["raw_orientation"],
             "analysis": evaluation[mode_key],
             "hitched": evaluation["hitched"],
             "unhitched": evaluation["unhitched"],
