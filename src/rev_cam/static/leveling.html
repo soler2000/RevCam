@@ -451,27 +451,17 @@
               </div>
               <div class="analysis-section">
                 <section>
-                  <h3>Hitched guidance</h3>
-                  <p id="hitched-message">—</p>
+                  <h3>Leveling guidance</h3>
+                  <p id="leveling-message">—</p>
                   <dl class="stats">
                     <dt>Side to raise</dt>
-                    <dd id="hitched-side">—</dd>
+                    <dd id="leveling-side">—</dd>
                     <dt>Raise amount</dt>
-                    <dd id="hitched-raise">—</dd>
+                    <dd id="leveling-raise">—</dd>
                     <dt>Ramp travel</dt>
-                    <dd id="hitched-travel">—</dd>
-                  </dl>
-                </section>
-                <section>
-                  <h3>Unhitched guidance</h3>
-                  <p id="unhitched-message">—</p>
-                  <dl class="stats">
-                    <dt>Side to raise</dt>
-                    <dd id="unhitched-side">—</dd>
-                    <dt>Raise amount</dt>
-                    <dd id="unhitched-raise">—</dd>
+                    <dd id="leveling-ramp">—</dd>
                     <dt>Hitch adjustment</dt>
-                    <dd id="unhitched-hitch">—</dd>
+                    <dd id="leveling-hitch">—</dd>
                   </dl>
                 </section>
                 <section class="support-section">
@@ -532,14 +522,11 @@
       const sensorStatus = document.getElementById("sensor-status");
       const rollDisplay = document.getElementById("roll-display");
       const pitchDisplay = document.getElementById("pitch-display");
-      const hitchedMessage = document.getElementById("hitched-message");
-      const hitchedSide = document.getElementById("hitched-side");
-      const hitchedRaise = document.getElementById("hitched-raise");
-      const hitchedTravel = document.getElementById("hitched-travel");
-      const unhitchedMessage = document.getElementById("unhitched-message");
-      const unhitchedSide = document.getElementById("unhitched-side");
-      const unhitchedRaise = document.getElementById("unhitched-raise");
-      const unhitchedHitch = document.getElementById("unhitched-hitch");
+      const levelingMessage = document.getElementById("leveling-message");
+      const levelingSide = document.getElementById("leveling-side");
+      const levelingRaise = document.getElementById("leveling-raise");
+      const levelingRamp = document.getElementById("leveling-ramp");
+      const levelingHitch = document.getElementById("leveling-hitch");
       const supportElements = new Map();
       const supportRoot = document.getElementById("support-points");
       if (supportRoot) {
@@ -725,31 +712,28 @@
         rollDisplay.textContent = formatAngle(latestOrientation.roll);
         pitchDisplay.textContent = formatAngle(latestOrientation.pitch);
 
-        hitchedMessage.textContent = hitched.message;
-        hitchedSide.textContent = formatSide(hitched.side_to_raise);
-        hitchedRaise.textContent = formatDistance(hitched.required_raise_m);
+        levelingMessage.textContent = unhitched.message || hitched.message;
+        levelingSide.textContent = formatSide(hitched.side_to_raise);
+        levelingRaise.textContent = formatDistance(hitched.required_raise_m);
         if (hitched.ramp) {
           const travel = hitched.ramp.travel_m ?? 0;
           const percent = hitched.ramp.travel_percent ?? 0;
           const limited = hitched.ramp.limited;
           const travelText = `${formatDistance(travel)} (${percent.toFixed(1)}%)`;
-          hitchedTravel.textContent = limited
+          levelingRamp.textContent = limited
             ? `${travelText} – limited`
             : travelText;
         } else {
-          hitchedTravel.textContent = "—";
+          levelingRamp.textContent = "—";
         }
 
-        unhitchedMessage.textContent = unhitched.message;
-        unhitchedSide.textContent = formatSide(unhitched.side_to_raise);
-        unhitchedRaise.textContent = formatDistance(unhitched.required_raise_m);
         const hitchDir = unhitched.hitch_direction;
         const hitchAmount = formatDistance(unhitched.hitch_adjustment_m);
         if (hitchDir === "level") {
-          unhitchedHitch.textContent = "Level";
+          levelingHitch.textContent = "Level";
         } else {
           const direction = formatSide(hitchDir);
-          unhitchedHitch.textContent = `${direction} ${hitchAmount}`;
+          levelingHitch.textContent = `${direction} ${hitchAmount}`;
         }
 
         updateSupportPoints(supportPoints);
