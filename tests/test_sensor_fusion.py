@@ -42,6 +42,25 @@ def _make_static_sample(roll_deg: float, pitch_deg: float) -> SensorSample:
     )
 
 
+def _make_dynamic_sample(
+    roll_deg: float,
+    pitch_deg: float,
+    roll_rate: float,
+    pitch_rate: float,
+    yaw_rate: float = 0.0,
+) -> SensorSample:
+    base = _make_static_sample(roll_deg, pitch_deg)
+    # Board gyro axes follow the same 90° Z rotation as the accelerometer axes.
+    board_gx = pitch_rate
+    board_gy = roll_rate
+    board_gz = yaw_rate
+    return SensorSample(
+        accelerometer=base.accelerometer,
+        gyroscope=Vector3(x=board_gx, y=board_gy, z=board_gz),
+        magnetometer=base.magnetometer,
+    )
+
+
 @pytest.mark.parametrize(
     "roll_deg,pitch_deg",
     [
@@ -59,3 +78,19 @@ def test_kalman_filter_matches_trailer_axes(roll_deg, pitch_deg):
     assert orientation is not None
     assert orientation.roll == pytest.approx(roll_deg, abs=0.6)
     assert orientation.pitch == pytest.approx(pitch_deg, abs=0.6)
+
+
+def test_pitch_rate_changes_do_not_bias_roll():
+    filter = Gy85KalmanFilter()
+    level_sample = _make_dynamic_sample(0.0, 0.0, roll_rate=0.0, pitch_rate=0.0)
+    for _ in range(10):
+        filter.update(level_sample, dt=0.02)
+
+    pitch_rate = 15.0
+    orientation = None
+    for _ in range(200):
+        sample = _make_dynamic_sample(0.0, 0.0, roll_rate=0.0, pitch_rate=pitch_rate)
+        orientation = filter.update(sample, dt=0.02)
+
+    assert orientation is not None
+    assert orientation.roll == pytest.approx(0.0, abs=0.2)

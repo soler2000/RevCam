@@ -103,7 +103,7 @@ class Gy85KalmanFilter:
         if dt is None or not math.isfinite(dt) or dt <= 0:
             dt = 0.02
         ax_raw, ay_raw, az = sample.accelerometer.x, sample.accelerometer.y, sample.accelerometer.z
-        gx_raw, gy_raw = sample.gyroscope.x, sample.gyroscope.y
+        gx_raw, gy_raw, gz_raw = sample.gyroscope.x, sample.gyroscope.y, sample.gyroscope.z
 
         # The IMU is mounted rotated 90° around the Z axis relative to the trailer,
         # so the board's X axis aligns with the trailer's lateral axis (roll) and
@@ -111,15 +111,33 @@ class Gy85KalmanFilter:
         # Remap the axes so downstream calculations operate in trailer space.
         ax = ay_raw
         ay = ax_raw
-        gx = gy_raw
-        gy = gx_raw
+        # Angular velocities mapped to trailer axes. ``p`` denotes roll rate,
+        # ``q`` pitch rate and ``r`` yaw rate.  Even though the application does
+        # not expose yaw we still use ``r`` to remove the geometric coupling
+        # between roll and pitch.
+        p = gy_raw
+        q = gx_raw
+        r = gz_raw
+
+        roll_rad = math.radians(self._smoothed_orientation.roll)
+        pitch_rad = math.radians(self._smoothed_orientation.pitch)
+        sin_roll = math.sin(roll_rad)
+        cos_roll = math.cos(roll_rad)
+        tan_pitch = math.tan(pitch_rad)
+        cos_pitch = math.cos(pitch_rad)
+        if abs(cos_pitch) < 1e-6:
+            tan_pitch = 0.0
+        else:
+            tan_pitch = max(min(tan_pitch, 50.0), -50.0)
+        roll_rate = p + q * sin_roll * tan_pitch + r * cos_roll * tan_pitch
+        pitch_rate = q * cos_roll - r * sin_roll
         # Accelerometer-based roll and pitch (degrees)
         roll_measure = math.degrees(math.atan2(ay, az)) if ay or az else 0.0
         denominator = math.sqrt(ay * ay + az * az)
         pitch_measure = math.degrees(math.atan2(-ax, denominator)) if denominator else 0.0
 
-        roll = self._roll.update(gx, roll_measure, dt)
-        pitch = self._pitch.update(gy, pitch_measure, dt)
+        roll = self._roll.update(roll_rate, roll_measure, dt)
+        pitch = self._pitch.update(pitch_rate, pitch_measure, dt)
 
         raw_orientation = OrientationAngles(roll=roll, pitch=pitch).normalised()
         smoothed = OrientationAngles(
