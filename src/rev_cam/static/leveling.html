@@ -636,7 +636,6 @@
   <script type="module">
       import * as THREE from "https://unpkg.com/three@0.158.0/build/three.module.js?module";
       import { OrbitControls } from "https://unpkg.com/three@0.158.0/examples/jsm/controls/OrbitControls.js?module";
-      import { STLLoader } from "https://unpkg.com/three@0.158.0/examples/jsm/loaders/STLLoader.js?module";
 
       const SAMPLE_INTERVAL = 300;
       const sampleRateDisplay = document.getElementById("sample-rate");
@@ -677,7 +676,7 @@
       let pendingSample = false;
       let hardwareAvailable = false;
       let latestOrientation = { roll: 0, pitch: 0 };
-      let scene, renderer, camera, controls, trailer, placeholder;
+      let scene, renderer, camera, controls, trailer;
 
       async function refreshSensorStatus() {
         if (!sensorStatus) {
@@ -1135,80 +1134,22 @@
         plane.rotation.x = -Math.PI / 2;
         scene.add(plane);
 
-        const placeholderMaterial = new THREE.MeshStandardMaterial({
-          color: 0x4f586b,
-          metalness: 0.2,
-          roughness: 0.6,
-          transparent: true,
-          opacity: 0.85,
+        const trailerMaterial = new THREE.MeshStandardMaterial({
+          color: 0xa7b5c7,
+          metalness: 0.45,
+          roughness: 0.55,
         });
-        placeholder = new THREE.Mesh(
-          new THREE.BoxGeometry(2.6, 0.8, 0.9),
-          placeholderMaterial
+        trailer = new THREE.Mesh(
+          new THREE.BoxGeometry(2.6, 0.9, 1.0),
+          trailerMaterial
         );
-        placeholder.position.set(0, 0.4, 0);
-        scene.add(placeholder);
+        trailer.position.set(0, 0.45, 0);
+        scene.add(trailer);
         if (analysisStatus) {
-          analysisStatus.textContent = "Rendering placeholder trailer";
-          analysisStatus.classList.remove("error", "success");
+          analysisStatus.textContent = "Rendering simplified trailer";
+          analysisStatus.classList.remove("error");
           analysisStatus.classList.add("live");
         }
-
-        const loader = new STLLoader();
-        let loaderSettled = false;
-        const loaderTimeout = window.setTimeout(() => {
-          if (loaderSettled || !analysisStatus) {
-            return;
-          }
-          analysisStatus.textContent =
-            "Waiting for trailer model… displaying placeholder";
-          analysisStatus.classList.remove("error", "success");
-          analysisStatus.classList.add("live");
-        }, 4000);
-        loader.load(
-          "/models/airstream_trailer.stl",
-          (geometry) => {
-            loaderSettled = true;
-            window.clearTimeout(loaderTimeout);
-            const material = new THREE.MeshStandardMaterial({
-              color: 0xbcc9d6,
-              metalness: 0.65,
-              roughness: 0.35,
-            });
-            trailer = new THREE.Mesh(geometry, material);
-            geometry.computeBoundingBox();
-            const box = geometry.boundingBox;
-            const center = box.getCenter(new THREE.Vector3());
-            geometry.translate(-center.x, -center.y, -center.z);
-            geometry.computeBoundingBox();
-            const adjustedBox = geometry.boundingBox;
-            trailer.position.y = -adjustedBox.min.y;
-            if (placeholder) {
-              scene.remove(placeholder);
-              placeholder.geometry.dispose();
-              placeholder.material.dispose();
-              placeholder = undefined;
-            }
-            scene.add(trailer);
-            if (analysisStatus) {
-              analysisStatus.textContent = "Loaded trailer model";
-              analysisStatus.classList.remove("error", "live");
-              analysisStatus.classList.add("success");
-            }
-          },
-          undefined,
-          (error) => {
-            loaderSettled = true;
-            window.clearTimeout(loaderTimeout);
-            console.error(error);
-            if (analysisStatus) {
-              analysisStatus.textContent =
-                "Unable to load trailer model – showing placeholder";
-              analysisStatus.classList.remove("success", "live");
-              analysisStatus.classList.add("error");
-            }
-          }
-        );
 
         const updateRendererSize = () => {
           const { width: w, height: h } = measureViewerSize();
