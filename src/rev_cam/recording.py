@@ -195,7 +195,7 @@ def _compose_codec_failure_message(
 
 
 def _select_time_base(frame_rate: Fraction) -> Fraction:
-    """Choose a high-resolution container time base for ``frame_rate``."""
+    """Choose a container time base that mirrors the frame duration."""
 
     numerator = frame_rate.numerator
     denominator = frame_rate.denominator
@@ -203,13 +203,13 @@ def _select_time_base(frame_rate: Fraction) -> Fraction:
         numerator = 1
     if denominator <= 0:
         denominator = 1
-    # Use millisecond granularity relative to the FPS so we retain enough
-    # precision for jitter while staying inside encoder-friendly bounds (for
-    # example, V4L2-backed H.264 encoders expect a kHz-scale time base).
-    time_base = Fraction(denominator, numerator * 1000)
+    # Prefer a direct reciprocal of the frame rate so encoded packets advance by
+    # one tick per frame, avoiding accelerated playback and ensuring durations
+    # match the recorded timeline.
+    time_base = Fraction(denominator, numerator)
     if time_base <= 0:
-        return Fraction(1, 1000)
-    return time_base.limit_denominator(90_000)
+        return Fraction(1, 30)
+    return time_base.limit_denominator(1_000)
 
 
 def _apply_stream_timing(

@@ -127,7 +127,7 @@ def test_prepare_frame_for_encoding_trims_extra_channels():
 
 def test_select_time_base_matches_frame_duration():
     result = recording._select_time_base(Fraction(30, 1))
-    assert result == Fraction(1, 30_000)
+    assert result == Fraction(1, 30)
 
 
 def test_single_frame_duration_respects_time_base(tmp_path):
