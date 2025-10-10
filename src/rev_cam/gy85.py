@@ -63,9 +63,19 @@ class Gy85Sensor:
         self._lock = Lock()
         self._bus = self._create_bus(i2c_bus)
         self._owns_bus = True
-        self._i2c_devices = self._create_devices()
+        self._i2c_devices = None
         self._last_timestamp: float = 0.0
-        self._initialise_sensors()
+        try:
+            self._i2c_devices = self._create_devices()
+            self._initialise_sensors()
+        except Exception:
+            # Ensure any partially created resources are released before
+            # propagating the failure to the caller. ``close`` resets the
+            # internal handles so subsequent attempts can succeed once the
+            # underlying issue is resolved (for example when the hardware is
+            # connected again).
+            self.close()
+            raise
 
     def close(self) -> None:
         """Release any owned I²C resources."""
@@ -123,9 +133,21 @@ class Gy85Sensor:
         except Exception as exc:  # pragma: no cover - environment specific
             raise Gy85UnavailableError(f"Unable to initialise I2C devices: {exc}") from exc
 
-        accel = I2CDevice(self._bus, self._ADXL345_ADDRESS)
-        gyro = I2CDevice(self._bus, self._ITG3200_ADDRESS)
-        mag = I2CDevice(self._bus, self._HMC5883L_ADDRESS)
+        def _probe_device(address: int, label: str):
+            try:
+                return I2CDevice(self._bus, address)
+            except ValueError as exc:
+                raise Gy85UnavailableError(
+                    f"{label} not found at address 0x{address:02X}: {exc}"
+                ) from exc
+            except OSError as exc:
+                raise Gy85UnavailableError(
+                    f"Unable to communicate with {label} at address 0x{address:02X}: {exc}"
+                ) from exc
+
+        accel = _probe_device(self._ADXL345_ADDRESS, "accelerometer")
+        gyro = _probe_device(self._ITG3200_ADDRESS, "gyroscope")
+        mag = _probe_device(self._HMC5883L_ADDRESS, "magnetometer")
         return {
             "accel": accel,
             "gyro": gyro,
