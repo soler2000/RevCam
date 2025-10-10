@@ -311,7 +311,7 @@ def compute_unhitched_leveling(orientation: OrientationAngles, settings: Levelin
     }
 
 
-def _round_orientation_value(value: float, *, decimals: int = 1) -> float:
+def _round_orientation_value(value: float, *, decimals: int = 0) -> float:
     rounded = round(float(value), decimals)
     if rounded == 0:
         return 0.0

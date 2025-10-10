@@ -736,13 +736,13 @@
         if (absValue >= 1) {
           return `${value.toFixed(2)} m`;
         }
-        return `${(value * 100).toFixed(1)} cm`;
+        return `${(value * 100).toFixed(0)} cm`;
       }
 
       function formatAngle(value) {
         if (!Number.isFinite(value)) return "—";
-        const rounded = Math.abs(value) < 0.05 ? 0 : value;
-        return `${rounded.toFixed(1)}°`;
+        const rounded = Math.abs(value) < 0.5 ? 0 : value;
+        return `${rounded.toFixed(0)}°`;
       }
 
       function formatSide(value) {

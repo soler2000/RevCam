@@ -95,6 +95,6 @@ def test_evaluate_leveling_applies_reference():
     orientation = OrientationAngles(roll=4.5, pitch=1.0)
     result = evaluate_leveling(orientation, settings)
     assert result["orientation"]["roll"] == pytest.approx(3.0)
-    assert result["orientation"]["pitch"] == pytest.approx(1.5)
-    assert result["raw_orientation"]["roll"] == pytest.approx(4.5)
+    assert result["orientation"]["pitch"] == pytest.approx(2.0)
+    assert result["raw_orientation"]["roll"] == pytest.approx(4.0)
     assert result["raw_orientation"]["pitch"] == pytest.approx(1.0)
