@@ -207,6 +207,48 @@ def _select_time_base(frame_rate: Fraction) -> Fraction:
     return time_base.limit_denominator(90_000)
 
 
+def _apply_stream_timing(
+    stream: av.video.stream.VideoStream,
+    frame_rate: Fraction,
+    time_base: Fraction,
+) -> None:
+    """Synchronise stream and codec timing so playback honours real duration."""
+
+    try:
+        stream.time_base = time_base
+    except Exception:  # pragma: no cover - property may be read-only
+        pass
+
+    try:
+        stream.rate = frame_rate
+    except Exception:  # pragma: no cover - legacy PyAV attribute
+        pass
+
+    try:
+        stream.average_rate = frame_rate
+    except Exception:  # pragma: no cover - best-effort hint
+        pass
+
+    codec_context = getattr(stream, "codec_context", None)
+    if codec_context is None:
+        return
+
+    try:
+        codec_context.time_base = time_base
+    except Exception:  # pragma: no cover - codec contexts vary
+        pass
+
+    try:
+        codec_context.framerate = frame_rate
+    except Exception:  # pragma: no cover - optional property
+        pass
+
+    try:
+        codec_context.ticks_per_frame = 1
+    except Exception:  # pragma: no cover - property may be absent
+        pass
+
+
 def _extract_multipart_boundary(media_type: str) -> str | None:
     if not isinstance(media_type, str):
         return None
@@ -2778,20 +2820,10 @@ class RecordingManager:
             requested_pixel_format = str(codec_profile.get("pixel_format", "yuv420p"))
             pixel_format = _select_stream_pixel_format(stream, requested_pixel_format)
             stream.pix_fmt = pixel_format
-            stream.time_base = time_base
-            try:
-                # Some encoders (e.g. hardware H.264) require the codec context
-                # time base to match the stream for avcodec_send_frame().
-                stream.codec_context.time_base = time_base
-            except AttributeError:  # pragma: no cover - codec context optional
-                pass
+            _apply_stream_timing(stream, frame_rate_fraction, time_base)
             try:
                 stream.codec_context.pix_fmt = pixel_format
             except Exception:  # pragma: no cover - codec context may not expose pix_fmt
-                pass
-            try:
-                stream.average_rate = frame_rate_fraction
-            except Exception:  # pragma: no cover - best effort rate hint
                 pass
             self._record_failed_codecs(())
             return _ActiveChunkWriter(

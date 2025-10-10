@@ -79,6 +79,23 @@ class _DummyStreamWithFormats:
         self.pix_fmt = None
 
 
+class _DummyTimingCodecContext:
+    def __init__(self) -> None:
+        self.time_base = None
+        self.framerate = None
+        self.ticks_per_frame = 2
+        self.pix_fmt = None
+
+
+class _DummyStreamWithTiming:
+    def __init__(self) -> None:
+        self.codec_context = _DummyTimingCodecContext()
+        self.pix_fmt = None
+        self.time_base = None
+        self.rate = None
+        self.average_rate = None
+
+
 def test_select_stream_pixel_format_prefers_requested_when_available():
     stream = _DummyStreamWithFormats(["yuv420p", "nv12"])
     result = recording._select_stream_pixel_format(stream, "yuv420p")
@@ -141,3 +158,18 @@ def test_single_frame_duration_respects_time_base(tmp_path):
 
     assert entry["frame_count"] == 1
     assert entry["duration_seconds"] == pytest.approx(1 / 30, abs=1e-3)
+
+
+def test_apply_stream_timing_sets_codec_context_properties():
+    stream = _DummyStreamWithTiming()
+    frame_rate = Fraction(30, 1)
+    time_base = Fraction(1, 30)
+
+    recording._apply_stream_timing(stream, frame_rate, time_base)
+
+    assert stream.time_base == time_base
+    assert stream.rate == frame_rate
+    assert stream.average_rate == frame_rate
+    assert stream.codec_context.time_base == time_base
+    assert stream.codec_context.framerate == frame_rate
+    assert stream.codec_context.ticks_per_frame == 1
