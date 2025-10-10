@@ -678,6 +678,51 @@
       let latestOrientation = { roll: 0, pitch: 0 };
       let scene, renderer, camera, controls, trailer;
 
+      function buildTrailerPlaceholder() {
+        const group = new THREE.Group();
+
+        const bodyMaterial = new THREE.MeshStandardMaterial({
+          color: 0xbcc9d6,
+          metalness: 0.55,
+          roughness: 0.45,
+        });
+
+        const body = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.95, 0.86), bodyMaterial);
+        body.position.y = 0.475;
+        group.add(body);
+
+        const roof = new THREE.Mesh(new THREE.BoxGeometry(1.82, 0.2, 0.88), bodyMaterial.clone());
+        roof.position.set(0, 0.95, 0);
+        group.add(roof);
+
+        const hitchMaterial = new THREE.MeshStandardMaterial({
+          color: 0x9aa7b5,
+          metalness: 0.7,
+          roughness: 0.3,
+        });
+        const hitch = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.9, 16), hitchMaterial);
+        hitch.rotation.z = Math.PI / 2;
+        hitch.position.set(1.1, 0.25, 0);
+        group.add(hitch);
+
+        const wheelMaterial = new THREE.MeshStandardMaterial({
+          color: 0x14161d,
+          metalness: 0.2,
+          roughness: 0.8,
+        });
+
+        const wheelOffsets = [new THREE.Vector3(-0.75, 0.25, 0.4), new THREE.Vector3(-0.75, 0.25, -0.4)];
+        for (const offset of wheelOffsets) {
+          const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.28, 0.18, 24), wheelMaterial);
+          wheel.rotation.z = Math.PI / 2;
+          wheel.position.copy(offset);
+          group.add(wheel);
+        }
+
+        group.position.y = 0.1;
+        return group;
+      }
+
       async function refreshSensorStatus() {
         if (!sensorStatus) {
           hardwareAvailable = false;
@@ -1040,75 +1085,15 @@
 
       function initThree() {
         const container = document.getElementById("viewer");
-        if (!container) {
-          return;
-        }
-
-        const measureViewerSize = () => {
-          const rect = container.getBoundingClientRect();
-          let width = rect.width;
-          if (!width) {
-            width = container.clientWidth;
-          }
-          if (!width) {
-            width = container.offsetWidth;
-          }
-          if (!width && container.parentElement) {
-            const parentRect = container.parentElement.getBoundingClientRect();
-            width = parentRect.width || container.parentElement.clientWidth;
-          }
-          if (!width) {
-            width = window.innerWidth || 640;
-          }
-          width = Math.max(1, width);
-
-          let height = rect.height;
-          if (!height) {
-            height = container.clientHeight;
-          }
-          if (!height) {
-            height = container.offsetHeight;
-          }
-          if (!height && container.parentElement) {
-            const parentRect = container.parentElement.getBoundingClientRect();
-            height = parentRect.height || container.parentElement.clientHeight;
-          }
-          if (!height) {
-            height = width * (9 / 16);
-          }
-          height = Math.max(1, height);
-
-          return { width, height };
-        };
-
-        const { width, height } = measureViewerSize();
-
+        const width = container.clientWidth;
+        const height = container.clientHeight;
         scene = new THREE.Scene();
         scene.background = new THREE.Color(0x0b0d13);
 
         camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 100);
         camera.position.set(2.8, 1.8, 2.8);
 
-        if (!window.WebGLRenderingContext) {
-          if (analysisStatus) {
-            analysisStatus.textContent = "WebGL unsupported in this browser";
-            analysisStatus.classList.remove("success", "live");
-            analysisStatus.classList.add("error");
-          }
-          return;
-        }
-
-        try {
-          renderer = new THREE.WebGLRenderer({ antialias: true });
-        } catch (error) {
-          console.error(error);
-          if (analysisStatus) {
-            analysisStatus.textContent = "Unable to initialise WebGL renderer";
-            analysisStatus.classList.remove("success", "live");
-            analysisStatus.classList.add("error");
-          }
-          return;
-        }
+        renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setPixelRatio(window.devicePixelRatio);
         renderer.setSize(width, height);
         container.appendChild(renderer.domElement);
@@ -1134,154 +1119,18 @@
         plane.rotation.x = -Math.PI / 2;
         scene.add(plane);
 
-        const trailerMaterial = new THREE.MeshStandardMaterial({
-          color: 0xa7b5c7,
-          metalness: 0.5,
-          roughness: 0.4,
-        });
-        const accentMaterial = new THREE.MeshStandardMaterial({
-          color: 0x6c7a8c,
-          metalness: 0.3,
-          roughness: 0.6,
-        });
-        const glassMaterial = new THREE.MeshStandardMaterial({
-          color: 0x9ad6ff,
-          metalness: 0.8,
-          roughness: 0.15,
-          transparent: true,
-          opacity: 0.75,
-        });
-
-        const caravan = new THREE.Group();
-
-        const profile = new THREE.Shape();
-        profile.moveTo(-1.5, 0);
-        profile.lineTo(1.35, 0);
-        profile.lineTo(1.35, 0.65);
-        profile.quadraticCurveTo(1.35, 1.15, 0.75, 1.15);
-        profile.lineTo(-0.95, 1.15);
-        profile.quadraticCurveTo(-1.5, 1.1, -1.5, 0.55);
-        profile.closePath();
-
-        const bodyDepth = 1.5;
-        const bodyGeometry = new THREE.ExtrudeGeometry(profile, {
-          depth: bodyDepth,
-          bevelEnabled: false,
-        });
-        bodyGeometry.computeBoundingBox();
-        const bodyBox = bodyGeometry.boundingBox;
-        const centerX = (bodyBox.max.x + bodyBox.min.x) / 2;
-        const centerY = (bodyBox.max.y + bodyBox.min.y) / 2;
-        const centerZ = (bodyBox.max.z + bodyBox.min.z) / 2;
-        bodyGeometry.translate(-centerX, -centerY, -centerZ);
-        const caravanBody = new THREE.Mesh(bodyGeometry, trailerMaterial);
-        caravan.add(caravanBody);
-
-        const bodyHeight = bodyBox.max.y - bodyBox.min.y;
-        const halfDepth = bodyDepth / 2;
-        const frontEdge = bodyBox.max.x - centerX;
-
-        const belt = new THREE.Mesh(
-          new THREE.BoxGeometry(2.2, 0.12, bodyDepth + 0.02),
-          accentMaterial
-        );
-        belt.position.set(-0.25, -0.15, 0);
-        caravan.add(belt);
-
-        const window = new THREE.Mesh(
-          new THREE.BoxGeometry(0.9, 0.45, 0.04),
-          glassMaterial
-        );
-        window.position.set(-0.6, 0.2, halfDepth - 0.12);
-        caravan.add(window);
-
-        const door = new THREE.Mesh(
-          new THREE.BoxGeometry(0.45, 0.85, 0.05),
-          accentMaterial
-        );
-        door.position.set(0.55, -0.05, halfDepth - 0.15);
-        caravan.add(door);
-
-        const hitchBar = new THREE.Mesh(
-          new THREE.BoxGeometry(0.9, 0.08, 0.08),
-          accentMaterial
-        );
-        hitchBar.position.set(frontEdge + 0.4, -0.55, 0);
-        caravan.add(hitchBar);
-
-        const hitchBall = new THREE.Mesh(
-          new THREE.SphereGeometry(0.09, 24, 16),
-          accentMaterial
-        );
-        hitchBall.position.set(frontEdge + 0.78, -0.55, 0);
-        caravan.add(hitchBall);
-
-        const wheelMaterial = new THREE.MeshStandardMaterial({
-          color: 0x1d1f24,
-          metalness: 0.1,
-          roughness: 0.8,
-        });
-        const rimMaterial = new THREE.MeshStandardMaterial({
-          color: 0xbfc6d1,
-          metalness: 0.7,
-          roughness: 0.3,
-        });
-
-        const wheelRadius = 0.32;
-        const wheelWidth = 0.24;
-        const wheelGeometry = new THREE.CylinderGeometry(
-          wheelRadius,
-          wheelRadius,
-          wheelWidth,
-          28
-        );
-        wheelGeometry.rotateX(Math.PI / 2);
-
-        const rimGeometry = new THREE.CylinderGeometry(
-          wheelRadius * 0.55,
-          wheelRadius * 0.55,
-          wheelWidth + 0.01,
-          24
-        );
-        rimGeometry.rotateX(Math.PI / 2);
-
-        const wheelY = -bodyHeight / 2 + wheelRadius;
-        const wheelXOffset = -0.25;
-        const wheelZOffset = halfDepth + wheelWidth / 2 + 0.04;
-
-        const addWheel = (zSign) => {
-          const wheel = new THREE.Mesh(wheelGeometry, wheelMaterial);
-          wheel.position.set(wheelXOffset, wheelY, zSign * wheelZOffset);
-          caravan.add(wheel);
-
-          const rim = new THREE.Mesh(rimGeometry, rimMaterial);
-          rim.position.copy(wheel.position);
-          caravan.add(rim);
-        };
-        addWheel(1);
-        addWheel(-1);
-
-        trailer = caravan;
-        trailer.position.set(0, bodyHeight / 2, 0);
+        trailer = buildTrailerPlaceholder();
         scene.add(trailer);
-        if (analysisStatus) {
-          analysisStatus.textContent = "Rendering caravan preview";
-          analysisStatus.classList.remove("error");
-          analysisStatus.classList.add("live");
-        }
+        analysisStatus.classList.remove("error");
+        analysisStatus.textContent = "Placeholder trailer preview ready";
 
-        const updateRendererSize = () => {
-          const { width: w, height: h } = measureViewerSize();
+        window.addEventListener("resize", () => {
+          const w = container.clientWidth;
+          const h = container.clientHeight;
           camera.aspect = w / h;
           camera.updateProjectionMatrix();
           renderer.setSize(w, h);
-        };
-
-        window.addEventListener("resize", updateRendererSize);
-        if ("ResizeObserver" in window) {
-          const observer = new ResizeObserver(() => updateRendererSize());
-          observer.observe(container);
-        }
+        });
 
         function animate() {
           requestAnimationFrame(animate);
