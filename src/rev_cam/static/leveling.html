@@ -24,12 +24,12 @@
         --text-primary: #f5f7fb;
         --text-muted: rgba(245, 247, 250, 0.72);
         --text-on-accent: #ffffff;
-        --accent: #0a84ff;
-        --accent-hover: #2f95ff;
-        --accent-active: #55adff;
-        --accent-soft: rgba(10, 132, 255, 0.16);
-        --accent-soft-hover: rgba(10, 132, 255, 0.24);
-        --accent-ring: rgba(10, 132, 255, 0.45);
+        --accent: #4ade80;
+        --accent-hover: #5ee39a;
+        --accent-active: #38c66b;
+        --accent-soft: rgba(74, 222, 128, 0.18);
+        --accent-soft-hover: rgba(74, 222, 128, 0.26);
+        --accent-ring: rgba(74, 222, 128, 0.45);
         --success: #4ade80;
         --success-soft: rgba(74, 222, 128, 0.16);
         --warning: #ff9f0a;
@@ -151,7 +151,7 @@
         color: var(--text-primary);
         border-color: var(--accent-active);
         background: var(--accent-soft);
-        box-shadow: 0 16px 40px rgba(10, 132, 255, 0.25);
+        box-shadow: 0 16px 40px rgba(74, 222, 128, 0.28);
       }
 
       main {
@@ -229,22 +229,6 @@
         color: var(--text-muted);
       }
 
-      .mode-toggle {
-        display: inline-flex;
-        gap: var(--space-md);
-        align-items: center;
-        flex-wrap: wrap;
-      }
-
-      .mode-toggle label {
-        font-weight: 500;
-        cursor: pointer;
-      }
-
-      .mode-toggle input {
-        margin-right: var(--space-xs);
-      }
-
       .orientation-readout {
         display: flex;
         gap: var(--space-xl);
@@ -303,33 +287,6 @@
         margin: 0;
       }
 
-      .hitch-callout {
-        background: rgba(61, 72, 110, 0.18);
-        border-left: 4px solid var(--accent);
-        border-radius: var(--radius-md);
-        padding: var(--space-md) var(--space-lg);
-        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
-      }
-
-      .hitch-callout h4 {
-        margin: 0 0 var(--space-xs);
-        font-size: 0.95rem;
-        letter-spacing: 0.01em;
-        text-transform: uppercase;
-      }
-
-      .hitch-primary {
-        font-size: 1rem;
-        font-weight: 600;
-        margin: 0 0 var(--space-xs);
-      }
-
-      .hitch-note {
-        margin: 0;
-        font-size: 0.85rem;
-        color: var(--text-muted);
-      }
-
       dl.stats {
         margin: 0;
         display: grid;
@@ -382,7 +339,7 @@
       }
 
       .status.live {
-        color: var(--info, #38bdf8);
+        color: var(--accent-active);
       }
 
       .status.loading::after {
@@ -437,15 +394,11 @@
               <h2>Leveling Analysis</h2>
               <p>Monitor real-time leveling guidance from the GY-85 sensor.</p>
             </div>
-            <div class="mode-toggle" role="radiogroup" aria-label="Operating mode">
-              <label><input type="radio" name="mode" value="hitched" checked /> Hitched</label>
-              <label><input type="radio" name="mode" value="unhitched" /> Unhitched</label>
-            </div>
           </div>
           <div class="analysis-layout">
             <div class="analysis-details">
               <div>
-                <p class="status" id="sensor-status" aria-live="polite">Detecting GY-85 sensor…</p>
+                <p class="status hidden" id="sensor-status" aria-live="polite"></p>
                 <p class="status" id="analysis-status">Awaiting sensor data…</p>
               </div>
               <div class="orientation-readout">
@@ -464,11 +417,6 @@
                   <div class="guidance-layout">
                     <div class="guidance-summary">
                       <p id="leveling-message" class="guidance-message">—</p>
-                      <div class="hitch-callout" role="group" aria-labelledby="hitch-guidance-heading">
-                        <h4 id="hitch-guidance-heading">Hitch guidance</h4>
-                        <p id="hitch-message" class="hitch-primary">—</p>
-                        <p id="hitch-assumption" class="hitch-note">—</p>
-                      </div>
                     </div>
                     <dl class="stats">
                       <dt>Side to raise</dt>
@@ -510,9 +458,6 @@
       const levelingSide = document.getElementById("leveling-side");
       const levelingRaise = document.getElementById("leveling-raise");
       const levelingRamp = document.getElementById("leveling-ramp");
-      const hitchMessage = document.getElementById("hitch-message");
-      const hitchAssumption = document.getElementById("hitch-assumption");
-      let currentMode = "hitched";
       let lastSampleTime = performance.now();
       let inFlight = false;
       let pendingSample = false;
@@ -673,21 +618,22 @@
           hardwareAvailable = available;
           sensorStatus.classList.remove("error", "success", "live");
           if (available) {
-            sensorStatus.textContent = "GY-85 hardware sensor connected";
-            sensorStatus.classList.add("success");
+            sensorStatus.textContent = "";
+            sensorStatus.classList.add("hidden");
             sampleRateDisplay.textContent = "Awaiting sensor data…";
           } else {
             const fallbackMessage = errorMessage
               ? `GY-85 sensor unavailable – ${errorMessage}`
               : "GY-85 sensor not detected";
             sensorStatus.textContent = fallbackMessage;
+            sensorStatus.classList.remove("hidden");
             sensorStatus.classList.add("error");
           }
         } catch (error) {
           console.error(error);
           hardwareAvailable = false;
           sensorStatus.textContent = "Unable to determine sensor status";
-          sensorStatus.classList.remove("success", "live");
+          sensorStatus.classList.remove("success", "live", "hidden");
           sensorStatus.classList.add("error");
         }
         analysisStatus.classList.remove("live", "error", "loading");
@@ -721,11 +667,11 @@
         return value.charAt(0).toUpperCase() + value.slice(1);
       }
 
-     function updateDisplays(evaluation, meta) {
-        if (!evaluation) {
+      function updateDisplays(payload) {
+        if (!payload) {
           return;
         }
-        const { orientation, hitched, unhitched } = evaluation;
+        const { orientation, hitched, unhitched } = payload;
         latestOrientation = {
           roll: Number(orientation?.roll) || 0,
           pitch: Number(orientation?.pitch) || 0,
@@ -733,11 +679,12 @@
         rollDisplay.textContent = formatAngle(latestOrientation.roll);
         pitchDisplay.textContent = formatAngle(latestOrientation.pitch);
 
-        const primaryMessage = unhitched.guidance_message || hitched.message;
+        const primaryMessage =
+          payload.analysis?.message || hitched?.message || unhitched?.guidance_message || "";
         levelingMessage.textContent = primaryMessage || "—";
-        levelingSide.textContent = formatSide(hitched.side_to_raise);
-        levelingRaise.textContent = formatDistance(hitched.required_raise_m);
-        if (hitched.ramp) {
+        levelingSide.textContent = formatSide(hitched?.side_to_raise);
+        levelingRaise.textContent = formatDistance(hitched?.required_raise_m);
+        if (hitched?.ramp) {
           const travel = hitched.ramp.travel_m ?? 0;
           const percent = hitched.ramp.travel_percent ?? 0;
           const limited = hitched.ramp.limited;
@@ -749,29 +696,9 @@
           levelingRamp.textContent = "—";
         }
 
-        const hitchDir = unhitched.hitch_direction;
-        const hitchAmount = formatDistance(unhitched.hitch_adjustment_m);
-        let hitchCallout = unhitched.hitch_message;
-        if (!hitchCallout) {
-          if (hitchDir === "level") {
-            hitchCallout = "Hitch is level relative to the axle.";
-          } else {
-            const direction = hitchDir === "lower" ? "Lower" : "Raise";
-            hitchCallout = `${direction} the hitch by ${hitchAmount}.`;
-          }
-        }
-        hitchMessage.textContent = hitchCallout;
-        const notice = unhitched.hitch_notice;
-        hitchAssumption.textContent = notice || "—";
-
-        if (meta) {
-          const { modeLabel, analysisMessage } = meta;
-          const message = analysisMessage ? `${modeLabel} • ${analysisMessage}` : modeLabel;
-          analysisStatus.textContent = message;
-          analysisStatus.classList.remove("error");
-          analysisStatus.classList.add("live");
-        }
-
+        analysisStatus.textContent = "Receiving leveling data";
+        analysisStatus.classList.remove("error");
+        analysisStatus.classList.add("live");
         analysisStatus.classList.remove("loading");
         analysisStatus.removeAttribute("aria-busy");
 
@@ -806,7 +733,7 @@
         analysisStatus.setAttribute("aria-busy", "true");
         analysisStatus.classList.remove("error");
         try {
-          const response = await fetch(`/api/leveling/live?mode=${encodeURIComponent(currentMode)}`);
+          const response = await fetch(`/api/leveling/live`);
           if (response.status === 503) {
             hardwareAvailable = false;
             pendingSample = true;
@@ -835,16 +762,12 @@
             throw new Error(detail);
           }
           const data = await response.json();
-          const modeLabel = data.mode === "hitched" ? "Hitched mode" : "Unhitched mode";
-          const analysisMessage = data.analysis?.message ?? "";
-          updateDisplays(
-            {
-              orientation: data.orientation,
-              hitched: data.hitched,
-              unhitched: data.unhitched,
-            },
-            { modeLabel, analysisMessage }
-          );
+          updateDisplays({
+            orientation: data.orientation,
+            hitched: data.hitched,
+            unhitched: data.unhitched,
+            analysis: data.analysis,
+          });
           const now = performance.now();
           const intervalMs =
             typeof data.interval_s === "number" && Number.isFinite(data.interval_s)
@@ -871,17 +794,6 @@
             pendingSample = false;
             requestSample();
           }
-        }
-      }
-
-      function initModeToggle() {
-        for (const radio of document.querySelectorAll('input[name="mode"]')) {
-          radio.addEventListener("change", (event) => {
-            if (event.target instanceof HTMLInputElement && event.target.checked) {
-              currentMode = event.target.value;
-              requestSample();
-            }
-          });
         }
       }
 
@@ -955,7 +867,6 @@
       }
 
       async function initialise() {
-        initModeToggle();
         await initThree();
         await refreshSensorStatus();
         setInterval(requestSample, SAMPLE_INTERVAL);

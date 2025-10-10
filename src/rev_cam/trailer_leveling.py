@@ -299,27 +299,13 @@ def compute_unhitched_leveling(orientation: OrientationAngles, settings: Levelin
     max_deviation = max(abs(orientation.roll), abs(orientation.pitch))
     score = max(0.0, 1.0 - min(max_deviation / 10.0, 1.0))
 
-    if hitch_direction == "level":
-        hitch_message = "Hitch is level relative to the axle."
-    else:
-        action = "Lower" if hitch_direction == "lower" else "Raise"
-        if math.isfinite(hitch_adjustment):
-            hitch_message = f"{action} the hitch by {hitch_adjustment * 100:.1f} cm."
-        else:  # pragma: no cover - defensive branch for extreme pitch
-            hitch_message = (
-                f"{action} the hitch until level; pitch angle exceeds supported range."
-            )
-
-    hitch_notice = "Hitch guidance assumes the trailer stays hitched."
-    message = f"{hitched_guidance['message']} {hitch_message} {hitch_notice}"
+    message = hitched_guidance["message"]
     return {
         **hitched_guidance,
         "message": message,
         "guidance_message": hitched_guidance["message"],
         "hitch_adjustment_m": hitch_adjustment,
         "hitch_direction": hitch_direction,
-        "hitch_message": hitch_message,
-        "hitch_notice": hitch_notice,
         "level_score": score,
         "max_deviation_deg": max_deviation,
     }

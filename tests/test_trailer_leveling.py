@@ -38,7 +38,7 @@ def test_hitched_leveling_respects_ramp_limits():
     assert result["ramp"]["limited"] is True
 
 
-def test_unhitched_leveling_includes_hitch_guidance():
+def test_unhitched_leveling_reports_hitch_adjustment():
     settings = LevelingSettings(
         geometry=TrailerGeometry(axle_width_m=2.5, hitch_to_axle_m=5.0, length_m=8.0),
         ramp=RampSpecification(length_m=0.7, height_m=0.1),
@@ -52,10 +52,7 @@ def test_unhitched_leveling_includes_hitch_guidance():
     assert unhitched["side_to_raise"] == hitched["side_to_raise"]
     assert unhitched["required_raise_m"] == pytest.approx(hitched["required_raise_m"])
     assert unhitched["guidance_message"] == hitched["message"]
-    assert unhitched["hitch_message"] == "Lower the hitch by 26.2 cm."
-    assert unhitched["hitch_notice"] == "Hitch guidance assumes the trailer stays hitched."
-    assert unhitched["message"].startswith(hitched["message"])  # combined guidance
-    assert "Lower the hitch" in unhitched["message"]
+    assert unhitched["message"] == hitched["message"]
 
 
 def test_unhitched_leveling_reports_level_when_pitch_small():
@@ -67,8 +64,7 @@ def test_unhitched_leveling_reports_level_when_pitch_small():
     unhitched = compute_unhitched_leveling(orientation, settings)
     assert unhitched["hitch_direction"] == "level"
     assert unhitched["hitch_adjustment_m"] == pytest.approx(0.0)
-    assert unhitched["hitch_message"] == "Hitch is level relative to the axle."
-    assert unhitched["hitch_notice"] == "Hitch guidance assumes the trailer stays hitched."
+    assert unhitched["message"] == unhitched["guidance_message"]
 
 
 def test_evaluate_leveling_returns_both_modes():
