@@ -41,11 +41,15 @@ from .pipeline import FramePipeline
 logger = logging.getLogger(__name__)
 
 
+class RecordingProcessingError(RuntimeError):
+    """Raised when a recording failed to produce usable media."""
+
+
 _VIDEO_CODEC_CANDIDATES: tuple[str, ...] = (
+    "libx264",
+    "h264",
     "h264_v4l2m2m",
     "h264_omx",
-    "h264",
-    "libx264",
 )
 
 
@@ -57,6 +61,74 @@ _CODECS_REQUIRE_EVEN_DIMENSIONS: frozenset[str] = frozenset(
         "h264_omx",
     }
 )
+
+
+def _normalise_pixel_format(value: object) -> str | None:
+    """Return a lower-cased pixel format string when ``value`` is usable."""
+
+    if isinstance(value, str):
+        value = value.strip()
+        return value.lower() or None
+    if isinstance(value, bytes):
+        try:
+            decoded = value.decode("ascii", errors="ignore").strip()
+        except Exception:  # pragma: no cover - defensive decode
+            return None
+        return decoded.lower() or None
+    return None
+
+
+def _select_stream_pixel_format(
+    stream: av.video.stream.VideoStream,
+    requested: str | None,
+) -> str:
+    """Choose a pixel format compatible with ``stream`` and the requested value."""
+
+    requested_format = _normalise_pixel_format(requested) or "yuv420p"
+    codec_context = getattr(stream, "codec_context", None)
+    available: tuple[str, ...] = ()
+    if codec_context is not None:
+        pix_fmts = getattr(codec_context, "pix_fmts", None)
+        if isinstance(pix_fmts, (list, tuple)):
+            collected: list[str] = []
+            for item in pix_fmts:
+                normalised = _normalise_pixel_format(item)
+                if normalised:
+                    collected.append(normalised)
+            available = tuple(collected)
+    if not available:
+        return requested_format
+    preferred_order: list[str] = [requested_format, "yuv420p", "nv12", "nv21", "p010le"]
+    for candidate in preferred_order:
+        if candidate and candidate in available:
+            return candidate
+    return available[0]
+
+
+def _prepare_frame_for_encoding(array: "_np.ndarray") -> "_np.ndarray | None":
+    """Normalise frame arrays before handing them to the encoder."""
+
+    if _np is None:
+        return None
+
+    frame_array = _np.asarray(array)
+    if frame_array.ndim == 2:
+        frame_array = _np.repeat(frame_array[:, :, _np.newaxis], 3, axis=2)
+    elif frame_array.ndim == 3:
+        if frame_array.shape[2] == 1:
+            frame_array = _np.repeat(frame_array, 3, axis=2)
+        elif frame_array.shape[2] > 3:
+            frame_array = frame_array[:, :, :3]
+    else:
+        return None
+
+    if frame_array.dtype != _np.uint8:
+        frame_array = _np.clip(frame_array, 0, 255).astype(_np.uint8)
+
+    if not bool(getattr(frame_array.flags, "c_contiguous", False)):
+        frame_array = _np.ascontiguousarray(frame_array)
+
+    return frame_array
 
 
 def _codec_profile(codec: str) -> Mapping[str, object]:
@@ -71,8 +143,59 @@ def _codec_profile(codec: str) -> Mapping[str, object]:
     return base
 
 
+def _compose_codec_failure_message(
+    last_error: Exception | str | None, attempted_codecs: Sequence[str]
+) -> str:
+    """Return a detailed codec initialisation failure message with guidance."""
+
+    detail: str | None
+    if isinstance(last_error, Exception):
+        detail = str(last_error).strip() or None
+    elif isinstance(last_error, str):
+        detail = last_error.strip() or None
+    else:
+        detail = None
+
+    if detail is None:
+        detail = "No usable surveillance video codec available"
+
+    ordered_unique: list[str] = []
+    seen: set[str] = set()
+    for codec in attempted_codecs:
+        if not codec or codec in seen:
+            continue
+        seen.add(codec)
+        ordered_unique.append(codec)
+
+    attempt_suffix = ""
+    if ordered_unique:
+        attempt_suffix = f" (attempted codecs: {', '.join(ordered_unique)})"
+
+    message = f"{detail}{attempt_suffix}".rstrip()
+    if message.endswith("."):
+        message = f"{message} No video file was created."
+    else:
+        message = f"{message}. No video file was created."
+
+    guidance_parts = [
+        (
+            "Install FFmpeg with H.264 encoder support (e.g. sudo apt install ffmpeg"
+            " libavcodec-extra) and ensure Raspberry Pi hardware video encoding is enabled."
+        )
+    ]
+    if ordered_unique:
+        guidance_parts.append(
+            f"Confirm that FFmpeg exposes one of: {', '.join(ordered_unique)}."
+        )
+
+    guidance = " ".join(guidance_parts).strip()
+    if guidance:
+        message = f"{message} {guidance}".rstrip()
+    return message
+
+
 def _select_time_base(frame_rate: Fraction) -> Fraction:
-    """Choose a sane container time base for a given frame rate."""
+    """Choose a container time base that mirrors the frame duration."""
 
     numerator = frame_rate.numerator
     denominator = frame_rate.denominator
@@ -80,12 +203,55 @@ def _select_time_base(frame_rate: Fraction) -> Fraction:
         numerator = 1
     if denominator <= 0:
         denominator = 1
-    # Use millisecond granularity relative to the FPS to preserve pacing while
-    # staying within encoder-friendly bounds (e.g. V4L2 H.264).
-    time_base = Fraction(denominator, numerator * 1000)
+    # Prefer a direct reciprocal of the frame rate so encoded packets advance by
+    # one tick per frame, avoiding accelerated playback and ensuring durations
+    # match the recorded timeline.
+    time_base = Fraction(denominator, numerator)
     if time_base <= 0:
-        return Fraction(1, 1000)
-    return time_base.limit_denominator(90_000)
+        return Fraction(1, 30)
+    return time_base.limit_denominator(1_000)
+
+
+def _apply_stream_timing(
+    stream: av.video.stream.VideoStream,
+    frame_rate: Fraction,
+    time_base: Fraction,
+) -> None:
+    """Synchronise stream and codec timing so playback honours real duration."""
+
+    try:
+        stream.time_base = time_base
+    except Exception:  # pragma: no cover - property may be read-only
+        pass
+
+    try:
+        stream.rate = frame_rate
+    except Exception:  # pragma: no cover - legacy PyAV attribute
+        pass
+
+    try:
+        stream.average_rate = frame_rate
+    except Exception:  # pragma: no cover - best-effort hint
+        pass
+
+    codec_context = getattr(stream, "codec_context", None)
+    if codec_context is None:
+        return
+
+    try:
+        codec_context.time_base = time_base
+    except Exception:  # pragma: no cover - codec contexts vary
+        pass
+
+    try:
+        codec_context.framerate = frame_rate
+    except Exception:  # pragma: no cover - optional property
+        pass
+
+    try:
+        codec_context.ticks_per_frame = 1
+    except Exception:  # pragma: no cover - property may be absent
+        pass
 
 
 def _extract_multipart_boundary(media_type: str) -> str | None:
@@ -372,6 +538,7 @@ def load_recording_metadata(directory: Path) -> list[dict[str, object]]:
         if isinstance(data, dict):
             data.setdefault("name", path.stem.replace(".meta", ""))
             file_name = data.get("file")
+            file_exists = False
             if isinstance(file_name, str):
                 file_path = directory / file_name
                 if file_path.exists() and file_path.is_file():
@@ -381,6 +548,14 @@ def load_recording_metadata(directory: Path) -> list[dict[str, object]]:
                         size = None
                     else:
                         data.setdefault("size_bytes", int(size))
+                        file_exists = True
+            if "media_available" not in data:
+                data["media_available"] = bool(file_exists)
+            elif not file_exists:
+                data["media_available"] = False
+            processing_error = data.get("processing_error")
+            if isinstance(processing_error, str) and processing_error.strip():
+                data["media_available"] = False
             chunks = data.get("chunks")
             if isinstance(chunks, list):
                 total = 0
@@ -434,6 +609,7 @@ def load_recording_payload(
 
     payload: dict[str, object] = dict(metadata)
     payload.setdefault("name", safe_name)
+    media_available = bool(payload.get("media_available"))
 
     if chunk_sources:
         total_size = 0
@@ -535,6 +711,7 @@ def load_recording_payload(
                 else:
                     chunk_entry["size_bytes"] = int(size)
                     total_size += int(size)
+                media_available = True
             normalised_chunks.append(chunk_entry)
         if primary_chunk := (normalised_chunks[0] if normalised_chunks else None):
             file_name = primary_chunk.get("file")
@@ -584,6 +761,9 @@ def load_recording_payload(
             payload["size_bytes"] = total_size
         if include_frames:
             payload["frames"] = []
+        if payload.get("processing_error"):
+            media_available = False
+        payload["media_available"] = media_available
         if metadata_dirty:
             try:
                 _write_metadata(meta_path, metadata)
@@ -633,6 +813,7 @@ def load_recording_payload(
                         metadata_dirty = True
         if file_path.exists() and file_path.is_file():
             payload["file_path"] = str(file_path)
+            media_available = True
         try:
             size = file_path.stat().st_size
         except OSError:
@@ -659,6 +840,9 @@ def load_recording_payload(
                 pass
     if include_frames:
         payload["frames"] = []
+    if payload.get("processing_error"):
+        media_available = False
+    payload["media_available"] = media_available
     return payload
 
 
@@ -750,6 +934,11 @@ def build_recording_video(
 
     safe_name = _safe_recording_name(name)
     payload = load_recording_payload(directory, safe_name, include_frames=False)
+    processing_error = payload.get("processing_error") if isinstance(payload, Mapping) else None
+    if isinstance(processing_error, str):
+        processing_error = processing_error.strip()
+        if processing_error:
+            raise RecordingProcessingError(processing_error)
     try:
         file_path = resolve_recording_media_path(directory, payload)
     except FileNotFoundError as exc:
@@ -773,6 +962,11 @@ def export_recording_media(
 
     safe_name = _safe_recording_name(name)
     payload = load_recording_payload(directory, safe_name, include_frames=False)
+    processing_error = payload.get("processing_error") if isinstance(payload, Mapping) else None
+    if isinstance(processing_error, str):
+        processing_error = processing_error.strip()
+        if processing_error:
+            raise RecordingProcessingError(processing_error)
     file_path = resolve_recording_media_path(directory, payload)
     destination_root = target_directory
     if destination_root is None:
@@ -1418,6 +1612,8 @@ class RecordingManager:
     _preferred_video_codec: str | None = field(init=False, default=None)
     _codec_failures: set[str] = field(init=False, default_factory=set)
     _video_encoding_disabled: bool = field(init=False, default=False)
+    _last_video_initialisation_error: str | None = field(init=False, default=None)
+    _last_failed_codecs: tuple[str, ...] = field(init=False, default=())
     _codec_state_path: Path | None = field(init=False, default=None)
 
     def __post_init__(self) -> None:
@@ -1456,6 +1652,24 @@ class RecordingManager:
         self._chunk_frame_limit = 0
         self._codec_state_path = self.directory / ".codec_state.json"
         self._load_codec_state()
+
+    def _reset_video_encoding_state(self) -> None:
+        """Reset codec failure tracking when a new session begins."""
+
+        previous_error = (
+            str(self._last_video_initialisation_error).strip()
+            if isinstance(self._last_video_initialisation_error, str)
+            else None
+        )
+        self._video_encoding_disabled = False
+        self._last_failed_codecs = ()
+        self._last_video_initialisation_error = None
+        if previous_error:
+            if self._codec_failures:
+                self._codec_failures.clear()
+            # Persist so the state file drops the stored error message while
+            # keeping any preferred codec that previously worked.
+            self._persist_codec_state()
 
     @property
     def media_type(self) -> str:
@@ -1525,7 +1739,7 @@ class RecordingManager:
             self._chunk_entries.clear()
             self._chunk_index = 0
             self._total_frame_count = 0
-            self._video_encoding_disabled = False
+            self._reset_video_encoding_state()
             if motion_enabled and self._session_motion_override:
                 self._motion_event_base = name
                 self._motion_event_index = 0
@@ -1635,7 +1849,10 @@ class RecordingManager:
         invoke_callback: bool = True,
     ) -> dict[str, object]:
         metadata = dict(base_metadata)
-        processing_error: str | None = None
+        existing_error = metadata.pop("processing_error", None)
+        processing_error = self._resolve_processing_error_message(
+            existing_error, allow_fallback=False
+        )
         entries: list[dict[str, object]] = []
         for entry in chunk_entries:
             if isinstance(entry, Mapping):
@@ -1643,16 +1860,22 @@ class RecordingManager:
 
         primary_entry: dict[str, object] | None = entries[0] if entries else None
         size_bytes = 0
+        media_available = bool(entries)
+        primary_entry_found = False
         if primary_entry is not None:
             file_name = primary_entry.get("file")
             if isinstance(file_name, str):
-                normalised_file, _, _ = _ensure_centralised_asset(
+                normalised_file, resolved_path, found_asset = _ensure_centralised_asset(
                     self.directory, file_name, subdir="media"
                 )
                 if normalised_file != file_name:
                     primary_entry["file"] = normalised_file
                     entries[0] = dict(primary_entry)
                 metadata["file"] = normalised_file
+                primary_entry_found = bool(found_asset)
+                if resolved_path.exists() and resolved_path.is_file():
+                    primary_entry_found = True
+                    metadata["file_path"] = str(resolved_path)
             media_type = primary_entry.get("media_type")
             if isinstance(media_type, str):
                 metadata["media_type"] = media_type
@@ -1671,6 +1894,8 @@ class RecordingManager:
             size_value = primary_entry.get("size_bytes")
             if isinstance(size_value, (int, float)):
                 size_bytes = int(size_value)
+        if media_available and not primary_entry_found:
+            media_available = False
         if size_bytes:
             metadata["size_bytes"] = size_bytes
         thumbnail_data = metadata.get("thumbnail")
@@ -1688,8 +1913,23 @@ class RecordingManager:
                     pass
                 else:
                     metadata["preview_file"] = (Path("previews") / preview_name).as_posix()
+        if processing_error is None and not entries:
+            processing_error = self._resolve_processing_error_message(
+                None, allow_fallback=True
+            )
+        if processing_error is None and not media_available:
+            processing_error = self._resolve_processing_error_message(
+                None, allow_fallback=True
+            )
         if processing_error:
+            media_available = False
             metadata["processing_error"] = processing_error
+        metadata["media_available"] = media_available
+        if not media_available:
+            metadata.pop("file", None)
+            metadata.pop("file_path", None)
+            metadata.pop("desktop_file", None)
+            self._cleanup_failed_recording_media(name)
         meta_path = self.directory / f"{name}.meta.json"
         try:
             await asyncio.to_thread(_write_metadata, meta_path, metadata)
@@ -1699,6 +1939,7 @@ class RecordingManager:
             logger.exception("Failed to write surveillance metadata for %s", name)
             processing_error = str(exc)
             metadata["processing_error"] = processing_error
+            metadata["media_available"] = False
 
         if invoke_callback and callable(self.on_stop):
             try:
@@ -2180,6 +2421,11 @@ class RecordingManager:
             if isinstance(self._last_storage_status, Mapping)
             else None
         )
+        processing_error: str | None = None
+        if isinstance(self._last_video_initialisation_error, str):
+            candidate = self._last_video_initialisation_error.strip()
+            if candidate:
+                processing_error = candidate
         context = _FinaliseContext(
             name=name,
             started_at=self._recording_started_at or _utcnow(),
@@ -2192,6 +2438,7 @@ class RecordingManager:
             notify_stop_callback=notify_stop,
             pending_flush=pending_flush,
             chunk_entries=chunk_entries,
+            processing_error=processing_error,
         )
         self._total_frame_count = 0
         self._chunk_index = 0
@@ -2243,6 +2490,18 @@ class RecordingManager:
             base_metadata["motion_event_index"] = context.motion_event_index
             motion_snapshot.setdefault("event_index", context.motion_event_index)
         base_metadata["motion_detection"] = motion_snapshot
+        processing_error = self._resolve_processing_error_message(
+            context.processing_error, allow_fallback=False
+        )
+        media_available = bool(context.chunk_entries)
+        if processing_error is None and not context.chunk_entries:
+            processing_error = self._resolve_processing_error_message(
+                None, allow_fallback=True
+            )
+        if processing_error:
+            media_available = False
+            base_metadata["processing_error"] = processing_error
+        base_metadata["media_available"] = media_available
         processing_stub = dict(base_metadata)
         processing_stub["processing"] = True
 
@@ -2407,6 +2666,38 @@ class RecordingManager:
             self._preferred_video_codec = None
         self._persist_codec_state()
 
+    def _record_failed_codecs(self, attempted_codecs: Sequence[str] | None) -> None:
+        ordered_unique: list[str] = []
+        seen: set[str] = set()
+        if attempted_codecs:
+            for codec in attempted_codecs:
+                if not codec or codec in seen:
+                    continue
+                seen.add(codec)
+                ordered_unique.append(codec)
+        self._last_failed_codecs = tuple(ordered_unique)
+
+    def _resolve_processing_error_message(
+        self, error: str | None, *, allow_fallback: bool
+    ) -> str | None:
+        candidate = error.strip() if isinstance(error, str) else None
+        attempted = self._last_failed_codecs or tuple(sorted(self._codec_failures))
+        if candidate:
+            if "No video file was created." in candidate:
+                return candidate
+            return _compose_codec_failure_message(candidate, attempted)
+        if not allow_fallback:
+            return None
+        fallback = self._last_video_initialisation_error
+        detail = fallback.strip() if isinstance(fallback, str) else None
+        if detail:
+            if "No video file was created." in detail:
+                return detail
+            return _compose_codec_failure_message(detail, attempted)
+        if self._video_encoding_disabled or attempted:
+            return _compose_codec_failure_message(None, attempted)
+        return None
+
     def _handle_chunk_failure(self, chunk: _ChunkWriter) -> None:
         try:
             chunk.abort()
@@ -2445,6 +2736,7 @@ class RecordingManager:
         relative_file = Path("media") / filename
         path = self.media_directory / filename
         last_error: Exception | None = None
+        attempted_codecs: list[str] = []
         if path.exists():
             try:
                 path.unlink()
@@ -2457,9 +2749,13 @@ class RecordingManager:
                     logger.error(
                         "Disabling surveillance recording for %s: %s", name, last_error
                     )
+                message = _compose_codec_failure_message(last_error, attempted_codecs)
                 self._video_encoding_disabled = True
+                self._last_video_initialisation_error = message
+                self._record_failed_codecs(attempted_codecs)
                 self._persist_codec_state()
                 return None
+            attempted_codecs.append(codec_name)
             try:
                 codec_profile = _codec_profile(codec_name)
                 filename = self._chunk_filename(name, index, codec_profile["extension"])
@@ -2483,6 +2779,10 @@ class RecordingManager:
                 last_error = exc
                 logger.error("Failed to open chunk container %s: %s", path, exc)
                 self._video_encoding_disabled = True
+                self._last_video_initialisation_error = _compose_codec_failure_message(
+                    exc, attempted_codecs
+                )
+                self._record_failed_codecs(attempted_codecs)
                 self._persist_codec_state()
                 return None
             try:
@@ -2522,19 +2822,15 @@ class RecordingManager:
                 continue
             stream.width = target_width
             stream.height = target_height
-            pixel_format = str(codec_profile.get("pixel_format", "yuv420p"))
+            requested_pixel_format = str(codec_profile.get("pixel_format", "yuv420p"))
+            pixel_format = _select_stream_pixel_format(stream, requested_pixel_format)
             stream.pix_fmt = pixel_format
-            stream.time_base = time_base
+            _apply_stream_timing(stream, frame_rate_fraction, time_base)
             try:
-                # Some encoders (e.g. hardware H.264) require the codec context
-                # time base to match the stream for avcodec_send_frame().
-                stream.codec_context.time_base = time_base
-            except AttributeError:  # pragma: no cover - codec context optional
+                stream.codec_context.pix_fmt = pixel_format
+            except Exception:  # pragma: no cover - codec context may not expose pix_fmt
                 pass
-            try:
-                stream.average_rate = frame_rate_fraction
-            except Exception:  # pragma: no cover - best effort rate hint
-                pass
+            self._record_failed_codecs(())
             return _ActiveChunkWriter(
                 name=name,
                 index=index,
@@ -2551,15 +2847,37 @@ class RecordingManager:
                 pixel_format=pixel_format,
             )
 
+    def _cleanup_failed_recording_media(self, name: str) -> None:
+        base = Path(name)
+        stems: set[str] = set()
+        if base.name:
+            stems.add(base.name)
+        if base.stem:
+            stems.add(base.stem)
+        if not stems:
+            return
+        search_roots = {self.media_directory, self.directory}
+        extensions = (".mp4", ".mjpeg", ".avi", ".mov")
+        for stem in stems:
+            for root in search_roots:
+                for extension in extensions:
+                    candidate = root / f"{stem}{extension}"
+                    try:
+                        if candidate.exists() and candidate.is_file():
+                            candidate.unlink()
+                    except OSError:  # pragma: no cover - best-effort cleanup
+                        logger.debug(
+                            "Failed to remove incomplete media file %s", candidate
+                        )
+
     def _append_frame_to_chunk_locked(
         self, frame_array: "_np.ndarray", timestamp: float
     ) -> _ChunkWriter | None:
         if _np is None:
             return None
-        array = _np.asarray(frame_array)
-        if array.ndim != 3 or array.shape[2] != 3:
+        array = _prepare_frame_for_encoding(frame_array)
+        if array is None:
             return None
-        array = _np.ascontiguousarray(array)
         attempts = 0
         max_attempts = max(1, len(_VIDEO_CODEC_CANDIDATES))
         while attempts < max_attempts:
@@ -2662,6 +2980,9 @@ class RecordingManager:
             and preferred not in self._codec_failures
         ):
             self._preferred_video_codec = preferred
+        last_error = payload.get("last_error")
+        if isinstance(last_error, str) and last_error.strip():
+            self._last_video_initialisation_error = last_error.strip()
 
     def _persist_codec_state(self) -> None:
         path = self._codec_state_file()
@@ -2673,6 +2994,9 @@ class RecordingManager:
         codec = self._preferred_video_codec
         if codec and codec not in self._codec_failures:
             payload["preferred_codec"] = codec
+        error_message = self._last_video_initialisation_error
+        if isinstance(error_message, str) and error_message.strip():
+            payload["last_error"] = error_message.strip()
         try:
             data = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
             path.write_text(data, encoding="utf-8")
@@ -2775,6 +3099,7 @@ class RecordingManager:
 __all__ = [
     "MotionDetector",
     "RecordingManager",
+    "RecordingProcessingError",
     "build_recording_video",
     "export_recording_media",
     "resolve_recording_media_path",
@@ -2800,4 +3125,5 @@ class _FinaliseContext:
     motion_event_index: int | None
     notify_stop_callback: bool
     pending_flush: _ChunkWriter | None = None
+    processing_error: str | None = None
 
