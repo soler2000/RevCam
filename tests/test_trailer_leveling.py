@@ -1,5 +1,7 @@
 import math
 
+import math
+
 import pytest
 
 from rev_cam.trailer_leveling import (
@@ -56,6 +58,7 @@ def test_evaluate_leveling_returns_both_modes():
     assert "hitched" in result
     assert "unhitched" in result
     assert result["orientation"]["yaw"] == pytest.approx(-165.0)
+    assert result["raw_orientation"]["yaw"] == pytest.approx(-165.0)
     assert set(result["support_points"].keys()) == {
         "left_wheel",
         "right_wheel",
@@ -84,3 +87,15 @@ def test_support_point_adjustments_reflect_orientation():
     assert right["adjustment_m"] > 0
     assert hitch["adjustment_m"] > 0
     assert rear["adjustment_m"] > 0
+
+
+def test_evaluate_leveling_applies_reference():
+    reference = OrientationAngles(roll=1.5, pitch=-0.5, yaw=12.0)
+    settings = LevelingSettings(reference=reference)
+    orientation = OrientationAngles(roll=4.5, pitch=1.0, yaw=42.0)
+    result = evaluate_leveling(orientation, settings)
+    assert result["orientation"]["roll"] == pytest.approx(3.0)
+    assert result["orientation"]["pitch"] == pytest.approx(1.5)
+    assert result["orientation"]["yaw"] == pytest.approx(30.0)
+    assert result["raw_orientation"]["roll"] == pytest.approx(4.5)
+    assert result["raw_orientation"]["yaw"] == pytest.approx(42.0)

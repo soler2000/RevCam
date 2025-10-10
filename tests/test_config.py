@@ -26,7 +26,7 @@ from rev_cam.config import (
     SURVEILLANCE_STANDARD_PRESETS,
 )
 from rev_cam.distance import DistanceCalibration
-from rev_cam.trailer_leveling import LevelingSettings
+from rev_cam.trailer_leveling import LevelingSettings, OrientationAngles
 
 
 def test_default_orientation(tmp_path: Path):
@@ -385,12 +385,28 @@ def test_leveling_settings_persist(tmp_path: Path) -> None:
     assert reloaded.get_leveling_settings() == updated
 
 
+def test_leveling_reference_persists(tmp_path: Path) -> None:
+    config_file = tmp_path / "config.json"
+    manager = ConfigManager(config_file)
+    payload = {"reference": {"roll": 2.0, "pitch": -1.0, "yaw": 15.0}}
+    updated = manager.set_leveling_settings(payload)
+    assert isinstance(updated, LevelingSettings)
+    expected_reference = OrientationAngles(2.0, -1.0, 15.0).normalised()
+    assert updated.reference == expected_reference
+    reloaded = ConfigManager(config_file)
+    assert reloaded.get_leveling_settings().reference == expected_reference
+
+
 def test_leveling_settings_validation(tmp_path: Path) -> None:
     manager = ConfigManager(tmp_path / "config.json")
     with pytest.raises(ValueError):
         manager.set_leveling_settings({"geometry": {"axle_width_m": -1.0}})
     with pytest.raises(ValueError):
         manager.set_leveling_settings({"ramp": {"height_m": 0.0}})
+    with pytest.raises(ValueError):
+        manager.set_leveling_settings({"reference": {"roll": "bad"}})
+    with pytest.raises(ValueError):
+        manager.set_leveling_settings({"reference": {"pitch": float("nan")}})
 
 
 def test_default_overlay_settings(tmp_path: Path) -> None:

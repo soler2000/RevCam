@@ -91,12 +91,15 @@ class Gy85KalmanFilter:
         self._pitch = _AxisKalmanFilter()
         self._yaw = _AxisKalmanFilter(r_measure=0.5)
         self._last_orientation = OrientationAngles(0.0, 0.0, 0.0)
+        self._smoothed_orientation = OrientationAngles(0.0, 0.0, 0.0)
+        self._smoothing_alpha = 0.2
 
     def reset(self) -> None:
         self._roll.reset()
         self._pitch.reset()
         self._yaw.reset()
         self._last_orientation = OrientationAngles(0.0, 0.0, 0.0)
+        self._smoothed_orientation = OrientationAngles(0.0, 0.0, 0.0)
 
     def update(self, sample: SensorSample, dt: Optional[float] = None) -> OrientationAngles:
         """Update the filter with a new sensor sample."""
@@ -108,7 +111,7 @@ class Gy85KalmanFilter:
         mx, my, mz = sample.magnetometer.x, sample.magnetometer.y, sample.magnetometer.z
 
         # Accelerometer-based roll and pitch (degrees)
-        roll_measure = math.degrees(math.atan2(az, ay)) if ay or az else 0.0
+        roll_measure = math.degrees(math.atan2(ay, az)) if ay or az else 0.0
         denominator = math.sqrt(ay * ay + az * az)
         pitch_measure = math.degrees(math.atan2(-ax, denominator)) if denominator else 0.0
 
@@ -127,7 +130,29 @@ class Gy85KalmanFilter:
         yaw_measure = math.degrees(math.atan2(-compensated_y, compensated_x)) if compensated_x or compensated_y else self._last_orientation.yaw
 
         yaw = self._yaw.update(gz, yaw_measure, dt)
-        orientation = OrientationAngles(roll=roll, pitch=pitch, yaw=yaw).normalised()
-        self._last_orientation = orientation
-        return orientation
+        raw_orientation = OrientationAngles(roll=roll, pitch=pitch, yaw=yaw).normalised()
+        self._last_orientation = raw_orientation
+        smoothed = OrientationAngles(
+            roll=_smooth_angle(self._smoothed_orientation.roll, raw_orientation.roll, self._smoothing_alpha),
+            pitch=_smooth_angle(
+                self._smoothed_orientation.pitch, raw_orientation.pitch, self._smoothing_alpha
+            ),
+            yaw=_smooth_angle(self._smoothed_orientation.yaw, raw_orientation.yaw, self._smoothing_alpha),
+        ).normalised()
+        self._smoothed_orientation = smoothed
+        return smoothed
+
+
+def _smooth_angle(previous: float, current: float, alpha: float) -> float:
+    """Return an exponentially smoothed angle while respecting wrap-around."""
+
+    previous = float(previous)
+    current = float(current)
+    alpha = float(alpha)
+    if alpha <= 0:
+        return previous
+    if alpha >= 1:
+        return current
+    delta = ((current - previous + 180.0) % 360.0) - 180.0
+    return previous + alpha * delta
 
