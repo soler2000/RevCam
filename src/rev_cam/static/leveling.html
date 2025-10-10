@@ -159,19 +159,6 @@
         gap: var(--stack-gap-lg);
       }
 
-      .panel-grid {
-        display: grid;
-        gap: var(--stack-gap-lg);
-        grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
-        align-items: start;
-      }
-
-      @media (min-width: 1100px) {
-        .panel-grid {
-          grid-template-columns: minmax(340px, 420px) minmax(520px, 1fr);
-        }
-      }
-
       .card {
         background: var(--surface-panel);
         border-radius: var(--radius-xl);
@@ -194,102 +181,51 @@
         color: var(--text-muted);
       }
 
-      #viewer-card {
-        grid-column: 1 / -1;
+      .analysis-card {
+        gap: var(--stack-gap-lg);
       }
 
-      form label {
-        display: block;
-        font-weight: 600;
-        margin-bottom: var(--space-xs);
-      }
-
-      .field-group {
-        display: grid;
-        gap: var(--space-md);
-      }
-
-      .field-row {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-        gap: var(--space-md);
-      }
-
-      input[type="number"],
-      input[type="range"],
-      button {
-        font: inherit;
-      }
-
-      input[type="number"] {
-        width: 100%;
-        padding: var(--control-padding-y) var(--control-padding-x);
-        border-radius: var(--radius-sm);
-        border: 1px solid transparent;
-        background: var(--surface-soft);
-        box-shadow: inset 0 0 0 1px var(--border-subtle);
-        color: var(--text-primary);
-        transition: border-color var(--transition), box-shadow var(--transition),
-          background var(--transition);
-      }
-
-      input[type="number"]:focus-visible {
-        outline: none;
-        background: var(--surface-secondary);
-        box-shadow: inset 0 0 0 1px var(--accent), 0 0 0 4px var(--accent-soft);
-      }
-
-      input[type="range"] {
-        width: 100%;
-      }
-
-      button {
-        align-self: flex-start;
-        background: linear-gradient(135deg, var(--accent), var(--accent-hover));
-        color: var(--text-on-accent);
-        border: none;
-        border-radius: var(--radius-pill);
-        padding: 0.7rem 1.9rem;
-        font-weight: 600;
-        cursor: pointer;
-        box-shadow: 0 18px 42px rgba(10, 132, 255, 0.35);
-        transition: transform var(--transition), box-shadow var(--transition);
-      }
-
-      button:hover,
-      button:focus-visible {
-        outline: none;
-        transform: translateY(-1px);
-        box-shadow: 0 24px 52px rgba(10, 132, 255, 0.45);
-      }
-
-      .sensor-grid {
-        display: grid;
+      .analysis-header {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
         gap: var(--space-lg);
       }
 
-      .sensor-group {
-        background: var(--surface-secondary);
-        border-radius: var(--radius-lg);
-        padding: var(--space-lg);
-        border: 1px solid var(--border-subtle);
-        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+      .analysis-header h2 {
+        margin-bottom: var(--space-xs);
       }
 
-      .sensor-group h3 {
-        margin-top: 0;
-        margin-bottom: var(--space-md);
+      .analysis-header p {
+        margin: 0;
+        color: var(--text-muted);
       }
 
-      .slider-row {
+      .analysis-layout {
         display: grid;
-        gap: var(--space-xs);
+        gap: var(--stack-gap-lg);
       }
 
-      .slider-row span {
+      @media (min-width: 900px) {
+        .analysis-layout {
+          grid-template-columns: minmax(0, 1fr) minmax(260px, 360px);
+          align-items: start;
+        }
+      }
+
+      .analysis-details {
+        display: grid;
+        gap: var(--stack-gap-lg);
+      }
+
+      .visualiser-panel {
         display: flex;
-        justify-content: space-between;
-        font-size: 0.9rem;
+        flex-direction: column;
+        gap: var(--space-md);
+      }
+
+      .visualiser-panel p {
         color: var(--text-muted);
       }
 
@@ -405,8 +341,8 @@
       #viewer {
         position: relative;
         width: 100%;
-        aspect-ratio: 16 / 9;
-        min-height: clamp(420px, 60vh, 720px);
+        aspect-ratio: 4 / 3;
+        min-height: clamp(260px, 32vh, 480px);
         background: radial-gradient(circle at top, rgba(70, 80, 110, 0.32), rgba(9, 11, 18, 0.9));
         border-radius: var(--radius-xl);
         border: 1px solid var(--border-muted);
@@ -486,148 +422,101 @@
         </nav>
       </header>
       <main>
-        <div class="panel-grid">
-        <article class="card" id="sensor-card">
-          <h2>Sensor Simulator</h2>
-          <p>
-            Adjust the sliders to emulate the GY-85 outputs when the hardware sensor is
-            unavailable. Values are fed through a Kalman filter to estimate orientation.
-          </p>
-          <div class="mode-toggle" role="radiogroup" aria-label="Operating mode">
-            <label><input type="radio" name="mode" value="hitched" checked /> Hitched</label>
-            <label><input type="radio" name="mode" value="unhitched" /> Unhitched</label>
-          </div>
-          <div class="sensor-grid">
-            <section class="sensor-group">
-              <h3>Accelerometer (g)</h3>
-              <div class="slider-row">
-                <span><span>X axis</span><span id="accel-x-display">0.00 g</span></span>
-                <input type="range" min="-2" max="2" step="0.01" value="0" id="accel-x" />
-              </div>
-              <div class="slider-row">
-                <span><span>Y axis</span><span id="accel-y-display">1.00 g</span></span>
-                <input type="range" min="-2" max="2" step="0.01" value="1" id="accel-y" />
-              </div>
-              <div class="slider-row">
-                <span><span>Z axis</span><span id="accel-z-display">0.00 g</span></span>
-                <input type="range" min="-2" max="2" step="0.01" value="0" id="accel-z" />
-              </div>
-            </section>
-            <section class="sensor-group">
-              <h3>Gyroscope (°/s)</h3>
-              <div class="slider-row">
-                <span><span>Roll</span><span id="gyro-x-display">0 °/s</span></span>
-                <input type="range" min="-250" max="250" step="1" value="0" id="gyro-x" />
-              </div>
-              <div class="slider-row">
-                <span><span>Pitch</span><span id="gyro-y-display">0 °/s</span></span>
-                <input type="range" min="-250" max="250" step="1" value="0" id="gyro-y" />
-              </div>
-              <div class="slider-row">
-                <span><span>Yaw</span><span id="gyro-z-display">0 °/s</span></span>
-                <input type="range" min="-250" max="250" step="1" value="0" id="gyro-z" />
-              </div>
-            </section>
-            <section class="sensor-group">
-              <h3>Magnetometer (µT)</h3>
-              <div class="slider-row">
-                <span><span>X axis</span><span id="mag-x-display">20 µT</span></span>
-                <input type="range" min="-100" max="100" step="1" value="20" id="mag-x" />
-              </div>
-              <div class="slider-row">
-                <span><span>Y axis</span><span id="mag-y-display">0 µT</span></span>
-                <input type="range" min="-100" max="100" step="1" value="0" id="mag-y" />
-              </div>
-              <div class="slider-row">
-                <span><span>Z axis</span><span id="mag-z-display">-5 µT</span></span>
-                <input type="range" min="-100" max="100" step="1" value="-5" id="mag-z" />
-              </div>
-            </section>
-          </div>
-        </article>
-
-        <article class="card">
-          <h2>Leveling Analysis</h2>
-          <p class="status" id="sensor-status" aria-live="polite">Detecting GY-85 sensor…</p>
-          <p class="status" id="analysis-status">Awaiting sensor data…</p>
-          <div class="orientation-readout">
+        <article class="card analysis-card">
+          <div class="analysis-header">
             <div>
-              <span>Roll</span>
-              <strong id="roll-display">0°</strong>
+              <h2>Leveling Analysis</h2>
+              <p>Monitor real-time leveling guidance from the GY-85 sensor.</p>
             </div>
-            <div>
-              <span>Pitch</span>
-              <strong id="pitch-display">0°</strong>
+            <div class="mode-toggle" role="radiogroup" aria-label="Operating mode">
+              <label><input type="radio" name="mode" value="hitched" checked /> Hitched</label>
+              <label><input type="radio" name="mode" value="unhitched" /> Unhitched</label>
             </div>
           </div>
-          <div class="analysis-section">
-            <section>
-              <h3>Hitched guidance</h3>
-              <p id="hitched-message">—</p>
-              <dl class="stats">
-                <dt>Side to raise</dt>
-                <dd id="hitched-side">—</dd>
-                <dt>Raise amount</dt>
-                <dd id="hitched-raise">—</dd>
-                <dt>Ramp travel</dt>
-                <dd id="hitched-travel">—</dd>
-              </dl>
-            </section>
-            <section>
-              <h3>Unhitched guidance</h3>
-              <p id="unhitched-message">—</p>
-              <dl class="stats">
-                <dt>Side to raise</dt>
-                <dd id="unhitched-side">—</dd>
-                <dt>Raise amount</dt>
-                <dd id="unhitched-raise">—</dd>
-                <dt>Hitch adjustment</dt>
-                <dd id="unhitched-hitch">—</dd>
-              </dl>
-            </section>
-            <section class="support-section">
-              <h3>Support adjustments</h3>
-              <dl class="support-stats" id="support-points">
-                <div data-point="left_wheel">
-                  <dt>Left wheel</dt>
-                  <dd>
-                    <span class="support-primary">—</span>
-                    <span class="support-secondary">Offset: —</span>
-                  </dd>
+          <div class="analysis-layout">
+            <div class="analysis-details">
+              <div>
+                <p class="status" id="sensor-status" aria-live="polite">Detecting GY-85 sensor…</p>
+                <p class="status" id="analysis-status">Awaiting sensor data…</p>
+              </div>
+              <div class="orientation-readout">
+                <div>
+                  <span>Roll</span>
+                  <strong id="roll-display">0°</strong>
                 </div>
-                <div data-point="right_wheel">
-                  <dt>Right wheel</dt>
-                  <dd>
-                    <span class="support-primary">—</span>
-                    <span class="support-secondary">Offset: —</span>
-                  </dd>
+                <div>
+                  <span>Pitch</span>
+                  <strong id="pitch-display">0°</strong>
                 </div>
-                <div data-point="hitch">
-                  <dt>Hitch jack</dt>
-                  <dd>
-                    <span class="support-primary">—</span>
-                    <span class="support-secondary">Offset: —</span>
-                  </dd>
-                </div>
-                <div data-point="rear_stabilizer">
-                  <dt>Rear stabilizer</dt>
-                  <dd>
-                    <span class="support-primary">—</span>
-                    <span class="support-secondary">Offset: —</span>
-                  </dd>
-                </div>
-              </dl>
-            </section>
+              </div>
+              <div class="analysis-section">
+                <section>
+                  <h3>Hitched guidance</h3>
+                  <p id="hitched-message">—</p>
+                  <dl class="stats">
+                    <dt>Side to raise</dt>
+                    <dd id="hitched-side">—</dd>
+                    <dt>Raise amount</dt>
+                    <dd id="hitched-raise">—</dd>
+                    <dt>Ramp travel</dt>
+                    <dd id="hitched-travel">—</dd>
+                  </dl>
+                </section>
+                <section>
+                  <h3>Unhitched guidance</h3>
+                  <p id="unhitched-message">—</p>
+                  <dl class="stats">
+                    <dt>Side to raise</dt>
+                    <dd id="unhitched-side">—</dd>
+                    <dt>Raise amount</dt>
+                    <dd id="unhitched-raise">—</dd>
+                    <dt>Hitch adjustment</dt>
+                    <dd id="unhitched-hitch">—</dd>
+                  </dl>
+                </section>
+                <section class="support-section">
+                  <h3>Support adjustments</h3>
+                  <dl class="support-stats" id="support-points">
+                    <div data-point="left_wheel">
+                      <dt>Left wheel</dt>
+                      <dd>
+                        <span class="support-primary">—</span>
+                        <span class="support-secondary">Offset: —</span>
+                      </dd>
+                    </div>
+                    <div data-point="right_wheel">
+                      <dt>Right wheel</dt>
+                      <dd>
+                        <span class="support-primary">—</span>
+                        <span class="support-secondary">Offset: —</span>
+                      </dd>
+                    </div>
+                    <div data-point="hitch">
+                      <dt>Hitch jack</dt>
+                      <dd>
+                        <span class="support-primary">—</span>
+                        <span class="support-secondary">Offset: —</span>
+                      </dd>
+                    </div>
+                    <div data-point="rear_stabilizer">
+                      <dt>Rear stabilizer</dt>
+                      <dd>
+                        <span class="support-primary">—</span>
+                        <span class="support-secondary">Offset: —</span>
+                      </dd>
+                    </div>
+                  </dl>
+                </section>
+              </div>
+            </div>
+            <aside class="visualiser-panel">
+              <h3>3D Trailer Visualiser</h3>
+              <p>Orientation estimates drive this rendering in real time from the onboard sensor.</p>
+              <div id="viewer" aria-label="3D rendering of trailer"></div>
+            </aside>
           </div>
         </article>
-
-        <article class="card" id="viewer-card">
-          <h2>3D Trailer Visualiser</h2>
-          <p>Orientation estimates drive this rendering. Adjust the sliders to see how the trailer shifts relative to level ground.</p>
-          <div id="viewer" aria-label="3D rendering of trailer"></div>
-        </article>
-      </div>
-    </main>
+      </main>
     <footer>
       <span>&copy; RevCam – Trailer leveling preview</span>
       <span id="sample-rate" class="status"></span>
@@ -641,7 +530,6 @@
       const sampleRateDisplay = document.getElementById("sample-rate");
       const analysisStatus = document.getElementById("analysis-status");
       const sensorStatus = document.getElementById("sensor-status");
-      const sensorCard = document.getElementById("sensor-card");
       const rollDisplay = document.getElementById("roll-display");
       const pitchDisplay = document.getElementById("pitch-display");
       const hitchedMessage = document.getElementById("hitched-message");
@@ -665,11 +553,6 @@
         }
       }
 
-      const sensorState = {
-        accelerometer: { x: 0, y: 1, z: 0 },
-        gyroscope: { x: 0, y: 0, z: 0 },
-        magnetometer: { x: 20, y: 0, z: -5 },
-      };
       let currentMode = "hitched";
       let lastSampleTime = performance.now();
       let inFlight = false;
@@ -741,18 +624,13 @@
           if (available) {
             sensorStatus.textContent = "GY-85 hardware sensor connected";
             sensorStatus.classList.add("success");
-            if (sensorCard) {
-              sensorCard.classList.add("hidden");
-            }
+            sampleRateDisplay.textContent = "Awaiting sensor data…";
           } else {
             const fallbackMessage = errorMessage
               ? `GY-85 sensor unavailable – ${errorMessage}`
-              : "GY-85 sensor not detected – using simulator";
+              : "GY-85 sensor not detected";
             sensorStatus.textContent = fallbackMessage;
             sensorStatus.classList.add("error");
-            if (sensorCard) {
-              sensorCard.classList.remove("hidden");
-            }
           }
         } catch (error) {
           console.error(error);
@@ -760,17 +638,14 @@
           sensorStatus.textContent = "Unable to determine sensor status";
           sensorStatus.classList.remove("success", "live");
           sensorStatus.classList.add("error");
-          if (sensorCard) {
-            sensorCard.classList.remove("hidden");
-          }
         }
         analysisStatus.classList.remove("live", "error", "loading");
         analysisStatus.removeAttribute("aria-busy");
         analysisStatus.textContent = hardwareAvailable
           ? "Awaiting sensor data…"
-          : "Awaiting simulator input…";
+          : "Waiting for GY-85 sensor connection…";
         if (!hardwareAvailable) {
-          sampleRateDisplay.textContent = "Simulator ready";
+          sampleRateDisplay.textContent = "Sensor unavailable";
         }
       }
 
@@ -905,11 +780,14 @@
           return;
         }
         pendingSample = false;
-        if (hardwareAvailable) {
-          void fetchHardwareSample();
-        } else {
-          void sendManualSample();
+        if (!hardwareAvailable) {
+          analysisStatus.classList.remove("live", "error", "loading");
+          analysisStatus.removeAttribute("aria-busy");
+          analysisStatus.textContent = "Waiting for GY-85 sensor connection…";
+          sampleRateDisplay.textContent = "Sensor unavailable";
+          return;
         }
+        void fetchHardwareSample();
       }
 
       async function fetchHardwareSample() {
@@ -987,91 +865,6 @@
         }
       }
 
-      async function sendManualSample() {
-        inFlight = true;
-        analysisStatus.classList.add("loading");
-        analysisStatus.setAttribute("aria-busy", "true");
-        analysisStatus.classList.remove("error");
-        const payload = {
-          accelerometer: sensorState.accelerometer,
-          gyroscope: sensorState.gyroscope,
-          magnetometer: sensorState.magnetometer,
-          dt: SAMPLE_INTERVAL / 1000,
-          mode: currentMode,
-        };
-        try {
-          const response = await fetch("/api/leveling/sample", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
-          });
-          if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
-          }
-          const data = await response.json();
-          const modeLabel = data.mode === "hitched" ? "Hitched mode" : "Unhitched mode";
-          const analysisMessage = data.analysis?.message ?? "";
-          updateDisplays({
-            orientation: data.orientation,
-            hitched: data.hitched,
-            unhitched: data.unhitched,
-            support_points: data.support_points,
-          }, { modeLabel, analysisMessage });
-          const now = performance.now();
-          const intervalMs =
-            typeof data.interval_s === "number" && Number.isFinite(data.interval_s)
-              ? data.interval_s * 1000
-              : now - lastSampleTime;
-          lastSampleTime = now;
-          const timestamp = new Date();
-          sampleRateDisplay.textContent = `Last update ${timestamp.toLocaleTimeString()} • Δ ${Math.round(intervalMs)} ms`;
-        } catch (error) {
-          console.error(error);
-          analysisStatus.textContent = "Unable to reach leveling API";
-          analysisStatus.classList.remove("live");
-          analysisStatus.classList.add("error");
-          sampleRateDisplay.textContent = "Waiting for connection…";
-        } finally {
-          analysisStatus.classList.remove("loading");
-          analysisStatus.removeAttribute("aria-busy");
-          inFlight = false;
-          if (pendingSample) {
-            pendingSample = false;
-            requestSample();
-          }
-        }
-      }
-
-      function handleSlider(id, formatter, target) {
-        const input = document.getElementById(id);
-        const display = document.getElementById(`${id}-display`);
-        if (!input || !display) {
-          throw new Error(`Missing slider ${id}`);
-        }
-        const update = (triggerSample = true) => {
-          const value = parseFloat(input.value);
-          display.textContent = formatter(value);
-          target(value);
-          if (triggerSample && !hardwareAvailable) {
-            requestSample();
-          }
-        };
-        input.addEventListener("input", () => update(true));
-        update(false);
-      }
-
-      function initSliders() {
-        handleSlider("accel-x", (v) => `${v.toFixed(2)} g`, (v) => (sensorState.accelerometer.x = v));
-        handleSlider("accel-y", (v) => `${v.toFixed(2)} g`, (v) => (sensorState.accelerometer.y = v));
-        handleSlider("accel-z", (v) => `${v.toFixed(2)} g`, (v) => (sensorState.accelerometer.z = v));
-        handleSlider("gyro-x", (v) => `${v.toFixed(0)} °/s`, (v) => (sensorState.gyroscope.x = v));
-        handleSlider("gyro-y", (v) => `${v.toFixed(0)} °/s`, (v) => (sensorState.gyroscope.y = v));
-        handleSlider("gyro-z", (v) => `${v.toFixed(0)} °/s`, (v) => (sensorState.gyroscope.z = v));
-        handleSlider("mag-x", (v) => `${v.toFixed(0)} µT`, (v) => (sensorState.magnetometer.x = v));
-        handleSlider("mag-y", (v) => `${v.toFixed(0)} µT`, (v) => (sensorState.magnetometer.y = v));
-        handleSlider("mag-z", (v) => `${v.toFixed(0)} µT`, (v) => (sensorState.magnetometer.z = v));
-      }
-
       function initModeToggle() {
         for (const radio of document.querySelectorAll('input[name="mode"]')) {
           radio.addEventListener("change", (event) => {
@@ -1141,7 +934,6 @@
       }
 
       async function initialise() {
-        initSliders();
         initModeToggle();
         initThree();
         await refreshSensorStatus();
