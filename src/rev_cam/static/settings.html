@@ -107,6 +107,17 @@
         display: block;
         margin-bottom: calc(var(--rhythm) / 2);
       }
+      .label-title {
+        display: block;
+        margin-bottom: var(--space-xs);
+      }
+      .measurement-helper {
+        display: block;
+        margin-top: var(--space-xs);
+      }
+      .measurement-helper[hidden] {
+        display: none;
+      }
       select,
       input[type="text"],
       input[type="password"],
@@ -148,6 +159,53 @@
         background: var(--surface-muted);
         box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
         color: var(--text-muted);
+      }
+      .unit-form {
+        margin-top: var(--stack-gap);
+      }
+      .unit-options {
+        margin: var(--stack-gap) 0 0;
+        padding: 0;
+        border: 0;
+        display: grid;
+        gap: var(--space-md);
+      }
+      .unit-options-legend {
+        margin: 0;
+        font-size: 0.95rem;
+        font-weight: 600;
+      }
+      .unit-option {
+        display: flex;
+        align-items: flex-start;
+        gap: var(--space-md);
+        padding: var(--space-md) var(--space-lg);
+        border-radius: var(--radius-md);
+        background: var(--surface-soft);
+        box-shadow: inset 0 0 0 1px var(--border-subtle);
+        cursor: pointer;
+        transition: background var(--transition), box-shadow var(--transition);
+      }
+      .unit-option:hover,
+      .unit-option:focus-within {
+        background: var(--surface-1);
+        box-shadow: inset 0 0 0 1px var(--accent);
+      }
+      .unit-option.is-selected {
+        background: var(--surface-1);
+        box-shadow: inset 0 0 0 1px var(--accent);
+      }
+      .unit-option input[type="radio"] {
+        margin-top: var(--space-xs);
+      }
+      .unit-option-content {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-xs);
+      }
+      .unit-option-title {
+        font-weight: 600;
+        font-size: 1.05rem;
       }
       input[type="checkbox"] {
         margin-top: var(--space-xs);
@@ -1637,6 +1695,18 @@
                   type="button"
                   class="tab-button"
                   role="tab"
+                  id="tab-units"
+                  aria-controls="panel-units"
+                  aria-selected="false"
+                  data-tab="units"
+                  tabindex="-1"
+                >
+                  Units
+                </button>
+                <button
+                  type="button"
+                  class="tab-button"
+                  role="tab"
                   id="tab-lighting"
                   aria-controls="panel-lighting"
                   aria-selected="false"
@@ -1829,6 +1899,46 @@
 
         </section>
 
+        <section
+          id="panel-units"
+          class="tab-panel"
+          role="tabpanel"
+          aria-labelledby="tab-units"
+          data-tab="units"
+          hidden
+        >
+          <section class="card">
+            <h2>Units</h2>
+            <p class="muted helper-text">
+              Choose how measurements are displayed across the settings. Values convert automatically when saved.
+            </p>
+            <form id="unit-settings-form" class="unit-form">
+              <fieldset class="unit-options">
+                <legend class="unit-options-legend">Measurement system</legend>
+                <label class="unit-option">
+                  <input type="radio" name="unit-system" value="metric" />
+                  <span class="unit-option-content">
+                    <span class="unit-option-title">Metric</span>
+                    <span class="unit-option-description muted helper-text">
+                      Metres and millimetres
+                    </span>
+                  </span>
+                </label>
+                <label class="unit-option">
+                  <input type="radio" name="unit-system" value="imperial" />
+                  <span class="unit-option-content">
+                    <span class="unit-option-title">Imperial</span>
+                    <span class="unit-option-description muted helper-text">
+                      Feet and inches
+                    </span>
+                  </span>
+                </label>
+              </fieldset>
+            </form>
+            <p id="unit-selection-summary" class="muted helper-text"></p>
+          </section>
+        </section>
+
             <section
           id="panel-lighting"
           class="tab-panel"
@@ -1943,7 +2053,7 @@
               <div class="distance-geometry-controls">
                 <form id="distance-geometry-form" class="distance-geometry-form">
                   <label>
-                    Mount height (m)
+                    <span class="label-title" data-measurement-label="distance-geometry-height">Mount height (m)</span>
                     <input
                       type="number"
                       name="mount_height_m"
@@ -1951,7 +2061,12 @@
                       max="5"
                       step="0.01"
                       inputmode="decimal"
+                      data-measurement-field="distance-geometry-height"
                     />
+                    <span
+                      class="muted helper-text measurement-helper"
+                      data-measurement-helper="distance-geometry-height"
+                    ></span>
                   </label>
                   <label>
                     Mount angle (° from vertical)
@@ -2024,7 +2139,7 @@
             </p>
             <div class="distance-calibration-grid">
               <label>
-                Offset adjustment (m)
+                <span class="label-title" data-measurement-label="distance-calibration-offset">Offset adjustment (m)</span>
                 <input
                   type="number"
                   name="offset_m"
@@ -2032,7 +2147,12 @@
                   max="5"
                   step="0.01"
                   inputmode="decimal"
+                  data-measurement-field="distance-calibration-offset"
                 />
+                <span
+                  class="muted helper-text measurement-helper"
+                  data-measurement-helper="distance-calibration-offset"
+                ></span>
               </label>
               <label>
                 Scale factor
@@ -2060,10 +2180,10 @@
           <form id="distance-zones-form" class="card">
             <h2>Warning zones</h2>
             <p class="muted">
-              Set the thresholds for each warning zone. Distances are measured in metres.
+              Set the thresholds for each warning zone. Distances follow your selected units.
             </p>
             <label>
-              Caution threshold (m)
+              <span class="label-title" data-measurement-label="distance-zones-caution">Caution threshold (m)</span>
               <input
                 type="number"
                 name="caution"
@@ -2071,10 +2191,15 @@
                 max="10"
                 step="0.1"
                 inputmode="decimal"
+                data-measurement-field="distance-zones-caution"
               />
+              <span
+                class="muted helper-text measurement-helper"
+                data-measurement-helper="distance-zones-caution"
+              ></span>
             </label>
             <label>
-              Warning threshold (m)
+              <span class="label-title" data-measurement-label="distance-zones-warning">Warning threshold (m)</span>
               <input
                 type="number"
                 name="warning"
@@ -2082,10 +2207,15 @@
                 max="10"
                 step="0.1"
                 inputmode="decimal"
+                data-measurement-field="distance-zones-warning"
               />
+              <span
+                class="muted helper-text measurement-helper"
+                data-measurement-helper="distance-zones-warning"
+              ></span>
             </label>
             <label>
-              Danger threshold (m)
+              <span class="label-title" data-measurement-label="distance-zones-danger">Danger threshold (m)</span>
               <input
                 type="number"
                 name="danger"
@@ -2093,7 +2223,12 @@
                 max="10"
                 step="0.1"
                 inputmode="decimal"
+                data-measurement-field="distance-zones-danger"
               />
+              <span
+                class="muted helper-text measurement-helper"
+                data-measurement-helper="distance-zones-danger"
+              ></span>
             </label>
             <div class="form-actions">
               <button type="submit">Save warning zones</button>
@@ -2114,11 +2249,11 @@
             <h2>Trailer leveling</h2>
             <p class="muted helper-text">
               Configure the trailer geometry and ramp dimensions used to calculate leveling guidance.
-              All values are stored in metres.
+              Measurements are shown in your selected units and converted automatically when saved.
             </p>
             <div class="trailer-settings-grid">
               <label>
-                Axle width (m)
+                <span class="label-title" data-measurement-label="trailer-axle-width">Axle width (m)</span>
                 <input
                   type="number"
                   name="axle_width_m"
@@ -2127,10 +2262,15 @@
                   step="0.01"
                   inputmode="decimal"
                   required
+                  data-measurement-field="trailer-axle-width"
                 />
+                <span
+                  class="muted helper-text measurement-helper"
+                  data-measurement-helper="trailer-axle-width"
+                ></span>
               </label>
               <label>
-                Hitch to axle (m)
+                <span class="label-title" data-measurement-label="trailer-hitch-to-axle">Hitch to axle (m)</span>
                 <input
                   type="number"
                   name="hitch_to_axle_m"
@@ -2139,10 +2279,15 @@
                   step="0.01"
                   inputmode="decimal"
                   required
+                  data-measurement-field="trailer-hitch-to-axle"
                 />
+                <span
+                  class="muted helper-text measurement-helper"
+                  data-measurement-helper="trailer-hitch-to-axle"
+                ></span>
               </label>
               <label>
-                Trailer length (m)
+                <span class="label-title" data-measurement-label="trailer-length">Trailer length (m)</span>
                 <input
                   type="number"
                   name="length_m"
@@ -2151,7 +2296,12 @@
                   step="0.01"
                   inputmode="decimal"
                   required
+                  data-measurement-field="trailer-length"
                 />
+                <span
+                  class="muted helper-text measurement-helper"
+                  data-measurement-helper="trailer-length"
+                ></span>
               </label>
             </div>
             <h3>Ramp specification</h3>
@@ -2160,7 +2310,7 @@
             </p>
             <div class="trailer-settings-grid">
               <label>
-                Ramp length (m)
+                <span class="label-title" data-measurement-label="trailer-ramp-length">Ramp length (m)</span>
                 <input
                   type="number"
                   name="ramp_length_m"
@@ -2169,10 +2319,15 @@
                   step="0.01"
                   inputmode="decimal"
                   required
+                  data-measurement-field="trailer-ramp-length"
                 />
+                <span
+                  class="muted helper-text measurement-helper"
+                  data-measurement-helper="trailer-ramp-length"
+                ></span>
               </label>
               <label>
-                Ramp height (m)
+                <span class="label-title" data-measurement-label="trailer-ramp-height">Ramp height (m)</span>
                 <input
                   type="number"
                   name="ramp_height_m"
@@ -2181,7 +2336,12 @@
                   step="0.005"
                   inputmode="decimal"
                   required
+                  data-measurement-field="trailer-ramp-height"
                 />
+                <span
+                  class="muted helper-text measurement-helper"
+                  data-measurement-helper="trailer-ramp-height"
+                ></span>
               </label>
             </div>
             <div class="form-actions">
@@ -2974,6 +3134,27 @@
           pitch: 0,
         },
       };
+      const UNIT_STORAGE_KEY = "revcam.settings.units";
+      const METRES_PER_FOOT = 0.3048;
+      const METRES_PER_INCH = 0.0254;
+      const UNIT_SYSTEMS = {
+        metric: {
+          key: "metric",
+          label: "Metric",
+          description: "metres",
+        },
+        imperial: {
+          key: "imperial",
+          label: "Imperial",
+          description: "feet and inches",
+        },
+      };
+      let activeUnitSystem = "metric";
+      const measurementFields = [];
+      const measurementFieldMap = new Map();
+      const measurementFieldByInput = new Map();
+      let currentDistanceData = null;
+      let currentTrailerSettings = DEFAULT_TRAILER_SETTINGS;
       const ledSummary = document.getElementById("led-summary");
       const ledForm = document.getElementById("led-form");
       const ledPatternSelect = document.getElementById("led-pattern");
@@ -3044,6 +3225,176 @@
             scale: distanceCalibrationForm.querySelector('input[name="scale"]'),
           }
         : null;
+      const unitForm = document.getElementById("unit-settings-form");
+      const unitSummary = document.getElementById("unit-selection-summary");
+      const unitOptionLabels = unitForm
+        ? Array.from(unitForm.querySelectorAll(".unit-option")).filter(
+            (element) => element instanceof HTMLLabelElement,
+          )
+        : [];
+      const unitRadioButtons = unitForm
+        ? Array.from(unitForm.querySelectorAll('input[name="unit-system"]')).filter(
+            (element) => element instanceof HTMLInputElement,
+          )
+        : [];
+      const measurementLabelElements = new Map(
+        Array.from(document.querySelectorAll("[data-measurement-label]")).flatMap((element) => {
+          if (!(element instanceof HTMLElement)) {
+            return [];
+          }
+          const key = element.dataset.measurementLabel;
+          return typeof key === "string" && key.length > 0 ? [[key, element]] : [];
+        }),
+      );
+      const measurementHelperElements = new Map(
+        Array.from(document.querySelectorAll("[data-measurement-helper]")).flatMap((element) => {
+          if (!(element instanceof HTMLElement)) {
+            return [];
+          }
+          const key = element.dataset.measurementHelper;
+          return typeof key === "string" && key.length > 0 ? [[key, element]] : [];
+        }),
+      );
+      if (distanceGeometryInputs?.height instanceof HTMLInputElement) {
+        registerMeasurementField("distance-geometry-height", {
+          input: distanceGeometryInputs.height,
+          metric: { label: "Mount height (m)", min: 0.1, max: 5, step: 0.01, decimals: 2 },
+          imperial: {
+            label: "Mount height (ft)",
+            min: convertMetresToSystemValue(0.1, "imperial", { decimals: 3 }),
+            max: convertMetresToSystemValue(5, "imperial", { decimals: 3 }),
+            step: convertMetresToSystemValue(0.01, "imperial", { decimals: 3 }),
+            decimals: 2,
+          },
+        });
+      }
+      if (distanceInputs?.caution instanceof HTMLInputElement) {
+        registerMeasurementField("distance-zones-caution", {
+          input: distanceInputs.caution,
+          metric: { label: "Caution threshold (m)", min: 0.1, max: 10, step: 0.1, decimals: 1 },
+          imperial: {
+            label: "Caution threshold (ft)",
+            min: convertMetresToSystemValue(0.1, "imperial", { decimals: 3 }),
+            max: convertMetresToSystemValue(10, "imperial", { decimals: 3 }),
+            step: convertMetresToSystemValue(0.1, "imperial", { decimals: 3 }),
+            decimals: 2,
+          },
+        });
+      }
+      if (distanceInputs?.warning instanceof HTMLInputElement) {
+        registerMeasurementField("distance-zones-warning", {
+          input: distanceInputs.warning,
+          metric: { label: "Warning threshold (m)", min: 0.1, max: 10, step: 0.1, decimals: 1 },
+          imperial: {
+            label: "Warning threshold (ft)",
+            min: convertMetresToSystemValue(0.1, "imperial", { decimals: 3 }),
+            max: convertMetresToSystemValue(10, "imperial", { decimals: 3 }),
+            step: convertMetresToSystemValue(0.1, "imperial", { decimals: 3 }),
+            decimals: 2,
+          },
+        });
+      }
+      if (distanceInputs?.danger instanceof HTMLInputElement) {
+        registerMeasurementField("distance-zones-danger", {
+          input: distanceInputs.danger,
+          metric: { label: "Danger threshold (m)", min: 0.1, max: 10, step: 0.1, decimals: 1 },
+          imperial: {
+            label: "Danger threshold (ft)",
+            min: convertMetresToSystemValue(0.1, "imperial", { decimals: 3 }),
+            max: convertMetresToSystemValue(10, "imperial", { decimals: 3 }),
+            step: convertMetresToSystemValue(0.1, "imperial", { decimals: 3 }),
+            decimals: 2,
+          },
+        });
+      }
+      if (distanceCalibrationInputs?.offset instanceof HTMLInputElement) {
+        registerMeasurementField("distance-calibration-offset", {
+          input: distanceCalibrationInputs.offset,
+          metric: { label: "Offset adjustment (m)", min: -5, max: 5, step: 0.01, decimals: 2 },
+          imperial: {
+            label: "Offset adjustment (ft)",
+            min: convertMetresToSystemValue(-5, "imperial", { decimals: 3 }),
+            max: convertMetresToSystemValue(5, "imperial", { decimals: 3 }),
+            step: convertMetresToSystemValue(0.01, "imperial", { decimals: 3 }),
+            decimals: 2,
+          },
+        });
+      }
+      if (trailerInputs?.axleWidth instanceof HTMLInputElement) {
+        registerMeasurementField("trailer-axle-width", {
+          input: trailerInputs.axleWidth,
+          metric: { label: "Axle width (m)", min: 1, max: 5, step: 0.01, decimals: 2 },
+          imperial: {
+            label: "Axle width (ft)",
+            min: convertMetresToSystemValue(1, "imperial", { decimals: 3 }),
+            max: convertMetresToSystemValue(5, "imperial", { decimals: 3 }),
+            step: convertMetresToSystemValue(0.01, "imperial", { decimals: 3 }),
+            decimals: 2,
+          },
+        });
+      }
+      if (trailerInputs?.hitchToAxle instanceof HTMLInputElement) {
+        registerMeasurementField("trailer-hitch-to-axle", {
+          input: trailerInputs.hitchToAxle,
+          metric: { label: "Hitch to axle (m)", min: 1, max: 10, step: 0.01, decimals: 2 },
+          imperial: {
+            label: "Hitch to axle (ft)",
+            min: convertMetresToSystemValue(1, "imperial", { decimals: 3 }),
+            max: convertMetresToSystemValue(10, "imperial", { decimals: 3 }),
+            step: convertMetresToSystemValue(0.01, "imperial", { decimals: 3 }),
+            decimals: 2,
+          },
+        });
+      }
+      if (trailerInputs?.length instanceof HTMLInputElement) {
+        registerMeasurementField("trailer-length", {
+          input: trailerInputs.length,
+          metric: { label: "Trailer length (m)", min: 1, max: 15, step: 0.01, decimals: 2 },
+          imperial: {
+            label: "Trailer length (ft)",
+            min: convertMetresToSystemValue(1, "imperial", { decimals: 3 }),
+            max: convertMetresToSystemValue(15, "imperial", { decimals: 3 }),
+            step: convertMetresToSystemValue(0.01, "imperial", { decimals: 3 }),
+            decimals: 2,
+          },
+        });
+      }
+      if (trailerInputs?.rampLength instanceof HTMLInputElement) {
+        registerMeasurementField("trailer-ramp-length", {
+          input: trailerInputs.rampLength,
+          metric: { label: "Ramp length (m)", min: 0.2, max: 2, step: 0.01, decimals: 2 },
+          imperial: {
+            label: "Ramp length (ft)",
+            min: convertMetresToSystemValue(0.2, "imperial", { decimals: 3 }),
+            max: convertMetresToSystemValue(2, "imperial", { decimals: 3 }),
+            step: convertMetresToSystemValue(0.01, "imperial", { decimals: 3 }),
+            decimals: 2,
+          },
+        });
+      }
+      if (trailerInputs?.rampHeight instanceof HTMLInputElement) {
+        registerMeasurementField("trailer-ramp-height", {
+          input: trailerInputs.rampHeight,
+          metric: { label: "Ramp height (m)", min: 0.05, max: 0.5, step: 0.005, decimals: 3 },
+          imperial: {
+            label: "Ramp height (ft)",
+            min: convertMetresToSystemValue(0.05, "imperial", { decimals: 3 }),
+            max: convertMetresToSystemValue(0.5, "imperial", { decimals: 3 }),
+            step: convertMetresToSystemValue(0.005, "imperial", { decimals: 3 }),
+            decimals: 3,
+          },
+        });
+      }
+      initializeUnitSystem();
+      if (unitRadioButtons.length) {
+        for (const radio of unitRadioButtons) {
+          radio.addEventListener("change", () => {
+            if (radio instanceof HTMLInputElement && radio.checked) {
+              setActiveUnitSystem(radio.value, { force: true });
+            }
+          });
+        }
+      }
       let trailerReferenceSaving = false;
       let trailerReferenceStatusTimer = null;
       let trailerStatusTimer = null;
@@ -3091,6 +3442,7 @@
               if (distanceZonesStatus) {
                 distanceZonesStatus.textContent = "";
               }
+              updateMeasurementHelperForInput(input);
             });
           }
         }
@@ -3103,6 +3455,7 @@
               if (distanceCalibrationStatus) {
                 distanceCalibrationStatus.textContent = "";
               }
+              updateMeasurementHelperForInput(input);
             });
           }
         }
@@ -3115,6 +3468,7 @@
               if (distanceGeometryStatus) {
                 distanceGeometryStatus.textContent = "";
               }
+              updateMeasurementHelperForInput(input);
               refreshProjectedDistanceFromGeometry();
             });
           }
@@ -3126,6 +3480,7 @@
             input.addEventListener("input", () => {
               input.dataset.userEdited = "true";
               setTrailerStatus("", { persistent: true });
+              updateMeasurementHelperForInput(input);
             });
           }
         }
@@ -3138,13 +3493,13 @@
             return;
           }
           const geometry = {
-            axle_width_m: parseFloat(trailerInputs.axleWidth?.value ?? ""),
-            hitch_to_axle_m: parseFloat(trailerInputs.hitchToAxle?.value ?? ""),
-            length_m: parseFloat(trailerInputs.length?.value ?? ""),
+            axle_width_m: parseMeasurementFieldMetres("trailer-axle-width"),
+            hitch_to_axle_m: parseMeasurementFieldMetres("trailer-hitch-to-axle"),
+            length_m: parseMeasurementFieldMetres("trailer-length"),
           };
           const ramp = {
-            length_m: parseFloat(trailerInputs.rampLength?.value ?? ""),
-            height_m: parseFloat(trailerInputs.rampHeight?.value ?? ""),
+            length_m: parseMeasurementFieldMetres("trailer-ramp-length"),
+            height_m: parseMeasurementFieldMetres("trailer-ramp-height"),
           };
           const values = [...Object.values(geometry), ...Object.values(ramp)];
           if (values.some((value) => !Number.isFinite(value) || value <= 0)) {
@@ -4424,19 +4779,369 @@
         );
       }
 
-      function formatDistance(value) {
-        if (typeof value !== "number" || Number.isNaN(value)) {
+      function convertMetresToSystemValue(valueMetres, system = activeUnitSystem, options = {}) {
+        if (typeof valueMetres !== "number" || !Number.isFinite(valueMetres)) {
+          return Number.NaN;
+        }
+        const targetSystem = typeof system === "string" && system in UNIT_SYSTEMS ? system : activeUnitSystem;
+        let result = targetSystem === "imperial" ? valueMetres / METRES_PER_FOOT : valueMetres;
+        if (typeof options.decimals === "number" && Number.isFinite(options.decimals)) {
+          const factor = 10 ** Math.max(0, Math.min(6, Math.round(options.decimals)));
+          result = Math.round(result * factor) / factor;
+        }
+        return result;
+      }
+
+      function convertSystemValueToMetres(value, system = activeUnitSystem) {
+        if (typeof value !== "number" || !Number.isFinite(value)) {
+          return Number.NaN;
+        }
+        const sourceSystem = typeof system === "string" && system in UNIT_SYSTEMS ? system : activeUnitSystem;
+        return sourceSystem === "imperial" ? value * METRES_PER_FOOT : value;
+      }
+
+      function formatNumberForInputValue(value, decimals) {
+        if (typeof value !== "number" || !Number.isFinite(value)) {
+          return "";
+        }
+        const digits =
+          typeof decimals === "number" && Number.isFinite(decimals)
+            ? Math.max(0, Math.min(6, Math.round(decimals)))
+            : 2;
+        return value.toFixed(digits).replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "");
+      }
+
+      function formatDistanceMetric(valueMetres, fractionDigits) {
+        const digits =
+          typeof fractionDigits === "number" && Number.isFinite(fractionDigits)
+            ? Math.max(0, Math.min(6, Math.round(fractionDigits)))
+            : 1;
+        const text = Math.max(0, valueMetres).toFixed(digits);
+        const cleaned = text.replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "");
+        return `${cleaned} m`;
+      }
+
+      function formatDistanceImperial(valueMetres, inchPrecision = 0) {
+        const precision = Math.max(0, Math.min(3, Math.round(inchPrecision)));
+        const totalInches = Math.max(0, valueMetres) / METRES_PER_INCH;
+        if (!Number.isFinite(totalInches)) {
           return "—";
         }
-        return `${Math.max(0, value).toFixed(1)} m`;
+        let feet = Math.floor(totalInches / 12);
+        let inchesRaw = totalInches - feet * 12;
+        let inchText = "";
+        if (precision === 0) {
+          let inches = Math.round(inchesRaw);
+          if (inches === 12) {
+            feet += 1;
+            inches = 0;
+          }
+          if (inches > 0 || feet === 0) {
+            inchText = `${inches} in`;
+          }
+        } else {
+          const factor = 10 ** precision;
+          let inches = Math.round(inchesRaw * factor) / factor;
+          if (inches >= 12) {
+            feet += 1;
+            inches = 0;
+          }
+          const formatted = inches.toFixed(precision).replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "");
+          if (formatted !== "0" || feet === 0) {
+            inchText = `${formatted} in`;
+          }
+        }
+        const parts = [];
+        if (feet > 0 || inchText === "") {
+          parts.push(`${feet} ft`);
+        }
+        if (inchText) {
+          parts.push(inchText);
+        }
+        if (!parts.length) {
+          parts.push("0 in");
+        }
+        return parts.join(" ");
+      }
+
+      function formatDistanceForSystem(valueMetres, system, options = {}) {
+        if (typeof valueMetres !== "number" || !Number.isFinite(valueMetres)) {
+          return "—";
+        }
+        const targetSystem = typeof system === "string" && system in UNIT_SYSTEMS ? system : activeUnitSystem;
+        if (targetSystem === "imperial") {
+          const inchPrecision =
+            typeof options.inchPrecision === "number" && Number.isFinite(options.inchPrecision)
+              ? options.inchPrecision
+              : options.precise === true || (typeof options.fractionDigits === "number" && options.fractionDigits > 1)
+              ? 1
+              : 0;
+          return formatDistanceImperial(valueMetres, inchPrecision);
+        }
+        const fractionDigits =
+          typeof options.fractionDigits === "number" && Number.isFinite(options.fractionDigits)
+            ? options.fractionDigits
+            : options.precise === true
+            ? 3
+            : 1;
+        return formatDistanceMetric(valueMetres, fractionDigits);
+      }
+
+      function formatDistance(value) {
+        return formatDistanceForSystem(value, activeUnitSystem, { precise: false, fractionDigits: 1 });
       }
 
       function formatDistancePrecise(value, fractionDigits = 3) {
-        if (typeof value !== "number" || Number.isNaN(value)) {
+        if (typeof value !== "number" || !Number.isFinite(value)) {
           return "—";
         }
-        const digits = Number.isFinite(fractionDigits) ? Math.min(Math.max(Math.round(fractionDigits), 0), 6) : 3;
-        return `${Math.max(0, value).toFixed(digits)} m`;
+        if (activeUnitSystem === "imperial") {
+          const inchPrecision = fractionDigits > 2 ? 2 : 1;
+          return formatDistanceForSystem(value, "imperial", { inchPrecision });
+        }
+        return formatDistanceForSystem(value, "metric", { precise: true, fractionDigits });
+      }
+
+      function getMeasurementField(idOrField) {
+        if (typeof idOrField === "string") {
+          return measurementFieldMap.get(idOrField) || null;
+        }
+        if (idOrField && typeof idOrField === "object" && idOrField.input instanceof HTMLInputElement) {
+          return idOrField;
+        }
+        return null;
+      }
+
+      function updateMeasurementFieldAttributes(fieldOrId) {
+        const field = getMeasurementField(fieldOrId);
+        if (!field || !(field.input instanceof HTMLInputElement)) {
+          return;
+        }
+        const config = field[activeUnitSystem] || {};
+        if (field.label instanceof HTMLElement && typeof config.label === "string" && config.label.length > 0) {
+          field.label.textContent = config.label;
+        }
+        if (typeof config.min === "number" && Number.isFinite(config.min)) {
+          const formattedMin = formatNumberForInputValue(config.min, config.decimals ?? 3) || String(config.min);
+          field.input.min = formattedMin;
+        } else {
+          field.input.removeAttribute("min");
+        }
+        if (typeof config.max === "number" && Number.isFinite(config.max)) {
+          const formattedMax = formatNumberForInputValue(config.max, config.decimals ?? 3) || String(config.max);
+          field.input.max = formattedMax;
+        } else {
+          field.input.removeAttribute("max");
+        }
+        if (typeof config.step === "number" && Number.isFinite(config.step) && config.step > 0) {
+          const formattedStep = formatNumberForInputValue(config.step, config.decimals ?? 3) || String(config.step);
+          field.input.step = formattedStep;
+        } else {
+          field.input.removeAttribute("step");
+        }
+      }
+
+      function setMeasurementFieldValue(fieldOrId, metres, options = {}) {
+        const field = getMeasurementField(fieldOrId);
+        if (!field || !(field.input instanceof HTMLInputElement)) {
+          return;
+        }
+        const { forceUpdate = false, clearUserEdited = false } = options;
+        if (!forceUpdate && field.input.dataset.userEdited === "true") {
+          updateMeasurementHelper(field, metres);
+          return;
+        }
+        if (typeof metres === "number" && Number.isFinite(metres)) {
+          const config = field[activeUnitSystem] || {};
+          const value = convertMetresToSystemValue(metres, activeUnitSystem);
+          field.input.value = formatNumberForInputValue(value, config.decimals);
+          field.lastValueMetres = metres;
+        } else {
+          field.input.value = "";
+          field.lastValueMetres = Number.NaN;
+        }
+        if (clearUserEdited) {
+          delete field.input.dataset.userEdited;
+        }
+        updateMeasurementHelper(field, metres);
+      }
+
+      function parseMeasurementFieldMetres(fieldOrId) {
+        const field = getMeasurementField(fieldOrId);
+        if (!field || !(field.input instanceof HTMLInputElement)) {
+          return Number.NaN;
+        }
+        const value = Number.parseFloat(field.input.value);
+        if (!Number.isFinite(value)) {
+          return Number.NaN;
+        }
+        const metres = convertSystemValueToMetres(value, activeUnitSystem);
+        if (Number.isFinite(metres)) {
+          field.lastValueMetres = metres;
+        }
+        return metres;
+      }
+
+      function updateMeasurementHelper(fieldOrId, metresOverride) {
+        const field = getMeasurementField(fieldOrId);
+        if (!field || !(field.helper instanceof HTMLElement)) {
+          return;
+        }
+        const metres =
+          typeof metresOverride === "number" && Number.isFinite(metresOverride)
+            ? metresOverride
+            : parseMeasurementFieldMetres(field);
+        if (!Number.isFinite(metres)) {
+          field.helper.textContent = "";
+          field.helper.hidden = true;
+          return;
+        }
+        const oppositeSystem = activeUnitSystem === "imperial" ? "metric" : "imperial";
+        const magnitude = Math.abs(metres);
+        const formatted = formatDistanceForSystem(magnitude, oppositeSystem, { precise: true, fractionDigits: 3 });
+        if (!formatted || formatted === "—") {
+          field.helper.textContent = "";
+          field.helper.hidden = true;
+          return;
+        }
+        const sign = metres < 0 ? "-" : "";
+        field.helper.textContent = `≈ ${sign}${formatted}`;
+        field.helper.hidden = false;
+      }
+
+      function updateMeasurementHelperForInput(input) {
+        if (!(input instanceof HTMLInputElement)) {
+          return;
+        }
+        const field = measurementFieldByInput.get(input);
+        if (field) {
+          updateMeasurementHelper(field);
+        }
+      }
+
+      function registerMeasurementField(id, config = {}) {
+        if (typeof id !== "string" || !id.length) {
+          return;
+        }
+        const input = config.input;
+        if (!(input instanceof HTMLInputElement)) {
+          return;
+        }
+        const field = {
+          id,
+          input,
+          metric: config.metric || {},
+          imperial: config.imperial || {},
+          helper: measurementHelperElements.get(id) || null,
+          label: measurementLabelElements.get(id) || null,
+          lastValueMetres: Number.NaN,
+        };
+        measurementFields.push(field);
+        measurementFieldMap.set(id, field);
+        measurementFieldByInput.set(input, field);
+        updateMeasurementFieldAttributes(field);
+        updateMeasurementHelper(field);
+        input.addEventListener("input", () => {
+          updateMeasurementHelper(field);
+        });
+      }
+
+      function updateUnitSummary() {
+        if (!unitSummary) {
+          return;
+        }
+        const description = activeUnitSystem === "imperial" ? "feet and inches" : "metres";
+        unitSummary.textContent = `Measurements are displayed in ${description}.`;
+      }
+
+      function updateUnitOptionStates() {
+        for (const radio of unitRadioButtons) {
+          if (radio instanceof HTMLInputElement) {
+            radio.checked = radio.value === activeUnitSystem;
+          }
+        }
+        for (const label of unitOptionLabels) {
+          if (!(label instanceof HTMLLabelElement)) {
+            continue;
+          }
+          const radio = label.querySelector('input[type="radio"]');
+          const isChecked = radio instanceof HTMLInputElement && radio.checked;
+          label.classList.toggle("is-selected", isChecked);
+        }
+      }
+
+      function getStoredUnitSystem() {
+        try {
+          const stored = window.localStorage.getItem(UNIT_STORAGE_KEY);
+          if (stored && stored in UNIT_SYSTEMS) {
+            return stored;
+          }
+        } catch (error) {
+          console.error(error);
+        }
+        return null;
+      }
+
+      function setActiveUnitSystem(system, options = {}) {
+        if (!(system in UNIT_SYSTEMS)) {
+          return;
+        }
+        const force = options.force === true;
+        if (system === activeUnitSystem && !force) {
+          updateUnitSummary();
+          updateUnitOptionStates();
+          return;
+        }
+        const values = new Map();
+        for (const field of measurementFields) {
+          const metres = parseMeasurementFieldMetres(field);
+          if (Number.isFinite(metres)) {
+            values.set(field.id, metres);
+          } else if (Number.isFinite(field.lastValueMetres)) {
+            values.set(field.id, field.lastValueMetres);
+          }
+        }
+        activeUnitSystem = system;
+        if (options.persist !== false) {
+          try {
+            window.localStorage.setItem(UNIT_STORAGE_KEY, system);
+          } catch (error) {
+            console.error(error);
+          }
+        }
+        document.documentElement.dataset.unitSystem = system;
+        updateUnitSummary();
+        updateUnitOptionStates();
+        for (const field of measurementFields) {
+          updateMeasurementFieldAttributes(field);
+          const metres = values.get(field.id);
+          if (Number.isFinite(metres)) {
+            setMeasurementFieldValue(field, metres, { forceUpdate: true });
+          } else {
+            updateMeasurementHelper(field, metres);
+          }
+        }
+        refreshProjectedDistanceFromGeometry();
+        if (currentDistanceData) {
+          applyDistanceData(currentDistanceData);
+        }
+        if (currentTrailerSettings) {
+          applyTrailerSettings(currentTrailerSettings);
+        }
+      }
+
+      function initializeUnitSystem() {
+        const stored = getStoredUnitSystem();
+        if (stored && stored in UNIT_SYSTEMS) {
+          activeUnitSystem = stored;
+        }
+        document.documentElement.dataset.unitSystem = activeUnitSystem;
+        updateUnitSummary();
+        updateUnitOptionStates();
+        for (const field of measurementFields) {
+          updateMeasurementFieldAttributes(field);
+          updateMeasurementHelper(field);
+        }
       }
 
       function formatTimeOfDay(timestampSeconds) {
@@ -4651,12 +5356,11 @@
         }
         const offsetInput = distanceCalibrationInputs.offset;
         const scaleInput = distanceCalibrationInputs.scale;
-        if (
-          offsetInput instanceof HTMLInputElement &&
-          (forceUpdate || offsetInput.dataset.userEdited !== "true")
-        ) {
-          offsetInput.value = formatCalibrationValue(calibration.offset_m, 2);
-          delete offsetInput.dataset.userEdited;
+        if (offsetInput instanceof HTMLInputElement) {
+          setMeasurementFieldValue("distance-calibration-offset", calibration.offset_m, {
+            forceUpdate,
+            clearUserEdited: true,
+          });
         }
         if (
           scaleInput instanceof HTMLInputElement &&
@@ -4671,22 +5375,32 @@
         if (!zones || !distanceInputs) {
           return;
         }
-        const keys = ["caution", "warning", "danger"];
-        for (const key of keys) {
+        const fieldMap = {
+          caution: "distance-zones-caution",
+          warning: "distance-zones-warning",
+          danger: "distance-zones-danger",
+        };
+        for (const key of Object.keys(fieldMap)) {
           const input = distanceInputs[key];
           if (!(input instanceof HTMLInputElement)) {
             continue;
           }
-          if (!forceUpdate && input.dataset.userEdited === "true") {
+          const value = zones[key];
+          const shouldForce = forceUpdate || input.dataset.userEdited !== "true";
+          if (!shouldForce) {
             continue;
           }
-          const value = zones[key];
           if (typeof value === "number" && Number.isFinite(value)) {
-            input.value = value.toFixed(1);
+            setMeasurementFieldValue(fieldMap[key], value, {
+              forceUpdate: true,
+              clearUserEdited: true,
+            });
           } else {
-            input.value = "";
+            setMeasurementFieldValue(fieldMap[key], Number.NaN, {
+              forceUpdate: true,
+              clearUserEdited: true,
+            });
           }
-          delete input.dataset.userEdited;
         }
       }
 
@@ -4696,12 +5410,11 @@
         }
         const heightInput = distanceGeometryInputs.height;
         const angleInput = distanceGeometryInputs.angle;
-        if (
-          heightInput instanceof HTMLInputElement &&
-          (forceUpdate || heightInput.dataset.userEdited !== "true")
-        ) {
-          heightInput.value = formatCalibrationValue(geometry.mount_height_m, 2);
-          delete heightInput.dataset.userEdited;
+        if (heightInput instanceof HTMLInputElement) {
+          setMeasurementFieldValue("distance-geometry-height", geometry.mount_height_m, {
+            forceUpdate,
+            clearUserEdited: true,
+          });
         }
         if (
           angleInput instanceof HTMLInputElement &&
@@ -4745,7 +5458,7 @@
         if (!(heightInput instanceof HTMLInputElement) || !(angleInput instanceof HTMLInputElement)) {
           return null;
         }
-        const height = Number.parseFloat(heightInput.value);
+        const height = parseMeasurementFieldMetres("distance-geometry-height");
         const angle = Number.parseFloat(angleInput.value);
         if (!Number.isFinite(height) || !Number.isFinite(angle)) {
           return null;
@@ -5020,6 +5733,7 @@
       }
 
       function applyDistanceData(data, options = {}) {
+        currentDistanceData = data || null;
         const displayValue = getDisplayDistance(data);
         const useProjected = data && data.use_projected_distance === true;
         const actualValue =
@@ -6392,15 +7106,19 @@
           if (!(offsetInput instanceof HTMLInputElement) || !(scaleInput instanceof HTMLInputElement)) {
             return;
           }
-          const offset = Number.parseFloat(offsetInput.value);
+          const offset = parseMeasurementFieldMetres("distance-calibration-offset");
           const scale = Number.parseFloat(scaleInput.value);
           if (!Number.isFinite(offset) || !Number.isFinite(scale)) {
             setDistanceCalibrationStatus("Enter numeric values for offset and scale.");
             return;
           }
           if (Math.abs(offset) > CALIBRATION_OFFSET_LIMIT) {
+            const limitDisplay = formatDistanceForSystem(CALIBRATION_OFFSET_LIMIT, activeUnitSystem, {
+              precise: true,
+              fractionDigits: 3,
+            });
             setDistanceCalibrationStatus(
-              `Offset must be between -${CALIBRATION_OFFSET_LIMIT} and ${CALIBRATION_OFFSET_LIMIT}.`,
+              `Offset must be between -${limitDisplay} and ${limitDisplay}.`,
               { persistent: true },
             );
             return;
@@ -6493,7 +7211,7 @@
           const angleInput = distanceGeometryInputs.angle;
           const height =
             heightInput instanceof HTMLInputElement
-              ? Number.parseFloat(heightInput.value)
+              ? parseMeasurementFieldMetres("distance-geometry-height")
               : Number.NaN;
           const angle =
             angleInput instanceof HTMLInputElement
@@ -6559,11 +7277,17 @@
           const warningInput = distanceInputs.warning;
           const dangerInput = distanceInputs.danger;
           const caution =
-            cautionInput instanceof HTMLInputElement ? Number.parseFloat(cautionInput.value) : Number.NaN;
+            cautionInput instanceof HTMLInputElement
+              ? parseMeasurementFieldMetres("distance-zones-caution")
+              : Number.NaN;
           const warning =
-            warningInput instanceof HTMLInputElement ? Number.parseFloat(warningInput.value) : Number.NaN;
+            warningInput instanceof HTMLInputElement
+              ? parseMeasurementFieldMetres("distance-zones-warning")
+              : Number.NaN;
           const danger =
-            dangerInput instanceof HTMLInputElement ? Number.parseFloat(dangerInput.value) : Number.NaN;
+            dangerInput instanceof HTMLInputElement
+              ? parseMeasurementFieldMetres("distance-zones-danger")
+              : Number.NaN;
           if (!Number.isFinite(caution) || !Number.isFinite(warning) || !Number.isFinite(danger)) {
             if (distanceZonesStatus) {
               distanceZonesStatus.textContent = "Enter numeric thresholds for all zones.";
@@ -8199,34 +8923,23 @@
         const rampSource =
           settings && typeof settings.ramp === "object" ? settings.ramp : DEFAULT_TRAILER_SETTINGS.ramp;
         const forceUpdate = options.force === true;
+        currentTrailerSettings = settings || DEFAULT_TRAILER_SETTINGS;
         if (trailerInputs) {
-          const pairs = [
+          const fieldValues = [
+            ["trailer-axle-width", geometrySource.axle_width_m ?? DEFAULT_TRAILER_SETTINGS.geometry.axle_width_m],
             [
-              trailerInputs.axleWidth,
-              geometrySource.axle_width_m ?? DEFAULT_TRAILER_SETTINGS.geometry.axle_width_m,
-            ],
-            [
-              trailerInputs.hitchToAxle,
+              "trailer-hitch-to-axle",
               geometrySource.hitch_to_axle_m ?? DEFAULT_TRAILER_SETTINGS.geometry.hitch_to_axle_m,
             ],
-            [trailerInputs.length, geometrySource.length_m ?? DEFAULT_TRAILER_SETTINGS.geometry.length_m],
-            [trailerInputs.rampLength, rampSource.length_m ?? DEFAULT_TRAILER_SETTINGS.ramp.length_m],
-            [trailerInputs.rampHeight, rampSource.height_m ?? DEFAULT_TRAILER_SETTINGS.ramp.height_m],
+            ["trailer-length", geometrySource.length_m ?? DEFAULT_TRAILER_SETTINGS.geometry.length_m],
+            ["trailer-ramp-length", rampSource.length_m ?? DEFAULT_TRAILER_SETTINGS.ramp.length_m],
+            ["trailer-ramp-height", rampSource.height_m ?? DEFAULT_TRAILER_SETTINGS.ramp.height_m],
           ];
-          for (const [input, value] of pairs) {
-            if (!(input instanceof HTMLInputElement)) {
-              continue;
-            }
-            if (!forceUpdate && input.dataset.userEdited === "true") {
-              continue;
-            }
+          for (const [fieldId, value] of fieldValues) {
             if (Number.isFinite(value)) {
-              input.value = String(Number(value));
+              setMeasurementFieldValue(fieldId, value, { forceUpdate, clearUserEdited: true });
             } else if (forceUpdate) {
-              input.value = "";
-            }
-            if (forceUpdate) {
-              delete input.dataset.userEdited;
+              setMeasurementFieldValue(fieldId, Number.NaN, { forceUpdate: true, clearUserEdited: true });
             }
           }
         }
