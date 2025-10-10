@@ -539,11 +539,47 @@
           if (boundingBox) {
             const contentCenter = new THREE.Vector3();
             boundingBox.getCenter(contentCenter);
-            const pivot = new THREE.Vector3(
-              contentCenter.x,
-              boundingBox.min.y,
-              contentCenter.z
-            );
+
+            const position = geometry.getAttribute("position");
+            let pivot = new THREE.Vector3(contentCenter.x, boundingBox.min.y, contentCenter.z);
+
+            if (position) {
+              const yValues = [];
+              const wheelQuantile = 0.055;
+              const lowerTolerance = 0.2;
+              const upperTolerance = 0.05;
+
+              const buffer = position.array;
+              for (let i = 0; i < buffer.length; i += 3) {
+                yValues.push(buffer[i + 1]);
+              }
+
+              yValues.sort((a, b) => a - b);
+              const quantileIndex = Math.max(
+                0,
+                Math.min(yValues.length - 1, Math.floor((yValues.length - 1) * wheelQuantile))
+              );
+              const wheelPlane = yValues[quantileIndex];
+
+              let wheelCenterX = 0;
+              let wheelCenterZ = 0;
+              let wheelCenterCount = 0;
+              for (let i = 0; i < buffer.length; i += 3) {
+                const y = buffer[i + 1];
+                if (y >= wheelPlane - lowerTolerance && y <= wheelPlane + upperTolerance) {
+                  wheelCenterX += buffer[i];
+                  wheelCenterZ += buffer[i + 2];
+                  wheelCenterCount += 1;
+                }
+              }
+
+              pivot = new THREE.Vector3(
+                wheelCenterCount ? wheelCenterX / wheelCenterCount : contentCenter.x,
+                Number.isFinite(wheelPlane) ? wheelPlane : boundingBox.min.y,
+                wheelCenterCount ? wheelCenterZ / wheelCenterCount : contentCenter.z
+              );
+            }
+
             geometry.translate(-pivot.x, -pivot.y, -pivot.z);
             geometry.computeBoundingBox();
 
