@@ -194,8 +194,35 @@
         color: var(--text-muted);
       }
 
-      #viewer-card {
-        grid-column: 1 / -1;
+      .analysis-card {
+        gap: var(--stack-gap-lg);
+      }
+
+      .analysis-layout {
+        display: grid;
+        gap: var(--stack-gap-lg);
+      }
+
+      @media (min-width: 900px) {
+        .analysis-layout {
+          grid-template-columns: minmax(0, 1fr) minmax(260px, 360px);
+          align-items: start;
+        }
+      }
+
+      .analysis-details {
+        display: grid;
+        gap: var(--stack-gap-lg);
+      }
+
+      .visualiser-panel {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-md);
+      }
+
+      .visualiser-panel p {
+        color: var(--text-muted);
       }
 
       form label {
@@ -405,8 +432,8 @@
       #viewer {
         position: relative;
         width: 100%;
-        aspect-ratio: 16 / 9;
-        min-height: clamp(420px, 60vh, 720px);
+        aspect-ratio: 4 / 3;
+        min-height: clamp(260px, 32vh, 480px);
         background: radial-gradient(circle at top, rgba(70, 80, 110, 0.32), rgba(9, 11, 18, 0.9));
         border-radius: var(--radius-xl);
         border: 1px solid var(--border-muted);
@@ -546,85 +573,93 @@
           </div>
         </article>
 
-        <article class="card">
+        <article class="card analysis-card">
           <h2>Leveling Analysis</h2>
-          <p class="status" id="sensor-status" aria-live="polite">Detecting GY-85 sensor…</p>
-          <p class="status" id="analysis-status">Awaiting sensor data…</p>
-          <div class="orientation-readout">
-            <div>
-              <span>Roll</span>
-              <strong id="roll-display">0°</strong>
+          <div class="analysis-layout">
+            <div class="analysis-details">
+              <div>
+                <p class="status" id="sensor-status" aria-live="polite">Detecting GY-85 sensor…</p>
+                <p class="status" id="analysis-status">Awaiting sensor data…</p>
+              </div>
+              <div class="orientation-readout">
+                <div>
+                  <span>Roll</span>
+                  <strong id="roll-display">0°</strong>
+                </div>
+                <div>
+                  <span>Pitch</span>
+                  <strong id="pitch-display">0°</strong>
+                </div>
+              </div>
+              <div class="analysis-section">
+                <section>
+                  <h3>Hitched guidance</h3>
+                  <p id="hitched-message">—</p>
+                  <dl class="stats">
+                    <dt>Side to raise</dt>
+                    <dd id="hitched-side">—</dd>
+                    <dt>Raise amount</dt>
+                    <dd id="hitched-raise">—</dd>
+                    <dt>Ramp travel</dt>
+                    <dd id="hitched-travel">—</dd>
+                  </dl>
+                </section>
+                <section>
+                  <h3>Unhitched guidance</h3>
+                  <p id="unhitched-message">—</p>
+                  <dl class="stats">
+                    <dt>Side to raise</dt>
+                    <dd id="unhitched-side">—</dd>
+                    <dt>Raise amount</dt>
+                    <dd id="unhitched-raise">—</dd>
+                    <dt>Hitch adjustment</dt>
+                    <dd id="unhitched-hitch">—</dd>
+                  </dl>
+                </section>
+                <section class="support-section">
+                  <h3>Support adjustments</h3>
+                  <dl class="support-stats" id="support-points">
+                    <div data-point="left_wheel">
+                      <dt>Left wheel</dt>
+                      <dd>
+                        <span class="support-primary">—</span>
+                        <span class="support-secondary">Offset: —</span>
+                      </dd>
+                    </div>
+                    <div data-point="right_wheel">
+                      <dt>Right wheel</dt>
+                      <dd>
+                        <span class="support-primary">—</span>
+                        <span class="support-secondary">Offset: —</span>
+                      </dd>
+                    </div>
+                    <div data-point="hitch">
+                      <dt>Hitch jack</dt>
+                      <dd>
+                        <span class="support-primary">—</span>
+                        <span class="support-secondary">Offset: —</span>
+                      </dd>
+                    </div>
+                    <div data-point="rear_stabilizer">
+                      <dt>Rear stabilizer</dt>
+                      <dd>
+                        <span class="support-primary">—</span>
+                        <span class="support-secondary">Offset: —</span>
+                      </dd>
+                    </div>
+                  </dl>
+                </section>
+              </div>
             </div>
-            <div>
-              <span>Pitch</span>
-              <strong id="pitch-display">0°</strong>
-            </div>
+            <aside class="visualiser-panel">
+              <h3>3D Trailer Visualiser</h3>
+              <p>
+                Orientation estimates drive this rendering. Adjust the sliders to see how the trailer
+                shifts relative to level ground.
+              </p>
+              <div id="viewer" aria-label="3D rendering of trailer"></div>
+            </aside>
           </div>
-          <div class="analysis-section">
-            <section>
-              <h3>Hitched guidance</h3>
-              <p id="hitched-message">—</p>
-              <dl class="stats">
-                <dt>Side to raise</dt>
-                <dd id="hitched-side">—</dd>
-                <dt>Raise amount</dt>
-                <dd id="hitched-raise">—</dd>
-                <dt>Ramp travel</dt>
-                <dd id="hitched-travel">—</dd>
-              </dl>
-            </section>
-            <section>
-              <h3>Unhitched guidance</h3>
-              <p id="unhitched-message">—</p>
-              <dl class="stats">
-                <dt>Side to raise</dt>
-                <dd id="unhitched-side">—</dd>
-                <dt>Raise amount</dt>
-                <dd id="unhitched-raise">—</dd>
-                <dt>Hitch adjustment</dt>
-                <dd id="unhitched-hitch">—</dd>
-              </dl>
-            </section>
-            <section class="support-section">
-              <h3>Support adjustments</h3>
-              <dl class="support-stats" id="support-points">
-                <div data-point="left_wheel">
-                  <dt>Left wheel</dt>
-                  <dd>
-                    <span class="support-primary">—</span>
-                    <span class="support-secondary">Offset: —</span>
-                  </dd>
-                </div>
-                <div data-point="right_wheel">
-                  <dt>Right wheel</dt>
-                  <dd>
-                    <span class="support-primary">—</span>
-                    <span class="support-secondary">Offset: —</span>
-                  </dd>
-                </div>
-                <div data-point="hitch">
-                  <dt>Hitch jack</dt>
-                  <dd>
-                    <span class="support-primary">—</span>
-                    <span class="support-secondary">Offset: —</span>
-                  </dd>
-                </div>
-                <div data-point="rear_stabilizer">
-                  <dt>Rear stabilizer</dt>
-                  <dd>
-                    <span class="support-primary">—</span>
-                    <span class="support-secondary">Offset: —</span>
-                  </dd>
-                </div>
-              </dl>
-            </section>
-          </div>
-        </article>
-
-        <article class="card" id="viewer-card">
-          <h2>3D Trailer Visualiser</h2>
-          <p>Orientation estimates drive this rendering. Adjust the sliders to see how the trailer shifts relative to level ground.</p>
-          <div id="viewer" aria-label="3D rendering of trailer"></div>
         </article>
       </div>
     </main>
