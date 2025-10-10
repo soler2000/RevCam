@@ -195,15 +195,20 @@ def _compose_codec_failure_message(
 
 
 def _select_time_base(frame_rate: Fraction) -> Fraction:
-    """Choose a sane container time base for a given frame rate."""
+    """Choose a high-resolution container time base for ``frame_rate``."""
 
     numerator = frame_rate.numerator
     denominator = frame_rate.denominator
-    if numerator <= 0 or denominator <= 0:
-        return Fraction(1, 30)
-    time_base = Fraction(denominator, numerator)
+    if numerator <= 0:
+        numerator = 1
+    if denominator <= 0:
+        denominator = 1
+    # Use millisecond granularity relative to the FPS so we retain enough
+    # precision for jitter while staying inside encoder-friendly bounds (for
+    # example, V4L2-backed H.264 encoders expect a kHz-scale time base).
+    time_base = Fraction(denominator, numerator * 1000)
     if time_base <= 0:
-        return Fraction(1, 30)
+        return Fraction(1, 1000)
     return time_base.limit_denominator(90_000)
 
 

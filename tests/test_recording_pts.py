@@ -127,13 +127,13 @@ def test_prepare_frame_for_encoding_trims_extra_channels():
 
 def test_select_time_base_matches_frame_duration():
     result = recording._select_time_base(Fraction(30, 1))
-    assert result == Fraction(1, 30)
+    assert result == Fraction(1, 30_000)
 
 
 def test_single_frame_duration_respects_time_base(tmp_path):
     path = tmp_path / "chunk.mp4"
     path.write_bytes(b"\x00")
-    time_base = Fraction(1, 30)
+    time_base = recording._select_time_base(Fraction(30, 1))
     stream = _DummyStream(time_base)
     container = _DummyContainer()
     writer = recording._ActiveChunkWriter(
@@ -163,7 +163,7 @@ def test_single_frame_duration_respects_time_base(tmp_path):
 def test_apply_stream_timing_sets_codec_context_properties():
     stream = _DummyStreamWithTiming()
     frame_rate = Fraction(30, 1)
-    time_base = Fraction(1, 30)
+    time_base = recording._select_time_base(frame_rate)
 
     recording._apply_stream_timing(stream, frame_rate, time_base)
 
