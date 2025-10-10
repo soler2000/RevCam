@@ -263,7 +263,6 @@ class LevelingRampPayload(BaseModel):
 class LevelingReferencePayload(BaseModel):
     roll: float | None = None
     pitch: float | None = None
-    yaw: float | None = None
 
 
 class LevelingConfigPayload(BaseModel):

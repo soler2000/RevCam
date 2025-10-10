@@ -559,10 +559,6 @@
               <span>Pitch</span>
               <strong id="pitch-display">0°</strong>
             </div>
-            <div>
-              <span>Yaw</span>
-              <strong id="yaw-display">0°</strong>
-            </div>
           </div>
           <div class="analysis-section">
             <section>
@@ -649,7 +645,6 @@
       const sensorCard = document.getElementById("sensor-card");
       const rollDisplay = document.getElementById("roll-display");
       const pitchDisplay = document.getElementById("pitch-display");
-      const yawDisplay = document.getElementById("yaw-display");
       const hitchedMessage = document.getElementById("hitched-message");
       const hitchedSide = document.getElementById("hitched-side");
       const hitchedRaise = document.getElementById("hitched-raise");
@@ -681,7 +676,7 @@
       let inFlight = false;
       let pendingSample = false;
       let hardwareAvailable = false;
-      let latestOrientation = { roll: 0, pitch: 0, yaw: 0 };
+      let latestOrientation = { roll: 0, pitch: 0 };
       let scene, renderer, camera, controls, trailer;
 
       async function refreshSensorStatus() {
@@ -746,7 +741,8 @@
 
       function formatAngle(value) {
         if (!Number.isFinite(value)) return "—";
-        return `${value.toFixed(2)}°`;
+        const rounded = Math.abs(value) < 0.05 ? 0 : value;
+        return `${rounded.toFixed(1)}°`;
       }
 
       function formatSide(value) {
@@ -803,10 +799,12 @@
           return;
         }
         const { orientation, hitched, unhitched, support_points: supportPoints } = evaluation;
-        latestOrientation = orientation;
-        rollDisplay.textContent = formatAngle(orientation.roll);
-        pitchDisplay.textContent = formatAngle(orientation.pitch);
-        yawDisplay.textContent = formatAngle(orientation.yaw);
+        latestOrientation = {
+          roll: Number(orientation?.roll) || 0,
+          pitch: Number(orientation?.pitch) || 0,
+        };
+        rollDisplay.textContent = formatAngle(latestOrientation.roll);
+        pitchDisplay.textContent = formatAngle(latestOrientation.pitch);
 
         hitchedMessage.textContent = hitched.message;
         hitchedSide.textContent = formatSide(hitched.side_to_raise);
@@ -849,11 +847,10 @@
         analysisStatus.removeAttribute("aria-busy");
 
         if (trailer) {
-          const rollRad = THREE.MathUtils.degToRad(orientation.roll);
-          const pitchRad = THREE.MathUtils.degToRad(orientation.pitch);
-          const yawRad = THREE.MathUtils.degToRad(orientation.yaw);
+          const rollRad = THREE.MathUtils.degToRad(latestOrientation.roll);
+          const pitchRad = THREE.MathUtils.degToRad(latestOrientation.pitch);
           trailer.rotation.x = rollRad;
-          trailer.rotation.y = yawRad;
+          trailer.rotation.y = 0;
           trailer.rotation.z = pitchRad;
         }
       }

@@ -388,10 +388,10 @@ def test_leveling_settings_persist(tmp_path: Path) -> None:
 def test_leveling_reference_persists(tmp_path: Path) -> None:
     config_file = tmp_path / "config.json"
     manager = ConfigManager(config_file)
-    payload = {"reference": {"roll": 2.0, "pitch": -1.0, "yaw": 15.0}}
+    payload = {"reference": {"roll": 2.0, "pitch": -1.0}}
     updated = manager.set_leveling_settings(payload)
     assert isinstance(updated, LevelingSettings)
-    expected_reference = OrientationAngles(2.0, -1.0, 15.0).normalised()
+    expected_reference = OrientationAngles(2.0, -1.0).normalised()
     assert updated.reference == expected_reference
     reloaded = ConfigManager(config_file)
     assert reloaded.get_leveling_settings().reference == expected_reference

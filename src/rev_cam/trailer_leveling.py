@@ -55,11 +55,10 @@ class RampSpecification:
 
 @dataclass(frozen=True, slots=True)
 class OrientationAngles:
-    """Orientation expressed using roll, pitch and yaw (in degrees)."""
+    """Orientation expressed using roll and pitch angles (in degrees)."""
 
     roll: float
     pitch: float
-    yaw: float
 
     def normalised(self) -> "OrientationAngles":
         """Normalise angles to the range [-180, 180]."""
@@ -67,7 +66,6 @@ class OrientationAngles:
         return OrientationAngles(
             roll=_wrap_degrees(self.roll),
             pitch=_wrap_degrees(self.pitch),
-            yaw=_wrap_degrees(self.yaw),
         )
 
     def relative_to(self, reference: "OrientationAngles") -> "OrientationAngles":
@@ -76,14 +74,12 @@ class OrientationAngles:
         return OrientationAngles(
             roll=self.roll - reference.roll,
             pitch=self.pitch - reference.pitch,
-            yaw=self.yaw - reference.yaw,
         ).normalised()
 
     def to_dict(self) -> dict[str, float]:
         return {
             "roll": float(self.roll),
             "pitch": float(self.pitch),
-            "yaw": float(self.yaw),
         }
 
 
@@ -93,7 +89,7 @@ class LevelingSettings:
 
     geometry: TrailerGeometry = TrailerGeometry()
     ramp: RampSpecification = RampSpecification()
-    reference: OrientationAngles = OrientationAngles(0.0, 0.0, 0.0)
+    reference: OrientationAngles = OrientationAngles(0.0, 0.0)
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -110,7 +106,7 @@ def _wrap_degrees(value: float) -> float:
 
 DEFAULT_TRAILER_GEOMETRY = TrailerGeometry()
 DEFAULT_RAMP_SPECIFICATION = RampSpecification()
-DEFAULT_LEVEL_REFERENCE = OrientationAngles(0.0, 0.0, 0.0)
+DEFAULT_LEVEL_REFERENCE = OrientationAngles(0.0, 0.0)
 DEFAULT_LEVELING_SETTINGS = LevelingSettings(reference=DEFAULT_LEVEL_REFERENCE)
 
 
@@ -157,8 +153,7 @@ def _parse_reference(
 
     roll = _component("roll", default.roll)
     pitch = _component("pitch", default.pitch)
-    yaw = _component("yaw", default.yaw)
-    return OrientationAngles(roll=roll, pitch=pitch, yaw=yaw).normalised()
+    return OrientationAngles(roll=roll, pitch=pitch).normalised()
 
 
 def parse_leveling_settings(
@@ -182,7 +177,7 @@ def parse_leveling_settings(
         geometry_payload = value
     if ramp_payload is None and any(key in value for key in ("length_m", "height_m")):
         ramp_payload = value
-    if reference_payload is None and any(key in value for key in ("roll", "pitch", "yaw")):
+    if reference_payload is None and any(key in value for key in ("roll", "pitch")):
         reference_payload = value
 
     geometry = (
@@ -316,6 +311,13 @@ def compute_unhitched_leveling(orientation: OrientationAngles, settings: Levelin
     }
 
 
+def _round_orientation_value(value: float, *, decimals: int = 1) -> float:
+    rounded = round(float(value), decimals)
+    if rounded == 0:
+        return 0.0
+    return rounded
+
+
 def evaluate_leveling(orientation: OrientationAngles, settings: LevelingSettings) -> dict[str, object]:
     """Return a summary of levelling recommendations."""
 
@@ -324,13 +326,18 @@ def evaluate_leveling(orientation: OrientationAngles, settings: LevelingSettings
     hitched = compute_hitched_leveling(relative_orientation, settings)
     unhitched = compute_unhitched_leveling(relative_orientation, settings)
     support_points = _compute_support_point_adjustments(relative_orientation, settings)
+    rounded_orientation = {
+        "roll": _round_orientation_value(relative_orientation.roll),
+        "pitch": _round_orientation_value(relative_orientation.pitch),
+    }
+    rounded_raw_orientation = {
+        "roll": _round_orientation_value(raw_orientation.roll),
+        "pitch": _round_orientation_value(raw_orientation.pitch),
+    }
+
     return {
-        "orientation": {
-            "roll": relative_orientation.roll,
-            "pitch": relative_orientation.pitch,
-            "yaw": relative_orientation.yaw,
-        },
-        "raw_orientation": raw_orientation.to_dict(),
+        "orientation": rounded_orientation,
+        "raw_orientation": rounded_raw_orientation,
         "hitched": hitched,
         "unhitched": unhitched,
         "support_points": support_points,

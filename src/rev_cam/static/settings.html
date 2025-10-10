@@ -2203,10 +2203,6 @@
                   <dt>Pitch offset</dt>
                   <dd id="trailer-reference-pitch">0°</dd>
                 </div>
-                <div>
-                  <dt>Yaw offset</dt>
-                  <dd id="trailer-reference-yaw">0°</dd>
-                </div>
               </dl>
               <div class="form-actions trailer-reference-actions">
                 <button type="button" id="trailer-reference-capture">Set current orientation as level</button>
@@ -2976,7 +2972,6 @@
         reference: {
           roll: 0,
           pitch: 0,
-          yaw: 0,
         },
       };
       const ledSummary = document.getElementById("led-summary");
@@ -3028,7 +3023,6 @@
       const trailerSettingsStatus = document.getElementById("trailer-settings-status");
       const trailerReferenceRoll = document.getElementById("trailer-reference-roll");
       const trailerReferencePitch = document.getElementById("trailer-reference-pitch");
-      const trailerReferenceYaw = document.getElementById("trailer-reference-yaw");
       const trailerReferenceStatus = document.getElementById("trailer-reference-status");
       const trailerReferenceCaptureButton = document.getElementById("trailer-reference-capture");
       const trailerReferenceClearButton = document.getElementById("trailer-reference-clear");
@@ -8248,8 +8242,8 @@
         if (!Number.isFinite(numeric)) {
           return "—";
         }
-        const rounded = Math.abs(numeric) < 0.005 ? 0 : numeric;
-        return `${rounded.toFixed(2)}°`;
+        const rounded = Math.abs(numeric) < 0.05 ? 0 : numeric;
+        return `${rounded.toFixed(1)}°`;
       }
 
       function updateTrailerReferenceDisplay(reference) {
@@ -8263,22 +8257,18 @@
         if (trailerReferencePitch) {
           trailerReferencePitch.textContent = formatOrientationValue(source.pitch);
         }
-        if (trailerReferenceYaw) {
-          trailerReferenceYaw.textContent = formatOrientationValue(source.yaw);
-        }
       }
 
       async function saveTrailerReference(reference) {
         const roll = Number(reference?.roll);
         const pitch = Number(reference?.pitch);
-        const yaw = Number(reference?.yaw);
-        if (![roll, pitch, yaw].every((value) => Number.isFinite(value))) {
+        if (![roll, pitch].every((value) => Number.isFinite(value))) {
           throw new Error("Orientation data unavailable.");
         }
         const response = await fetch("/api/leveling/config", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ reference: { roll, pitch, yaw } }),
+          body: JSON.stringify({ reference: { roll, pitch } }),
         });
         if (!response.ok) {
           let detail = "Unable to save level reference.";

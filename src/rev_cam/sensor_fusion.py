@@ -84,22 +84,18 @@ class _AxisKalmanFilter:
 
 
 class Gy85KalmanFilter:
-    """Fusion filter combining gyro, accelerometer and magnetometer data."""
+    """Fusion filter combining gyro and accelerometer data for orientation."""
 
     def __init__(self) -> None:
         self._roll = _AxisKalmanFilter()
         self._pitch = _AxisKalmanFilter()
-        self._yaw = _AxisKalmanFilter(r_measure=0.5)
-        self._last_orientation = OrientationAngles(0.0, 0.0, 0.0)
-        self._smoothed_orientation = OrientationAngles(0.0, 0.0, 0.0)
+        self._smoothed_orientation = OrientationAngles(0.0, 0.0)
         self._smoothing_alpha = 0.2
 
     def reset(self) -> None:
         self._roll.reset()
         self._pitch.reset()
-        self._yaw.reset()
-        self._last_orientation = OrientationAngles(0.0, 0.0, 0.0)
-        self._smoothed_orientation = OrientationAngles(0.0, 0.0, 0.0)
+        self._smoothed_orientation = OrientationAngles(0.0, 0.0)
 
     def update(self, sample: SensorSample, dt: Optional[float] = None) -> OrientationAngles:
         """Update the filter with a new sensor sample."""
@@ -107,9 +103,7 @@ class Gy85KalmanFilter:
         if dt is None or not math.isfinite(dt) or dt <= 0:
             dt = 0.02
         ax, ay, az = sample.accelerometer.x, sample.accelerometer.y, sample.accelerometer.z
-        gx, gy, gz = sample.gyroscope.x, sample.gyroscope.y, sample.gyroscope.z
-        mx, my, mz = sample.magnetometer.x, sample.magnetometer.y, sample.magnetometer.z
-
+        gx, gy = sample.gyroscope.x, sample.gyroscope.y
         # Accelerometer-based roll and pitch (degrees)
         roll_measure = math.degrees(math.atan2(ay, az)) if ay or az else 0.0
         denominator = math.sqrt(ay * ay + az * az)
@@ -118,26 +112,12 @@ class Gy85KalmanFilter:
         roll = self._roll.update(gx, roll_measure, dt)
         pitch = self._pitch.update(gy, pitch_measure, dt)
 
-        # Tilt compensation for magnetometer to derive yaw
-        roll_rad = math.radians(roll)
-        pitch_rad = math.radians(pitch)
-        sin_roll = math.sin(roll_rad)
-        cos_roll = math.cos(roll_rad)
-        sin_pitch = math.sin(pitch_rad)
-        cos_pitch = math.cos(pitch_rad)
-        compensated_x = mx * cos_pitch + mz * sin_pitch
-        compensated_y = mx * sin_roll * sin_pitch + my * cos_roll - mz * sin_roll * cos_pitch
-        yaw_measure = math.degrees(math.atan2(-compensated_y, compensated_x)) if compensated_x or compensated_y else self._last_orientation.yaw
-
-        yaw = self._yaw.update(gz, yaw_measure, dt)
-        raw_orientation = OrientationAngles(roll=roll, pitch=pitch, yaw=yaw).normalised()
-        self._last_orientation = raw_orientation
+        raw_orientation = OrientationAngles(roll=roll, pitch=pitch).normalised()
         smoothed = OrientationAngles(
             roll=_smooth_angle(self._smoothed_orientation.roll, raw_orientation.roll, self._smoothing_alpha),
             pitch=_smooth_angle(
                 self._smoothed_orientation.pitch, raw_orientation.pitch, self._smoothing_alpha
             ),
-            yaw=_smooth_angle(self._smoothed_orientation.yaw, raw_orientation.yaw, self._smoothing_alpha),
         ).normalised()
         self._smoothed_orientation = smoothed
         return smoothed
