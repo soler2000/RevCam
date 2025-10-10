@@ -885,7 +885,25 @@
             throw new Error("GY-85 sensor unavailable");
           }
           if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
+            let detail = `HTTP ${response.status}`;
+            try {
+              const errorPayload = await response.clone().json();
+              const extractedDetail =
+                errorPayload?.detail || errorPayload?.message || errorPayload?.error;
+              if (typeof extractedDetail === "string" && extractedDetail.trim()) {
+                detail = extractedDetail.trim();
+              }
+            } catch (jsonError) {
+              try {
+                const text = (await response.text()).trim();
+                if (text) {
+                  detail = text;
+                }
+              } catch (textError) {
+                console.error("Failed to parse leveling error response", textError);
+              }
+            }
+            throw new Error(detail);
           }
           const data = await response.json();
           const modeLabel = data.mode === "hitched" ? "Hitched mode" : "Unhitched mode";
@@ -908,12 +926,14 @@
           const timestamp = new Date();
           sampleRateDisplay.textContent = `Last update ${timestamp.toLocaleTimeString()} • Δ ${Math.round(intervalMs)} ms`;
         } catch (error) {
-          console.error(error);
+          console.error("Failed to fetch leveling data", error);
           if (hardwareAvailable) {
-            analysisStatus.textContent = "Unable to reach leveling API";
+            const message =
+              error instanceof Error && error.message ? error.message : "Unable to reach leveling API";
+            analysisStatus.textContent = message;
             analysisStatus.classList.remove("live");
             analysisStatus.classList.add("error");
-            sampleRateDisplay.textContent = "Waiting for connection…";
+            sampleRateDisplay.textContent = "Waiting for leveling API…";
           }
         } finally {
           analysisStatus.classList.remove("loading");
