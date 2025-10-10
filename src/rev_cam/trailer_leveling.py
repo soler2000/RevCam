@@ -270,20 +270,42 @@ def compute_hitched_leveling(orientation: OrientationAngles, settings: LevelingS
     }
 
 
+def _compute_hitch_adjustment(
+    pitch_deg: float, hitch_distance_m: float, *, tolerance_deg: float = 0.25
+) -> tuple[str, float]:
+    """Return the adjustment required at the hitch to remove pitch."""
+
+    if abs(pitch_deg) <= tolerance_deg:
+        return ("level", 0.0)
+
+    pitch_rad = math.radians(pitch_deg)
+    cos_pitch = math.cos(pitch_rad)
+    if abs(cos_pitch) < 1e-6:
+        adjustment = float("inf")
+    else:
+        adjustment = abs(math.tan(pitch_rad) * hitch_distance_m)
+
+    direction = "lower" if pitch_deg > 0 else "raise"
+    return (direction, adjustment)
+
+
 def compute_unhitched_leveling(orientation: OrientationAngles, settings: LevelingSettings) -> dict[str, object]:
     """Return levelling guidance when treating the trailer as remaining hitched."""
 
     hitched_guidance = compute_hitched_leveling(orientation, settings)
+    hitch_direction, hitch_adjustment = _compute_hitch_adjustment(
+        orientation.pitch, settings.geometry.hitch_to_axle_m
+    )
     max_deviation = max(abs(orientation.roll), abs(orientation.pitch))
     score = max(0.0, 1.0 - min(max_deviation / 10.0, 1.0))
-    message = (
-        f"{hitched_guidance['message']} Hitch guidance assumes the trailer stays hitched."
-    )
+
+    message = hitched_guidance["message"]
     return {
         **hitched_guidance,
         "message": message,
-        "hitch_adjustment_m": 0.0,
-        "hitch_direction": "level",
+        "guidance_message": hitched_guidance["message"],
+        "hitch_adjustment_m": hitch_adjustment,
+        "hitch_direction": hitch_direction,
         "level_score": score,
         "max_deviation_deg": max_deviation,
     }
