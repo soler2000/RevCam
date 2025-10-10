@@ -29,12 +29,9 @@ def test_smooth_angle_alpha_bounds():
 def _make_static_sample(roll_deg: float, pitch_deg: float) -> SensorSample:
     roll_rad = math.radians(roll_deg)
     pitch_rad = math.radians(pitch_deg)
-    trailer_ax = -math.sin(pitch_rad)
-    trailer_ay = math.sin(roll_rad) * math.cos(pitch_rad)
-    trailer_az = math.cos(roll_rad) * math.cos(pitch_rad)
-    board_ax = trailer_ay
-    board_ay = trailer_ax
-    board_az = trailer_az
+    board_ax = -math.sin(pitch_rad)
+    board_ay = math.sin(roll_rad) * math.cos(pitch_rad)
+    board_az = math.cos(roll_rad) * math.cos(pitch_rad)
     return SensorSample(
         accelerometer=Vector3(x=board_ax, y=board_ay, z=board_az),
         gyroscope=Vector3(x=0.0, y=0.0, z=0.0),
@@ -50,9 +47,8 @@ def _make_dynamic_sample(
     yaw_rate: float = 0.0,
 ) -> SensorSample:
     base = _make_static_sample(roll_deg, pitch_deg)
-    # Board gyro axes follow the same 90° Z rotation as the accelerometer axes.
-    board_gx = pitch_rate
-    board_gy = roll_rate
+    board_gx = roll_rate
+    board_gy = pitch_rate
     board_gz = yaw_rate
     return SensorSample(
         accelerometer=base.accelerometer,
