@@ -440,6 +440,7 @@
   <script type="module">
       import * as THREE from "https://unpkg.com/three@0.158.0/build/three.module.js?module";
       import { OrbitControls } from "https://unpkg.com/three@0.158.0/examples/jsm/controls/OrbitControls.js?module";
+      import { STLLoader } from "https://unpkg.com/three@0.158.0/examples/jsm/loaders/STLLoader.js?module";
 
       const SAMPLE_INTERVAL = 300;
       const sampleRateDisplay = document.getElementById("sample-rate");
@@ -503,6 +504,46 @@
 
         group.position.y = 0.1;
         return group;
+      }
+
+      async function loadTrailerModel() {
+        const loader = new STLLoader();
+        try {
+          const geometry = await loader.loadAsync("/models/CARVAN_KEYRING.stl");
+          geometry.computeVertexNormals();
+          geometry.center();
+          geometry.computeBoundingBox();
+
+          const material = new THREE.MeshStandardMaterial({
+            color: 0xbcc9d6,
+            metalness: 0.4,
+            roughness: 0.35,
+          });
+
+          const trailerMesh = new THREE.Mesh(geometry, material);
+          trailerMesh.castShadow = true;
+          trailerMesh.receiveShadow = true;
+
+          const boundingBox = geometry.boundingBox?.clone();
+          if (boundingBox) {
+            const size = new THREE.Vector3();
+            boundingBox.getSize(size);
+            const maxDimension = Math.max(size.x, size.y, size.z) || 1;
+            const targetLength = 2.4;
+            const scale = targetLength / maxDimension;
+            trailerMesh.scale.setScalar(scale);
+
+            const baseOffset = -(boundingBox.min.y * scale);
+            trailerMesh.position.y = baseOffset;
+          }
+
+          const group = new THREE.Group();
+          group.add(trailerMesh);
+          return group;
+        } catch (error) {
+          console.error("Unable to load STL model", error);
+          throw error;
+        }
       }
 
       async function refreshSensorStatus() {
@@ -726,7 +767,7 @@
         }
       }
 
-      function initThree() {
+      async function initThree() {
         const container = document.getElementById("viewer");
         const width = container.clientWidth;
         const height = container.clientHeight;
@@ -765,7 +806,18 @@
         trailer = buildTrailerPlaceholder();
         scene.add(trailer);
         analysisStatus.classList.remove("error");
-        analysisStatus.textContent = "Placeholder trailer preview ready";
+        analysisStatus.textContent = "Loading detailed trailer model…";
+
+        try {
+          const detailedModel = await loadTrailerModel();
+          scene.remove(trailer);
+          trailer = detailedModel;
+          scene.add(trailer);
+          analysisStatus.textContent = "Trailer model ready";
+        } catch (error) {
+          analysisStatus.classList.add("error");
+          analysisStatus.textContent = "Failed to load trailer model";
+        }
 
         window.addEventListener("resize", () => {
           const w = container.clientWidth;
@@ -785,7 +837,7 @@
 
       async function initialise() {
         initModeToggle();
-        initThree();
+        await initThree();
         await refreshSensorStatus();
         setInterval(requestSample, SAMPLE_INTERVAL);
         setInterval(refreshSensorStatus, 10000);
