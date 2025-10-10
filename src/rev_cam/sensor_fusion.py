@@ -103,22 +103,22 @@ class Gy85KalmanFilter:
         if dt is None or not math.isfinite(dt) or dt <= 0:
             dt = 0.02
         # Remap the sensor axes into the trailer coordinate system.  The trailer
-        # roll corresponds to the IMU's X axis while pitch follows the IMU's Z
-        # axis as requested by the hardware layout.  The remaining axis becomes
+        # roll now corresponds to the IMU's Y axis while pitch follows the IMU's
+        # Z axis as requested by the hardware layout.  The remaining axis becomes
         # the trailer's vertical component.
         trailer_ax = sample.accelerometer.z
-        trailer_ay = sample.accelerometer.x
-        trailer_az = sample.accelerometer.y
+        trailer_ay = sample.accelerometer.y
+        trailer_az = sample.accelerometer.x
 
         gx_raw, gy_raw, gz_raw = sample.gyroscope.x, sample.gyroscope.y, sample.gyroscope.z
 
         # ``p`` denotes roll rate, ``q`` pitch rate and ``r`` yaw rate.  Even
         # though the application does not expose yaw we still use ``r`` to remove
         # the geometric coupling between roll and pitch.
-        # Trailer roll aligns with the IMU's Z axis, pitch with X and yaw with Y.
-        p = gz_raw
-        q = gx_raw
-        r = gy_raw
+        # Trailer roll aligns with the IMU's Y axis, pitch with Z and yaw with X.
+        p = gy_raw
+        q = gz_raw
+        r = gx_raw
 
         roll_rad = math.radians(self._smoothed_orientation.roll)
         pitch_rad = math.radians(self._smoothed_orientation.pitch)
@@ -133,7 +133,7 @@ class Gy85KalmanFilter:
         roll_rate = p + q * sin_roll * tan_pitch + r * cos_roll * tan_pitch
         pitch_rate = q * cos_roll - r * sin_roll
         # Accelerometer-based roll and pitch (degrees)
-        # Roll is derived from the IMU's X axis and pitch from the Z axis so the
+        # Roll is derived from the IMU's Y axis and pitch from the Z axis so the
         # displayed angles follow the trailer layout.
         roll_measure = math.degrees(math.atan2(trailer_ay, trailer_az)) if trailer_ay or trailer_az else 0.0
         denominator = math.sqrt(trailer_ay * trailer_ay + trailer_az * trailer_az)

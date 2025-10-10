@@ -34,8 +34,8 @@ def _make_static_sample(roll_deg: float, pitch_deg: float) -> SensorSample:
     trailer_az = math.cos(roll_rad) * math.cos(pitch_rad)
     return SensorSample(
         accelerometer=Vector3(
-            x=trailer_ay,
-            y=trailer_az,
+            x=trailer_az,
+            y=trailer_ay,
             z=trailer_ax,
         ),
         gyroscope=Vector3(x=0.0, y=0.0, z=0.0),
@@ -51,9 +51,9 @@ def _make_dynamic_sample(
     yaw_rate: float = 0.0,
 ) -> SensorSample:
     base = _make_static_sample(roll_deg, pitch_deg)
-    board_gx = pitch_rate  # IMU X axis tracks trailer pitch rate.
-    board_gy = yaw_rate
-    board_gz = roll_rate   # IMU Z axis tracks trailer roll rate.
+    board_gx = yaw_rate
+    board_gy = roll_rate   # IMU Y axis tracks trailer roll rate.
+    board_gz = pitch_rate  # IMU Z axis tracks trailer pitch rate.
     return SensorSample(
         accelerometer=base.accelerometer,
         gyroscope=Vector3(x=board_gx, y=board_gy, z=board_gz),
