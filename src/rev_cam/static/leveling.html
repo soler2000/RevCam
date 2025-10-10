@@ -502,7 +502,19 @@
           group.add(wheel);
         }
 
-        group.position.y = 0.1;
+        const placeholderBounds = new THREE.Box3().setFromObject(group);
+        const placeholderCenter = new THREE.Vector3();
+        placeholderBounds.getCenter(placeholderCenter);
+        const pivot = new THREE.Vector3(
+          placeholderCenter.x,
+          placeholderBounds.min.y,
+          placeholderCenter.z
+        );
+
+        for (const child of group.children) {
+          child.position.sub(pivot);
+        }
+
         return group;
       }
 
@@ -511,7 +523,6 @@
         try {
           const geometry = await loader.loadAsync("/models/CARVAN_KEYRING.stl");
           geometry.computeVertexNormals();
-          geometry.center();
           geometry.computeBoundingBox();
 
           const material = new THREE.MeshStandardMaterial({
@@ -526,20 +537,25 @@
 
           const boundingBox = geometry.boundingBox?.clone();
           if (boundingBox) {
+            const contentCenter = new THREE.Vector3();
+            boundingBox.getCenter(contentCenter);
+            const pivot = new THREE.Vector3(
+              contentCenter.x,
+              boundingBox.min.y,
+              contentCenter.z
+            );
+            geometry.translate(-pivot.x, -pivot.y, -pivot.z);
+            geometry.computeBoundingBox();
+
             const size = new THREE.Vector3();
-            boundingBox.getSize(size);
+            geometry.boundingBox?.getSize(size);
             const maxDimension = Math.max(size.x, size.y, size.z) || 1;
             const targetLength = 2.4;
             const scale = targetLength / maxDimension;
             trailerMesh.scale.setScalar(scale);
-
-            const baseOffset = -(boundingBox.min.y * scale);
-            trailerMesh.position.y = baseOffset;
           }
 
-          const group = new THREE.Group();
-          group.add(trailerMesh);
-          return group;
+          return trailerMesh;
         } catch (error) {
           console.error("Unable to load STL model", error);
           throw error;
@@ -801,6 +817,7 @@
         });
         const plane = new THREE.Mesh(planeGeometry, planeMaterial);
         plane.rotation.x = -Math.PI / 2;
+        plane.position.y = -0.015;
         scene.add(plane);
 
         trailer = buildTrailerPlaceholder();
