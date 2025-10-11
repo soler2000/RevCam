@@ -130,6 +130,16 @@
       .muted {
         color: var(--text-muted);
       }
+      .visually-hidden {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        border: 0;
+      }
       form {
         display: flex;
         flex-direction: column;
@@ -349,6 +359,20 @@
                 </div>
               </label>
             </fieldset>
+            <fieldset>
+              <legend>Recording resolution</legend>
+              <p class="muted">
+                Choose the capture resolution used for surveillance recordings and live
+                previews. Higher resolutions increase detail at the cost of storage size
+                and bandwidth.
+              </p>
+              <label class="visually-hidden" for="recording-resolution">
+                Recording resolution
+              </label>
+              <select id="recording-resolution"></select>
+              <p class="muted" id="active-resolution-label">Active resolution: —</p>
+              <p class="muted status" id="resolution-status" aria-live="polite"></p>
+            </fieldset>
             <section id="standard-section" aria-live="polite">
               <h2>Standard presets</h2>
               <p class="muted">
@@ -511,6 +535,9 @@
       const expertFpsInput = document.getElementById("expert-fps");
       const expertQualityInput = document.getElementById("expert-quality");
       const statusText = document.getElementById("settings-status");
+      const resolutionSelect = document.getElementById("recording-resolution");
+      const resolutionStatus = document.getElementById("resolution-status");
+      const activeResolutionLabel = document.getElementById("active-resolution-label");
       const summary = document.getElementById("settings-summary");
       const systemTemperatureText = document.getElementById("system-temperature");
       const tabButtons = Array.from(document.querySelectorAll(".tab-button"));
@@ -528,6 +555,8 @@
       const motionPostSecondsInput = document.getElementById("motion-post-seconds");
 
       let currentSettings = null;
+      let cameraConfig = null;
+      const resolutionLabels = new Map();
 
       function setActiveTab(tab) {
         const target = typeof tab === "string" && tab ? tab : "recording";
@@ -630,6 +659,174 @@
         return `${text}°C`;
       }
 
+      function normaliseResolutionLabel(value) {
+        if (!value) {
+          return null;
+        }
+        if (resolutionLabels.has(value)) {
+          return resolutionLabels.get(value);
+        }
+        return String(value).replace(/x/gi, "×");
+      }
+
+      function updateActiveResolutionDisplay(value) {
+        if (!activeResolutionLabel) {
+          return;
+        }
+        const label = normaliseResolutionLabel(value);
+        activeResolutionLabel.textContent = label
+          ? `Active resolution: ${label}`
+          : "Active resolution: —";
+      }
+
+      function populateResolutionOptions(camera) {
+        if (!resolutionSelect) {
+          return;
+        }
+        resolutionLabels.clear();
+        resolutionSelect.innerHTML = "";
+        const resolutionInfo =
+          camera && typeof camera === "object" && camera.resolution
+            ? camera.resolution
+            : null;
+        const options =
+          resolutionInfo && Array.isArray(resolutionInfo.options)
+            ? resolutionInfo.options
+            : [];
+        if (!options.length) {
+          const option = document.createElement("option");
+          option.value = "";
+          option.textContent = "No resolutions available";
+          resolutionSelect.appendChild(option);
+          resolutionSelect.disabled = true;
+        } else {
+          for (const option of options) {
+            if (!option || typeof option !== "object") {
+              continue;
+            }
+            const value =
+              typeof option.value === "string" && option.value.trim()
+                ? option.value.trim()
+                : null;
+            const label =
+              typeof option.label === "string" && option.label.trim()
+                ? option.label.trim()
+                : null;
+            if (!value || !label) {
+              continue;
+            }
+            const opt = document.createElement("option");
+            opt.value = value;
+            opt.textContent = label;
+            resolutionLabels.set(value, label);
+            resolutionSelect.appendChild(opt);
+          }
+          resolutionSelect.disabled = false;
+          const selected =
+            resolutionInfo && typeof resolutionInfo.selected === "string"
+              ? resolutionInfo.selected
+              : null;
+          if (selected && resolutionLabels.has(selected)) {
+            resolutionSelect.value = selected;
+          } else if (resolutionSelect.options.length > 0) {
+            resolutionSelect.selectedIndex = 0;
+          }
+        }
+        const active =
+          resolutionInfo && typeof resolutionInfo.active === "string"
+            ? resolutionInfo.active
+            : null;
+        updateActiveResolutionDisplay(active);
+        if (resolutionStatus) {
+          resolutionStatus.textContent = "";
+        }
+      }
+
+      async function loadCameraConfig() {
+        if (!resolutionSelect) {
+          return;
+        }
+        resolutionSelect.disabled = true;
+        if (resolutionStatus) {
+          resolutionStatus.textContent = "Loading resolution options…";
+        }
+        try {
+          const response = await fetch("/api/camera", { cache: "no-store" });
+          if (!response.ok) {
+            throw new Error(`Request failed with ${response.status}`);
+          }
+          const payload = await response.json();
+          if (!payload || typeof payload !== "object") {
+            throw new Error("Invalid camera response");
+          }
+          cameraConfig = payload;
+          populateResolutionOptions(payload);
+        } catch (error) {
+          console.error("Failed to load camera configuration", error);
+          cameraConfig = null;
+          populateResolutionOptions(null);
+          if (resolutionStatus) {
+            resolutionStatus.textContent = "Unable to load resolution options.";
+          }
+        }
+      }
+
+      async function applyCameraResolution(value) {
+        if (!resolutionSelect || !value || !cameraConfig) {
+          return;
+        }
+        const selectedSource =
+          typeof cameraConfig.selected === "string" && cameraConfig.selected
+            ? cameraConfig.selected
+            : "auto";
+        resolutionSelect.disabled = true;
+        if (resolutionStatus) {
+          const label = normaliseResolutionLabel(value);
+          resolutionStatus.textContent = label
+            ? `Applying ${label}…`
+            : "Applying resolution…";
+        }
+        try {
+          const response = await fetch("/api/camera", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ source: selectedSource, resolution: value }),
+          });
+          if (!response.ok) {
+            let message = `Unable to apply resolution (${response.status})`;
+            try {
+              const detail = await response.json();
+              if (detail && detail.detail) {
+                message = detail.detail;
+              }
+            } catch (parseError) {
+              console.error(parseError);
+            }
+            throw new Error(message);
+          }
+          await loadCameraConfig();
+          if (resolutionStatus) {
+            const label = normaliseResolutionLabel(value);
+            resolutionStatus.textContent = label
+              ? `${label} applied.`
+              : "Resolution updated.";
+          }
+        } catch (error) {
+          console.error("Failed to apply camera resolution", error);
+          if (resolutionStatus) {
+            resolutionStatus.textContent =
+              error instanceof Error ? error.message : "Unable to update resolution.";
+          }
+        } finally {
+          if (resolutionSelect) {
+            const firstOption = resolutionSelect.options[0];
+            const hasChoice =
+              resolutionSelect.options.length > 0 && firstOption && firstOption.value;
+            resolutionSelect.disabled = !hasChoice;
+          }
+        }
+      }
+
       function setSystemTemperatureLabel(text) {
         if (!systemTemperatureText) {
           return;
@@ -684,6 +881,16 @@
         });
       });
       setActiveTab("recording");
+
+      if (resolutionSelect) {
+        resolutionSelect.addEventListener("change", () => {
+          const value = resolutionSelect.value;
+          if (!value) {
+            return;
+          }
+          applyCameraResolution(value);
+        });
+      }
 
       if (motionSensitivityInput) {
         motionSensitivityInput.addEventListener("input", () => {
@@ -1010,6 +1217,7 @@
         }
       });
 
+      loadCameraConfig();
       loadSettings();
       refreshSystemTemperature();
     </script>

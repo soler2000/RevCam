@@ -494,7 +494,7 @@
         const encodedName = encodeURIComponent(recordingName);
         const mediaUrl = `/api/surveillance/recordings/${encodedName}/media?v=${Date.now()}`;
         source.src = mediaUrl;
-        const mediaType = typeof recording.media_type === "string" ? recording.media_type : "video/x-msvideo";
+        const mediaType = typeof recording.media_type === "string" ? recording.media_type : "video/mp4";
         source.type = mediaType;
         if (playbackMode) {
           const codec = recording.video_codec ? String(recording.video_codec).toUpperCase() : "H.264";

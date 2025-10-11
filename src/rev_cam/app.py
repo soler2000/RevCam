@@ -2157,7 +2157,7 @@ def create_app(
             raise HTTPException(status_code=500, detail="Unable to load recording") from exc
         media_type = payload.get("media_type")
         if not isinstance(media_type, str):
-            media_type = "video/x-msvideo"
+            media_type = "video/mp4"
         response = FileResponse(file_path, media_type=media_type, filename=file_path.name)
         try:
             size = file_path.stat().st_size
@@ -2213,7 +2213,7 @@ def create_app(
             logger.exception("Failed to prepare surveillance recording %s", name)
             raise HTTPException(status_code=500, detail="Unable to download recording") from exc
 
-        filename = f"{safe_name}.avi".replace("\"", "")
+        filename = f"{safe_name}.mp4".replace("\"", "")
         disposition = (
             f'attachment; filename="{filename}"; filename*=UTF-8\'\'{urlquote(filename)}'
         )
@@ -2230,7 +2230,7 @@ def create_app(
 
         return StreamingResponse(
             _iterator(),
-            media_type="video/x-msvideo",
+            media_type="video/mp4",
             headers={"Content-Disposition": disposition},
         )
 

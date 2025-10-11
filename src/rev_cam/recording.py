@@ -234,10 +234,10 @@ def _prepare_frame_for_encoding(array: "_np.ndarray") -> "_np.ndarray | None":
 
 def _codec_profile(codec: str) -> Mapping[str, object]:
     base: dict[str, object] = {
-        "format": "avi",
-        "extension": ".avi",
+        "format": "mp4",
+        "extension": ".mp4",
         "pixel_format": "yuv420p",
-        "media_type": "video/x-msvideo",
+        "media_type": "video/mp4",
     }
     return base
 
@@ -1024,7 +1024,7 @@ def load_recording_payload(
                 payload["preview_file"] = normalised_preview
         media_type = payload.get("media_type")
         if not isinstance(media_type, str):
-            payload["media_type"] = "video/x-msvideo"
+            payload["media_type"] = "video/mp4"
         if metadata_dirty:
             try:
                 _write_metadata(meta_path, metadata)
@@ -1071,7 +1071,7 @@ def iter_recording_frames(
             chunk_info = {
                 "file": file_value,
                 "media_type": base_metadata.get(
-                    "media_type", "video/x-msvideo"
+                    "media_type", "video/mp4"
                 ),
             }
             for frame in container.decode(video_stream):
@@ -1127,7 +1127,7 @@ def iter_recording_frames(
 def build_recording_video(
     directory: Path, name: str
 ) -> tuple[str, IO[bytes]]:
-    """Return the recorded AVI file for ``name`` as a readable handle."""
+    """Return the recorded media file for ``name`` as a readable handle."""
 
     safe_name = _safe_recording_name(name)
     payload = load_recording_payload(directory, safe_name, include_frames=False)
@@ -3420,7 +3420,7 @@ class RecordingManager:
                 time_base=time_base,
                 fps=frame_rate,
                 codec=codec_name,
-                media_type=codec_profile.get("media_type", "video/x-msvideo"),
+                media_type=codec_profile.get("media_type", "video/mp4"),
                 target_width=target_width,
                 target_height=target_height,
                 relative_file=relative_file.as_posix(),

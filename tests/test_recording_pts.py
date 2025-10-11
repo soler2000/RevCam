@@ -79,7 +79,7 @@ class _PacketTimeBaseStream(_DummyStream):
 
 
 def test_chunk_writer_pts_are_relative(tmp_path):
-    path = tmp_path / "chunk.avi"
+    path = tmp_path / "chunk.mp4"
     stream = _DummyStream(Fraction(1, 1_000_000))
     container = _DummyContainer()
     writer = recording._ActiveChunkWriter(
@@ -92,9 +92,9 @@ def test_chunk_writer_pts_are_relative(tmp_path):
         target_width=4,
         target_height=4,
         fps=10.0,
-        media_type="video/x-msvideo",
+        media_type="video/mp4",
         codec="mpeg4",
-        relative_file="media/chunk.avi",
+        relative_file="media/chunk.mp4",
         pixel_format="yuv420p",
     )
 
@@ -114,7 +114,7 @@ def test_chunk_writer_pts_are_relative(tmp_path):
 
 
 def test_chunk_writer_pts_resist_timestamp_jitter(tmp_path):
-    path = tmp_path / "chunk.avi"
+    path = tmp_path / "chunk.mp4"
     time_base = recording._select_time_base(Fraction(10, 1))
     stream = _DummyStream(time_base)
     container = _DummyContainer()
@@ -128,9 +128,9 @@ def test_chunk_writer_pts_resist_timestamp_jitter(tmp_path):
         target_width=4,
         target_height=4,
         fps=10.0,
-        media_type="video/x-msvideo",
+        media_type="video/mp4",
         codec="libx264",
-        relative_file="media/chunk.avi",
+        relative_file="media/chunk.mp4",
         pixel_format="yuv420p",
     )
 
@@ -152,7 +152,7 @@ def test_chunk_writer_pts_resist_timestamp_jitter(tmp_path):
 
 
 def test_chunk_writer_uses_stream_time_base_for_tick_math(tmp_path):
-    path = tmp_path / "chunk.avi"
+    path = tmp_path / "chunk.mp4"
     stream_time_base = Fraction(1, 1000)
     stream = _DummyStream(stream_time_base)
     container = _DummyContainer()
@@ -166,9 +166,9 @@ def test_chunk_writer_uses_stream_time_base_for_tick_math(tmp_path):
         target_width=4,
         target_height=4,
         fps=7.0,
-        media_type="video/x-msvideo",
+        media_type="video/mp4",
         codec="libx264",
-        relative_file="media/chunk.avi",
+        relative_file="media/chunk.mp4",
         pixel_format="yuv420p",
     )
 
@@ -192,7 +192,7 @@ def test_chunk_writer_uses_stream_time_base_for_tick_math(tmp_path):
 
 
 def test_chunk_writer_retimes_when_stream_updates_time_base(tmp_path):
-    path = tmp_path / "chunk.avi"
+    path = tmp_path / "chunk.mp4"
     initial_time_base = Fraction(1, 1000)
     updated_time_base = Fraction(1, 6000)
     stream = _DynamicTimeBaseStream(initial_time_base, updated_time_base)
@@ -207,9 +207,9 @@ def test_chunk_writer_retimes_when_stream_updates_time_base(tmp_path):
         target_width=4,
         target_height=4,
         fps=10.0,
-        media_type="video/x-msvideo",
+        media_type="video/mp4",
         codec="libx264",
-        relative_file="media/chunk.avi",
+        relative_file="media/chunk.mp4",
         pixel_format="yuv420p",
     )
 
@@ -239,7 +239,7 @@ def test_chunk_writer_retimes_when_stream_updates_time_base(tmp_path):
 
 
 def test_chunk_writer_tracks_packet_announced_time_base(tmp_path):
-    path = tmp_path / "chunk.avi"
+    path = tmp_path / "chunk.mp4"
     initial_time_base = Fraction(1, 20)
     packet_time_base = Fraction(1, 10240)
     stream = _PacketTimeBaseStream(initial_time_base, packet_time_base)
@@ -254,9 +254,9 @@ def test_chunk_writer_tracks_packet_announced_time_base(tmp_path):
         target_width=4,
         target_height=4,
         fps=20.0,
-        media_type="video/x-msvideo",
+        media_type="video/mp4",
         codec="libx264",
-        relative_file="media/chunk.avi",
+        relative_file="media/chunk.mp4",
         pixel_format="yuv420p",
     )
 
@@ -346,7 +346,7 @@ def test_select_time_base_matches_frame_duration():
 
 
 def test_single_frame_duration_respects_time_base(tmp_path):
-    path = tmp_path / "chunk.avi"
+    path = tmp_path / "chunk.mp4"
     path.write_bytes(b"\x00")
     time_base = recording._select_time_base(Fraction(30, 1))
     stream = _DummyStream(time_base)
@@ -361,9 +361,9 @@ def test_single_frame_duration_respects_time_base(tmp_path):
         target_width=4,
         target_height=4,
         fps=30.0,
-        media_type="video/x-msvideo",
+        media_type="video/mp4",
         codec="libx264",
-        relative_file="media/chunk.avi",
+        relative_file="media/chunk.mp4",
         pixel_format="yuv420p",
     )
 
