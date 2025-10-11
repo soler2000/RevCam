@@ -1349,6 +1349,7 @@ class _ActiveChunkWriter:
     _tick_increment: Fraction | None = field(init=False, default=None, repr=False)
     _tick_cursor: Fraction = field(init=False, default=Fraction(0, 1), repr=False)
     _next_tick_cursor: Fraction = field(init=False, default=Fraction(0, 1), repr=False)
+    _frame_duration: Fraction | None = field(init=False, default=None, repr=False)
 
     def __post_init__(self) -> None:
         resolved_time_base = self._resolve_time_base(self.time_base)
@@ -1391,6 +1392,7 @@ class _ActiveChunkWriter:
     def _initialise_tick_state(self) -> None:
         tick_increment = self._determine_tick_increment()
         self._tick_increment = tick_increment
+        self._frame_duration = self._determine_frame_duration()
         self._tick_cursor = Fraction(0, 1)
         self._next_tick_cursor = Fraction(0, 1)
 
@@ -1411,12 +1413,89 @@ class _ActiveChunkWriter:
         if time_base_fraction is None or time_base_fraction <= 0:
             return None
         frame_duration = Fraction(1, 1) / frame_rate
+        self._frame_duration = frame_duration
         ticks_per_frame = frame_duration / time_base_fraction
         if ticks_per_frame <= 0:
             return None
         return ticks_per_frame
 
+    def _determine_frame_duration(self) -> Fraction | None:
+        if not isinstance(self.fps, (int, float)) or self.fps <= 0:
+            return None
+        try:
+            frame_rate = Fraction(str(self.fps)).limit_denominator(1_000_000)
+        except Exception:  # pragma: no cover - defensive conversion
+            return None
+        if frame_rate <= 0:
+            return None
+        return Fraction(1, 1) / frame_rate
+
+    def _maybe_update_time_base(self) -> None:
+        resolved_time_base = self._resolve_time_base(self.time_base)
+        if resolved_time_base is None:
+            return
+        try:
+            new_time_base = Fraction(resolved_time_base)
+        except Exception:  # pragma: no cover - defensive conversion
+            return
+        try:
+            current_time_base = Fraction(self.time_base)
+        except Exception:  # pragma: no cover - defensive conversion
+            current_time_base = None
+        if current_time_base is None or new_time_base == current_time_base:
+            if current_time_base is None:
+                self.time_base = new_time_base
+            return
+        self._retime_tick_state(current_time_base, new_time_base)
+
+    def _retime_tick_state(
+        self, current_time_base: Fraction, new_time_base: Fraction
+    ) -> None:
+        if new_time_base <= 0:
+            return
+        self.time_base = new_time_base
+        try:
+            cursor_seconds = self._tick_cursor * current_time_base
+        except Exception:  # pragma: no cover - defensive conversion
+            cursor_seconds = None
+        try:
+            next_cursor_seconds = self._next_tick_cursor * current_time_base
+        except Exception:  # pragma: no cover - defensive conversion
+            next_cursor_seconds = None
+        try:
+            last_pts_seconds = (
+                Fraction(self.last_pts, 1) * current_time_base
+                if self.last_pts >= 0
+                else None
+            )
+        except Exception:  # pragma: no cover - defensive conversion
+            last_pts_seconds = None
+        try:
+            next_pts_seconds = (
+                Fraction(self.next_pts, 1) * current_time_base
+                if self.next_pts > 0
+                else None
+            )
+        except Exception:  # pragma: no cover - defensive conversion
+            next_pts_seconds = None
+
+        if cursor_seconds is not None:
+            self._tick_cursor = cursor_seconds / new_time_base
+        if next_cursor_seconds is not None:
+            self._next_tick_cursor = next_cursor_seconds / new_time_base
+        if last_pts_seconds is not None:
+            self.last_pts = self._round_fraction_to_int(
+                last_pts_seconds / new_time_base
+            )
+        if next_pts_seconds is not None:
+            self.next_pts = self._round_fraction_to_int(
+                next_pts_seconds / new_time_base
+            )
+
+        self._tick_increment = self._determine_tick_increment()
+
     def _compute_pts(self, timestamp: float) -> int:
+        self._maybe_update_time_base()
         increment = self._tick_increment
         if increment is not None and increment > 0:
             current_cursor = self._tick_cursor
