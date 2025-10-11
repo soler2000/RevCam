@@ -169,7 +169,7 @@ async def test_start_recording_survives_cancellation(tmp_path: Path, anyio_backe
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("anyio_backend", ["asyncio"], indirect=True)
-async def test_chunk_mp4_generation(tmp_path: Path, anyio_backend) -> None:
+async def test_chunk_avi_generation(tmp_path: Path, anyio_backend) -> None:
     camera = _StaticCamera()
     pipeline = _pipeline()
     manager = RecordingManager(
@@ -198,7 +198,7 @@ async def test_chunk_mp4_generation(tmp_path: Path, anyio_backend) -> None:
     assert placeholder["processing"] is True
     metadata = await manager.wait_for_processing()
     assert metadata is not None
-    assert metadata.get("media_type") == "video/mp4"
+    assert metadata.get("media_type") == "video/x-msvideo"
     assert metadata.get("size_bytes", 0) > 0
     file_name = metadata.get("file")
     assert isinstance(file_name, str)
@@ -251,7 +251,7 @@ async def test_chunk_encoder_handles_odd_frame_size(
     assert "264" in codec_name or codec_name.startswith("h264")
     file_name = metadata.get("file")
     assert isinstance(file_name, str)
-    assert file_name.endswith(".mp4")
+    assert file_name.endswith(".avi")
     video_path = tmp_path / file_name
     assert video_path.exists()
     await manager.aclose()
@@ -671,12 +671,12 @@ async def test_recording_manager_writes_compressed_chunks(tmp_path: Path, anyio_
     assert metadata is not None
     await manager.aclose()
 
-    assert metadata.get("media_type") == "video/mp4"
+    assert metadata.get("media_type") == "video/x-msvideo"
     file_name = metadata.get("file")
     assert isinstance(file_name, str)
     path = tmp_path / file_name
     assert path.exists()
-    assert path.suffix == ".mp4"
+    assert path.suffix == ".avi"
     size_bytes = path.stat().st_size
     assert metadata.get("size_bytes") == size_bytes
     assert metadata.get("duration_seconds", 0) > 0
@@ -716,8 +716,8 @@ async def test_recording_manager_streams_chunk_writes(
     await manager.wait_for_processing()
     await manager.aclose()
 
-    mp4_files = sorted((tmp_path / "media").glob("*.mp4"))
-    assert mp4_files
+    avi_files = sorted((tmp_path / "media").glob("*.avi"))
+    assert avi_files
     legacy_chunks = sorted((tmp_path / "media").glob("*.chunk*.json*"))
     assert not legacy_chunks
 
@@ -852,7 +852,7 @@ async def test_recording_finalise_cancellation(tmp_path: Path, anyio_backend) ->
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("anyio_backend", ["asyncio"], indirect=True)
-async def test_build_recording_video_exports_mp4(tmp_path: Path, anyio_backend) -> None:
+async def test_build_recording_video_exports_avi(tmp_path: Path, anyio_backend) -> None:
     camera = _StaticCamera()
     pipeline = _pipeline()
     manager = RecordingManager(
@@ -884,8 +884,8 @@ async def test_build_recording_video_exports_mp4(tmp_path: Path, anyio_backend) 
     safe_name, handle = build_recording_video(tmp_path, finalised["name"])
     assert safe_name == finalised["name"]
 
-    header = handle.read(8)
-    assert header.startswith(b"\x00\x00\x00")
+    header = handle.read(4)
+    assert header == b"RIFF"
     handle.seek(0)
 
     with av.open(handle, mode="r") as container:
@@ -904,7 +904,7 @@ def test_build_recording_video_uses_file_path(tmp_path: Path, monkeypatch: pytes
     name = "20240103-030303"
     media_dir = tmp_path / "media"
     media_dir.mkdir(parents=True, exist_ok=True)
-    video_file = media_dir / f"{name}.mp4"
+    video_file = media_dir / f"{name}.avi"
     payload = b"file-path-video"
     video_file.write_bytes(payload)
 
@@ -917,7 +917,7 @@ def test_build_recording_video_uses_file_path(tmp_path: Path, monkeypatch: pytes
             "name": name,
             "file": "",
             "file_path": str(video_file),
-            "media_type": "video/mp4",
+            "media_type": "video/x-msvideo",
         }
 
     monkeypatch.setattr(recording, "load_recording_payload", _fake_load)

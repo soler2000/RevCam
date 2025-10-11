@@ -156,14 +156,14 @@ def test_update_surveillance_settings_expert_validation(client: TestClient) -> N
 def test_delete_surveillance_recording(client: TestClient) -> None:
     recordings_dir: Path = client.recordings_dir
     name = "20230101-010101"
-    video_file = recordings_dir / "media" / f"{name}.mp4"
+    video_file = recordings_dir / "media" / f"{name}.avi"
     video_file.write_bytes(b"mp4")
     meta = recordings_dir / f"{name}.meta.json"
     meta.write_text(
         json.dumps({
             "name": name,
             "file": f"media/{video_file.name}",
-            "media_type": "video/mp4",
+            "media_type": "video/x-msvideo",
             "frame_count": 0,
             "size_bytes": video_file.stat().st_size,
             "ended_at": "2023-01-01T00:00:00+00:00",
@@ -179,7 +179,7 @@ def test_delete_surveillance_recording(client: TestClient) -> None:
 def test_fetch_surveillance_recording_metadata_and_media(client: TestClient) -> None:
     recordings_dir: Path = client.recordings_dir
     name = "20230102-020202"
-    video_file = recordings_dir / "media" / f"{name}.mp4"
+    video_file = recordings_dir / "media" / f"{name}.avi"
     video_payload = b"fake-mp4-data"
     video_file.write_bytes(video_payload)
     preview_file = recordings_dir / "previews" / f"{name}.jpg"
@@ -194,7 +194,7 @@ def test_fetch_surveillance_recording_metadata_and_media(client: TestClient) -> 
                 "frame_count": 10,
                 "size_bytes": video_file.stat().st_size,
                 "duration_seconds": 2.5,
-                "media_type": "video/mp4",
+                "media_type": "video/x-msvideo",
                 "preview_file": f"previews/{name}.jpg",
             }
         ),
@@ -209,13 +209,13 @@ def test_fetch_surveillance_recording_metadata_and_media(client: TestClient) -> 
     assert payload["name"] == name
     assert payload["file"] == f"media/{video_file.name}"
     assert payload.get("preview_file") == f"previews/{name}.jpg"
-    assert payload["media_type"] == "video/mp4"
+    assert payload["media_type"] == "video/x-msvideo"
     assert payload["duration_seconds"] == 2.5
     assert "frames" not in payload
 
     media_response = client.get(f"/api/surveillance/recordings/{name}/media")
     assert media_response.status_code == 200
-    assert media_response.headers["content-type"].startswith("video/mp4")
+    assert media_response.headers["content-type"].startswith("video/x-msvideo")
     assert "inline" in media_response.headers["content-disposition"].lower()
     assert media_response.content == video_payload
 
@@ -349,7 +349,7 @@ def test_fetch_surveillance_recording_media_uses_file_path(
 ) -> None:
     recordings_dir: Path = client.recordings_dir
     name = "20240101-010101"
-    video_file = recordings_dir / "media" / f"{name}.mp4"
+    video_file = recordings_dir / "media" / f"{name}.avi"
     payload = b"video-data"
     video_file.write_bytes(payload)
 
@@ -360,16 +360,16 @@ def test_fetch_surveillance_recording_media_uses_file_path(
         assert requested_name == name
         return {
             "name": name,
-            "file": "media/missing.mp4",
+            "file": "media/missing.avi",
             "file_path": str(video_file),
-            "media_type": "video/mp4",
+            "media_type": "video/x-msvideo",
         }
 
     monkeypatch.setattr(app_module, "load_recording_payload", _fake_load)
 
     response = client.get(f"/api/surveillance/recordings/{name}/media")
     assert response.status_code == 200
-    assert response.headers["content-type"].startswith("video/mp4")
+    assert response.headers["content-type"].startswith("video/x-msvideo")
     assert response.content == payload
 
 
@@ -380,7 +380,7 @@ def test_fetch_surveillance_recording_media_recovers_missing_metadata(
     name = "20240202-020202"
     legacy_chunk = recordings_dir / f"{name}.chunk001.mp4"
     legacy_chunk.write_bytes(b"legacy")
-    final_path = recordings_dir / "media" / f"{name}.mp4"
+    final_path = recordings_dir / "media" / f"{name}.avi"
     payload = b"modern"
     final_path.write_bytes(payload)
 
@@ -473,7 +473,7 @@ def test_surveillance_recording_codec_failure_surfaces_to_clients(
     assert stored_metadata.get("media_available") is False
     assert "file" not in stored_metadata
 
-    media_file = recordings_dir / "media" / f"{name}.mp4"
+    media_file = recordings_dir / "media" / f"{name}.avi"
     assert not media_file.exists()
 
     media_response = client.get(f"/api/surveillance/recordings/{name}/media")
@@ -517,7 +517,7 @@ def test_finalise_marks_processing_error_when_media_missing(tmp_path: Path) -> N
         "frame_count": 5,
         "thumbnail": None,
     }
-    chunk_entries = [{"file": "media/does-not-exist.mp4", "media_type": "video/mp4"}]
+    chunk_entries = [{"file": "media/does-not-exist.avi", "media_type": "video/x-msvideo"}]
     manager._video_encoding_disabled = True
 
     async def _finalise() -> dict[str, object]:
@@ -583,12 +583,12 @@ def test_export_surveillance_recording_to_desktop(
 ) -> None:
     recordings_dir: Path = client.recordings_dir
     name = "20240303-030303"
-    video_file = recordings_dir / "media" / f"{name}.mp4"
+    video_file = recordings_dir / "media" / f"{name}.avi"
     payload = b"export-me"
     video_file.write_bytes(payload)
     meta = recordings_dir / f"{name}.meta.json"
     meta.write_text(
-        json.dumps({"name": name, "file": f"media/{video_file.name}", "media_type": "video/mp4"}),
+        json.dumps({"name": name, "file": f"media/{video_file.name}", "media_type": "video/x-msvideo"}),
         encoding="utf-8",
     )
 
@@ -609,7 +609,7 @@ def test_download_surveillance_recording_streams_file_path(
 ) -> None:
     recordings_dir: Path = client.recordings_dir
     name = "20240102-020202"
-    video_file = recordings_dir / "media" / f"{name}.mp4"
+    video_file = recordings_dir / "media" / f"{name}.avi"
     payload = b"download-video"
     video_file.write_bytes(payload)
 
@@ -622,14 +622,14 @@ def test_download_surveillance_recording_streams_file_path(
             "name": name,
             "file": "",
             "file_path": str(video_file),
-            "media_type": "video/mp4",
+            "media_type": "video/x-msvideo",
         }
 
     monkeypatch.setattr(recording, "load_recording_payload", _fake_load)
 
     response = client.get(f"/api/surveillance/recordings/{name}/download")
     assert response.status_code == 200
-    assert response.headers["content-type"].startswith("video/mp4")
+    assert response.headers["content-type"].startswith("video/x-msvideo")
     assert response.content == payload
 
 

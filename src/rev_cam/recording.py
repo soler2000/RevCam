@@ -134,13 +134,11 @@ def _prepare_frame_for_encoding(array: "_np.ndarray") -> "_np.ndarray | None":
 
 def _codec_profile(codec: str) -> Mapping[str, object]:
     base: dict[str, object] = {
-        "format": "mp4",
-        "extension": ".mp4",
+        "format": "avi",
+        "extension": ".avi",
         "pixel_format": "yuv420p",
-        "media_type": "video/mp4",
+        "media_type": "video/x-msvideo",
     }
-    if codec.startswith("h264") or codec == "libx264":
-        base["container_options"] = {"movflags": "+faststart"}
     return base
 
 
@@ -843,7 +841,7 @@ def load_recording_payload(
                 payload["preview_file"] = normalised_preview
         media_type = payload.get("media_type")
         if not isinstance(media_type, str):
-            payload["media_type"] = "video/mp4"
+            payload["media_type"] = "video/x-msvideo"
         if metadata_dirty:
             try:
                 _write_metadata(meta_path, metadata)
@@ -887,7 +885,12 @@ def iter_recording_frames(
                 break
             if video_stream is None:
                 raise RuntimeError("Recording does not contain a video stream")
-            chunk_info = {"file": file_value, "media_type": base_metadata.get("media_type", "video/mp4")}
+            chunk_info = {
+                "file": file_value,
+                "media_type": base_metadata.get(
+                    "media_type", "video/x-msvideo"
+                ),
+            }
             for frame in container.decode(video_stream):
                 try:
                     array = frame.to_ndarray(format="rgb24")
@@ -941,7 +944,7 @@ def iter_recording_frames(
 def build_recording_video(
     directory: Path, name: str
 ) -> tuple[str, IO[bytes]]:
-    """Return the recorded MP4 file for ``name`` as a readable handle."""
+    """Return the recorded AVI file for ``name`` as a readable handle."""
 
     safe_name = _safe_recording_name(name)
     payload = load_recording_payload(directory, safe_name, include_frames=False)
@@ -1047,6 +1050,7 @@ def remove_recording_files(directory: Path, name: str) -> None:
                 candidates.add(chunk_path)
 
     for pattern in (
+        f"{safe_name}*.avi",
         f"{safe_name}*.mp4",
         f"{safe_name}*.jpg",
         f"{safe_name}*.jpeg",
@@ -1524,39 +1528,115 @@ class _ActiveChunkWriter:
         self, timestamp: float, previous_timestamp: float | None
     ) -> int:
         self._maybe_update_time_base()
-        increment = self._tick_increment
-        if increment is not None and increment > 0:
-            step_multiplier = 1
-            frame_duration_fraction = self._frame_duration
-            if (
-                frame_duration_fraction is not None
-                and isinstance(previous_timestamp, (int, float))
-            ):
+        time_base_fraction = self._coerce_fraction(self.time_base)
+        if time_base_fraction is not None and time_base_fraction > 0:
+            base_timestamp = self.first_timestamp
+            if base_timestamp is None:
                 try:
-                    current_value = float(timestamp)
+                    base_timestamp = float(timestamp)
+                except Exception:  # pragma: no cover - defensive conversion
+                    base_timestamp = 0.0
+                self.first_timestamp = base_timestamp
+            try:
+                current_value = float(timestamp)
+            except Exception:  # pragma: no cover - defensive conversion
+                current_value = base_timestamp
+            if not math.isfinite(current_value):
+                current_value = base_timestamp
+            if isinstance(previous_timestamp, (int, float)):
+                try:
                     previous_value = float(previous_timestamp)
                 except Exception:  # pragma: no cover - defensive conversion
-                    try:
-                        current_value = float(timestamp)
-                    except Exception:
-                        current_value = 0.0
                     previous_value = current_value
-                delta_seconds = current_value - previous_value
-                frame_duration_seconds = float(frame_duration_fraction)
-                if (
-                    frame_duration_seconds > 0
-                    and delta_seconds > 0
-                    and math.isfinite(delta_seconds)
-                ):
+                if math.isfinite(previous_value) and current_value < previous_value:
+                    current_value = previous_value
+            if current_value < base_timestamp:
+                current_value = base_timestamp
+            offset_seconds = current_value - base_timestamp
+            if offset_seconds < 0:
+                offset_seconds = 0.0
+            increment = self._tick_increment
+            frame_duration_fraction = self._frame_duration
+            if (
+                increment is not None
+                and increment > 0
+                and frame_duration_fraction is not None
+                and frame_duration_fraction > 0
+            ):
+                try:
+                    frame_duration_seconds = float(frame_duration_fraction)
+                except Exception:  # pragma: no cover - defensive conversion
+                    frame_duration_seconds = 0.0
+                if frame_duration_seconds <= 0:
+                    approx_frames = self.frame_count
+                elif self.frame_count <= 0:
+                    approx_frames = 0
+                else:
+                    previous_index = self.frame_count - 1
+                    delta_seconds = frame_duration_seconds
+                    if isinstance(previous_timestamp, (int, float)):
+                        try:
+                            previous_value = float(previous_timestamp)
+                        except Exception:  # pragma: no cover - defensive conversion
+                            previous_value = current_value
+                        if math.isfinite(previous_value):
+                            delta_seconds = max(0.0, current_value - previous_value)
                     threshold = frame_duration_seconds * 1.95
+                    missing = 1
                     if delta_seconds >= threshold:
-                        approx_frames = int(round(delta_seconds / frame_duration_seconds))
-                        if approx_frames < 1:
-                            approx_frames = 1
-                        step_multiplier = approx_frames
+                        missing = int(
+                            round(delta_seconds / frame_duration_seconds)
+                        )
+                        if missing < 1:
+                            missing = 1
+                    approx_frames = previous_index + missing
+                if approx_frames < 0:
+                    approx_frames = 0
+                if approx_frames < self.frame_count:
+                    approx_frames = self.frame_count
+                cursor = Fraction(approx_frames, 1) * increment
+                pts = self._round_fraction_to_int(cursor)
+                if pts <= self.last_pts:
+                    pts = self.last_pts + 1
+                    cursor = Fraction(pts, 1)
+                    approx_frames = max(approx_frames, self.frame_count + 1)
+                next_cursor = Fraction(approx_frames + 1, 1) * increment
+                next_pts = self._round_fraction_to_int(next_cursor)
+                if next_pts <= pts:
+                    next_pts = pts + 1
+                    next_cursor = Fraction(next_pts, 1)
+                self._tick_cursor = cursor
+                self._next_tick_cursor = next_cursor
+                self.next_pts = next_pts
+                self.last_pts = pts
+                return pts
+            try:
+                offset_fraction = Fraction(str(offset_seconds)).limit_denominator(1_000_000)
+            except Exception:  # pragma: no cover - defensive conversion
+                offset_fraction = Fraction(0, 1)
+            ticks_fraction = offset_fraction / time_base_fraction
+            pts = self._round_fraction_to_int(ticks_fraction)
+            if pts <= self.last_pts:
+                pts = self.last_pts + 1
+            increment = self._tick_increment
+            if increment is not None and increment > 0:
+                current_cursor = Fraction(pts, 1)
+                next_cursor = current_cursor + increment
+                next_pts = self._round_fraction_to_int(next_cursor)
+                if next_pts <= pts:
+                    next_pts = pts + 1
+                    next_cursor = Fraction(next_pts, 1)
+                self._tick_cursor = current_cursor
+                self._next_tick_cursor = next_cursor
+                self.next_pts = next_pts
+            else:
+                self.next_pts = pts + 1
+            self.last_pts = pts
+            return pts
+
+        increment = self._tick_increment
+        if increment is not None and increment > 0:
             current_cursor = self._tick_cursor
-            if step_multiplier > 1:
-                current_cursor = current_cursor + (increment * (step_multiplier - 1))
             pts = self._round_fraction_to_int(current_cursor)
             if pts <= self.last_pts:
                 pts = self.last_pts + 1
@@ -1576,6 +1656,30 @@ class _ActiveChunkWriter:
             self.next_pts = pts + 1
         self.last_pts = pts
         return pts
+
+    @staticmethod
+    def _normalise_timestamp_value(
+        timestamp: float, previous_timestamp: float | None
+    ) -> float:
+        try:
+            value = float(timestamp)
+        except Exception:  # pragma: no cover - defensive conversion
+            value = 0.0
+        if not math.isfinite(value):
+            value = 0.0
+        if isinstance(previous_timestamp, (int, float)):
+            try:
+                previous_value = float(previous_timestamp)
+            except Exception:  # pragma: no cover - defensive conversion
+                previous_value = value
+            if math.isfinite(previous_value):
+                if value < previous_value:
+                    value = previous_value
+                if value < 0.0 and previous_value >= 0.0:
+                    value = previous_value
+        if value < 0.0:
+            value = 0.0
+        return value
 
     @staticmethod
     def _round_fraction_to_int(value: Fraction) -> int:
@@ -1604,9 +1708,10 @@ class _ActiveChunkWriter:
 
     def add_frame(self, array: "_np.ndarray", timestamp: float) -> None:
         previous_timestamp = self.last_timestamp
+        normalised_timestamp = self._normalise_timestamp_value(timestamp, previous_timestamp)
         if self.first_timestamp is None:
-            self.first_timestamp = float(timestamp)
-        self.last_timestamp = float(timestamp)
+            self.first_timestamp = normalised_timestamp
+        self.last_timestamp = normalised_timestamp
         frame = av.VideoFrame.from_ndarray(array, format="rgb24")
         target_width = self.target_width or frame.width
         target_height = self.target_height or frame.height
@@ -1614,7 +1719,7 @@ class _ActiveChunkWriter:
         frame = frame.reformat(
             width=target_width, height=target_height, format=pixel_format
         )
-        frame.pts = self._compute_pts(timestamp, previous_timestamp)
+        frame.pts = self._compute_pts(normalised_timestamp, previous_timestamp)
         frame.time_base = self.time_base
         for packet in self.stream.encode(frame):
             self._maybe_update_time_base_from_packet(packet)
@@ -3093,7 +3198,7 @@ class RecordingManager:
                 time_base=time_base,
                 fps=frame_rate,
                 codec=codec_name,
-                media_type=codec_profile.get("media_type", "video/mp4"),
+                media_type=codec_profile.get("media_type", "video/x-msvideo"),
                 target_width=target_width,
                 target_height=target_height,
                 relative_file=relative_file.as_posix(),
