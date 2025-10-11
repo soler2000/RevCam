@@ -1345,23 +1345,222 @@ class _ActiveChunkWriter:
     last_timestamp: float | None = None
     bytes_written: int = 0
     last_pts: int = field(init=False, default=-1)
+    next_pts: int = field(init=False, default=0)
+    _tick_increment: Fraction | None = field(init=False, default=None, repr=False)
+    _tick_cursor: Fraction = field(init=False, default=Fraction(0, 1), repr=False)
+    _next_tick_cursor: Fraction = field(init=False, default=Fraction(0, 1), repr=False)
+    _frame_duration: Fraction | None = field(init=False, default=None, repr=False)
+
+    def __post_init__(self) -> None:
+        resolved_time_base = self._resolve_time_base(self.time_base)
+        if resolved_time_base is not None:
+            self.time_base = resolved_time_base
+        self._initialise_tick_state()
+
+    @staticmethod
+    def _coerce_fraction(value: object | None) -> Fraction | None:
+        if value is None:
+            return None
+        try:
+            if isinstance(value, Fraction):
+                fraction = value
+            elif isinstance(value, (int, float)):
+                fraction = Fraction(str(value)).limit_denominator(1_000_000)
+            else:
+                numerator = getattr(value, "numerator", None)
+                denominator = getattr(value, "denominator", None)
+                if numerator is None or denominator is None:
+                    return None
+                fraction = Fraction(int(numerator), int(denominator))
+        except Exception:  # pragma: no cover - defensive conversion
+            return None
+        return fraction if fraction > 0 else None
+
+    def _resolve_time_base(
+        self, candidate: Fraction | float | int | None
+    ) -> Fraction | None:
+        values: list[object | None] = []
+        values.append(getattr(self.stream, "time_base", None))
+        codec_context = getattr(self.stream, "codec_context", None)
+        if codec_context is not None:
+            values.append(getattr(codec_context, "time_base", None))
+        if candidate is not None:
+            values.append(candidate)
+        for value in values:
+            fraction = self._coerce_fraction(value)
+            if fraction is not None:
+                return fraction
+        return None
+
+    def _initialise_tick_state(self) -> None:
+        tick_increment = self._determine_tick_increment()
+        self._tick_increment = tick_increment
+        self._frame_duration = self._determine_frame_duration()
+        self._tick_cursor = Fraction(0, 1)
+        self._next_tick_cursor = Fraction(0, 1)
+
+    def _determine_tick_increment(self) -> Fraction | None:
+        if not isinstance(self.fps, (int, float)) or self.fps <= 0:
+            return None
+        try:
+            frame_rate = Fraction(str(self.fps)).limit_denominator(1_000_000)
+        except Exception:  # pragma: no cover - defensive conversion
+            return None
+        if frame_rate <= 0:
+            return None
+        time_base_fraction = None
+        try:
+            time_base_fraction = Fraction(self.time_base)
+        except Exception:  # pragma: no cover - defensive conversion
+            pass
+        if time_base_fraction is None or time_base_fraction <= 0:
+            return None
+        frame_duration = Fraction(1, 1) / frame_rate
+        self._frame_duration = frame_duration
+        ticks_per_frame = frame_duration / time_base_fraction
+        if ticks_per_frame <= 0:
+            return None
+        return ticks_per_frame
+
+    def _determine_frame_duration(self) -> Fraction | None:
+        if not isinstance(self.fps, (int, float)) or self.fps <= 0:
+            return None
+        try:
+            frame_rate = Fraction(str(self.fps)).limit_denominator(1_000_000)
+        except Exception:  # pragma: no cover - defensive conversion
+            return None
+        if frame_rate <= 0:
+            return None
+        return Fraction(1, 1) / frame_rate
+
+    def _propagate_time_base(self, value: Fraction) -> None:
+        stream = getattr(self, "stream", None)
+        if stream is not None:
+            try:
+                stream.time_base = value
+            except Exception:  # pragma: no cover - property may be read-only
+                pass
+            codec_context = getattr(stream, "codec_context", None)
+            if codec_context is not None:
+                try:
+                    codec_context.time_base = value
+                except Exception:  # pragma: no cover - defensive assignment
+                    pass
+
+    def _update_time_base(self, new_time_base: Fraction | None) -> None:
+        if new_time_base is None or new_time_base <= 0:
+            return
+        try:
+            current_time_base = Fraction(self.time_base)
+        except Exception:  # pragma: no cover - defensive conversion
+            current_time_base = None
+        if current_time_base is None:
+            self.time_base = new_time_base
+            self._tick_increment = self._determine_tick_increment()
+            self._propagate_time_base(new_time_base)
+            return
+        if new_time_base == current_time_base:
+            return
+        self._retime_tick_state(current_time_base, new_time_base)
+        self._propagate_time_base(new_time_base)
+
+    def _maybe_update_time_base(self) -> None:
+        resolved_time_base = self._resolve_time_base(self.time_base)
+        self._update_time_base(resolved_time_base)
+
+    def _maybe_update_time_base_from_packet(self, packet: object) -> None:
+        packet_time_base = self._coerce_fraction(getattr(packet, "time_base", None))
+        if packet_time_base is not None:
+            self._update_time_base(packet_time_base)
+
+    def _retime_tick_state(
+        self, current_time_base: Fraction, new_time_base: Fraction
+    ) -> None:
+        if new_time_base <= 0:
+            return
+        self.time_base = new_time_base
+        try:
+            cursor_seconds = self._tick_cursor * current_time_base
+        except Exception:  # pragma: no cover - defensive conversion
+            cursor_seconds = None
+        try:
+            next_cursor_seconds = self._next_tick_cursor * current_time_base
+        except Exception:  # pragma: no cover - defensive conversion
+            next_cursor_seconds = None
+        try:
+            last_pts_seconds = (
+                Fraction(self.last_pts, 1) * current_time_base
+                if self.last_pts >= 0
+                else None
+            )
+        except Exception:  # pragma: no cover - defensive conversion
+            last_pts_seconds = None
+        try:
+            next_pts_seconds = (
+                Fraction(self.next_pts, 1) * current_time_base
+                if self.next_pts > 0
+                else None
+            )
+        except Exception:  # pragma: no cover - defensive conversion
+            next_pts_seconds = None
+
+        if cursor_seconds is not None:
+            self._tick_cursor = cursor_seconds / new_time_base
+        if next_cursor_seconds is not None:
+            self._next_tick_cursor = next_cursor_seconds / new_time_base
+        if last_pts_seconds is not None:
+            self.last_pts = self._round_fraction_to_int(
+                last_pts_seconds / new_time_base
+            )
+        if next_pts_seconds is not None:
+            self.next_pts = self._round_fraction_to_int(
+                next_pts_seconds / new_time_base
+            )
+
+        self._tick_increment = self._determine_tick_increment()
 
     def _compute_pts(self, timestamp: float) -> int:
-        base = self.first_timestamp if self.first_timestamp is not None else float(timestamp)
-        relative = float(timestamp) - float(base)
-        if relative < 0:
-            relative = 0.0
-        time_base_value = float(self.time_base) if self.time_base else 0.0
-        if time_base_value > 0:
-            pts = int(round(relative / time_base_value))
-        elif self.fps > 0:
-            pts = int(round(relative * float(self.fps)))
+        self._maybe_update_time_base()
+        increment = self._tick_increment
+        if increment is not None and increment > 0:
+            current_cursor = self._tick_cursor
+            pts = self._round_fraction_to_int(current_cursor)
+            if pts <= self.last_pts:
+                pts = self.last_pts + 1
+                current_cursor = Fraction(pts, 1)
+            next_cursor = current_cursor + increment
+            next_pts = self._round_fraction_to_int(next_cursor)
+            if next_pts <= pts:
+                next_pts = pts + 1
+                next_cursor = Fraction(next_pts, 1)
+            self._tick_cursor = next_cursor
+            self._next_tick_cursor = next_cursor
+            self.next_pts = next_pts
         else:
             pts = self.frame_count
-        if pts <= self.last_pts:
-            pts = self.last_pts + 1
+            if pts <= self.last_pts:
+                pts = self.last_pts + 1
+            self.next_pts = pts + 1
         self.last_pts = pts
         return pts
+
+    @staticmethod
+    def _round_fraction_to_int(value: Fraction) -> int:
+        if value <= 0:
+            return int(value + Fraction(1, 2))
+        numerator, denominator = value.numerator, value.denominator
+        quotient, remainder = divmod(numerator, denominator)
+        if remainder == 0:
+            return quotient
+        doubled = remainder * 2
+        if doubled < denominator:
+            return quotient
+        if doubled > denominator:
+            return quotient + 1
+        # Tie: prefer even to minimise drift.
+        if quotient % 2 == 0:
+            return quotient
+        return quotient + 1
 
     def _refresh_size(self) -> None:
         try:
@@ -1384,6 +1583,7 @@ class _ActiveChunkWriter:
         frame.pts = self._compute_pts(timestamp)
         frame.time_base = self.time_base
         for packet in self.stream.encode(frame):
+            self._maybe_update_time_base_from_packet(packet)
             self.container.mux(packet)
             packet_size = getattr(packet, "size", None)
             if isinstance(packet_size, int) and packet_size > 0:
@@ -1393,6 +1593,7 @@ class _ActiveChunkWriter:
 
     def finalise(self) -> dict[str, object]:
         for packet in self.stream.encode():
+            self._maybe_update_time_base_from_packet(packet)
             self.container.mux(packet)
             packet_size = getattr(packet, "size", None)
             if isinstance(packet_size, int) and packet_size > 0:
@@ -1416,7 +1617,15 @@ class _ActiveChunkWriter:
                 fps_minimum = float(self.frame_count) / float(self.fps)
             except Exception:  # pragma: no cover - defensive conversion
                 fps_minimum = 0.0
-        if self.last_pts >= 0:
+        if self._tick_increment and self._tick_increment > 0:
+            try:
+                time_base_fraction = Fraction(self.time_base).limit_denominator(1_000_000)
+                tick_fraction = self._next_tick_cursor * time_base_fraction
+                pts_duration = float(tick_fraction)
+            except Exception:  # pragma: no cover - defensive conversion
+                pts_duration = 0.0
+            duration = max(duration, pts_duration)
+        elif self.last_pts >= 0:
             try:
                 pts_duration = float(self.last_pts + 1) * float(self.time_base)
             except Exception:  # pragma: no cover - defensive conversion
