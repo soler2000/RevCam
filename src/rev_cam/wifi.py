@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 from collections import deque
 from dataclasses import dataclass
-from typing import Deque, Iterable, Sequence
+from typing import Callable, Deque, Iterable, Sequence
 
 from .mdns import MDNSAdvertiser
 from .system_log import SystemLog, SystemLogEntry
@@ -1277,12 +1277,13 @@ class WiFiManager:
         self._watchdog_boot_delay = max(0.0, watchdog_boot_delay)
         self._watchdog_interval = max(0.0, watchdog_interval)
         self._watchdog_retry_delay = max(0.0, watchdog_retry_delay)
+        self._status_listener: Callable[[WiFiStatus], None] | None = None
         try:
             initial_status = self._backend.get_status()
         except WiFiError:
             initial_status = None
         if initial_status:
-            self._update_mdns(initial_status)
+            self._finalise_status(initial_status)
 
     @property
     def system_log(self) -> SystemLog:
@@ -1527,8 +1528,6 @@ class WiFiManager:
                 self._credentials.set_network_password(cleaned_ssid, supplied_password)
             except ValueError:
                 pass
-        status = self._apply_hotspot_password(status)
-        self._update_mdns(status)
         if status.connected and not status.hotspot_active and not status.ip_address:
             sync_timeout = min(0.5, max(self._poll_interval * 2, 0.1))
             awaited = self._await_station_ip(
@@ -1576,6 +1575,7 @@ class WiFiManager:
                 result_metadata["previous_connection"] = previous_identifier
             message = f"Connected to {status.ssid or cleaned_ssid}."
             self._record_log("connect_success", message, status=status, metadata=result_metadata)
+            status = self._finalise_status(status)
             if not rollback_requested:
                 return status
             timeout = effective_timeout
@@ -1586,6 +1586,7 @@ class WiFiManager:
             detail = status.detail or "Connection did not report as active."
             message = f"Connection to {cleaned_ssid} pending: {detail}"
             self._record_log("connect_status", message, status=status, metadata=result_metadata)
+            status = self._finalise_status(status)
             if not rollback_requested:
                 return status
             timeout = effective_timeout
@@ -1611,7 +1612,7 @@ class WiFiManager:
                 status=status,
                 metadata=result_metadata,
             )
-            return status
+            return self._finalise_status(status, update_mdns=False)
         deadline = time.monotonic() + timeout
         current = status
         while time.monotonic() < deadline:
@@ -1626,8 +1627,6 @@ class WiFiManager:
             time.sleep(self._poll_interval)
             current = self._fetch_status(update_mdns=False)
         restored = self._backend.activate_profile(previous_profile)
-        restored = self._apply_hotspot_password(restored)
-        self._update_mdns(restored)
         restored.detail = (
             f"Connection to {cleaned_ssid} did not establish within {int(math.ceil(timeout))}s; "
             f"restored {previous_status.ssid or previous_profile}."
@@ -1640,7 +1639,7 @@ class WiFiManager:
             status=restored,
             metadata=rollback_metadata,
         )
-        return restored
+        return self._finalise_status(restored)
 
     def enable_hotspot(
         self,
@@ -1718,9 +1717,7 @@ class WiFiManager:
             raise failure from exc
         self._hotspot_password = cleaned_password
         self._credentials.set_hotspot_password(cleaned_password)
-        status = self._apply_hotspot_password(status)
         self._hotspot_profile = status.profile or self._hotspot_profile
-        self._update_mdns(status)
         rollback_requested = development_mode or (rollback_timeout is not None)
         effective_timeout = None
         if development_mode:
@@ -1744,6 +1741,7 @@ class WiFiManager:
                 status=status,
                 metadata=result_metadata,
             )
+            status = self._finalise_status(status)
             if not rollback_requested:
                 return status
             timeout = effective_timeout
@@ -1759,6 +1757,7 @@ class WiFiManager:
                 status=status,
                 metadata=result_metadata,
             )
+            status = self._finalise_status(status)
             if not rollback_requested:
                 return status
             timeout = effective_timeout
@@ -1790,7 +1789,6 @@ class WiFiManager:
             current = self._fetch_status(update_mdns=False)
         if previous_profile:
             restored = self._backend.activate_profile(previous_profile)
-            restored = self._apply_hotspot_password(restored)
             previous_name = (
                 previous_status.ssid if previous_status and previous_status.ssid else previous_profile
             )
@@ -1798,7 +1796,6 @@ class WiFiManager:
                 f"Hotspot {cleaned_ssid} did not become active within {int(math.ceil(timeout))}s; "
                 f"restored {previous_name}."
             )
-            self._update_mdns(restored)
             if previous_status and previous_status.hotspot_active:
                 self._hotspot_profile = previous_profile
             elif not restored.hotspot_active:
@@ -1811,20 +1808,18 @@ class WiFiManager:
                 status=restored,
                 metadata=rollback_metadata,
             )
-            return restored
-        current = self._apply_hotspot_password(current)
+            return self._finalise_status(restored)
         current.detail = (
             f"Hotspot {cleaned_ssid} did not become active within {int(math.ceil(timeout))}s and "
             "no previous connection was available to restore."
         )
-        self._update_mdns(current)
         self._record_log(
             "hotspot_timeout",
             current.detail,
             status=current,
             metadata=result_metadata,
         )
-        return current
+        return self._finalise_status(current)
 
     def disable_hotspot(self) -> WiFiStatus:
         metadata = {
@@ -1841,8 +1836,6 @@ class WiFiManager:
                 metadata=metadata,
             )
             raise
-        status = self._apply_hotspot_password(status)
-        self._update_mdns(status)
         if not status.hotspot_active:
             self._hotspot_profile = None
         detail = status.detail or "Hotspot disabled."
@@ -1852,7 +1845,7 @@ class WiFiManager:
             status=status,
             metadata=metadata,
         )
-        return status
+        return self._finalise_status(status)
 
     def close(self) -> None:
         self.stop_hotspot_watchdog()
@@ -2099,10 +2092,7 @@ class WiFiManager:
 
     def _fetch_status(self, *, update_mdns: bool = True) -> WiFiStatus:
         status = self._backend.get_status()
-        status = self._apply_hotspot_password(status)
-        if update_mdns:
-            self._update_mdns(status)
-        return status
+        return self._finalise_status(status, update_mdns=update_mdns)
 
     def _await_station_ip(
         self,
@@ -2177,6 +2167,36 @@ class WiFiManager:
         if isinstance(status, WiFiStatus):
             status.hotspot_password = self._hotspot_password
         return status
+
+    def set_status_listener(
+        self, listener: Callable[[WiFiStatus], None] | None
+    ) -> None:
+        """Register a callback invoked whenever the connection status updates."""
+
+        self._status_listener = listener
+
+    def _notify_status(self, status: WiFiStatus | None) -> None:
+        listener = self._status_listener
+        if listener is None or not isinstance(status, WiFiStatus):
+            return
+        try:
+            listener(status)
+        except Exception:  # pragma: no cover - defensive logging
+            logging.getLogger(__name__).debug(
+                "Wi-Fi status listener failed", exc_info=True
+            )
+
+    def _finalise_status(
+        self,
+        status: WiFiStatus | None,
+        *,
+        update_mdns: bool = True,
+    ) -> WiFiStatus:
+        result = self._apply_hotspot_password(status)
+        if update_mdns:
+            self._update_mdns(result)
+        self._notify_status(result)
+        return result
 
     def get_connection_log(self, limit: int | None = None) -> list[dict[str, object | None]]:
         """Return recent Wi-Fi connection and hotspot events."""

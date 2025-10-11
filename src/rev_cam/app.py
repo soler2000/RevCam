@@ -55,7 +55,7 @@ from .recording import (
 from .streaming import MJPEGStreamer, WebRTCManager, encode_frame_to_jpeg
 from .system_log import SystemLog
 from .version import APP_VERSION
-from .wifi import WiFiCredentialStore, WiFiError, WiFiManager
+from .wifi import WiFiCredentialStore, WiFiError, WiFiManager, WiFiStatus
 from .trailer_leveling import evaluate_leveling
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -452,6 +452,7 @@ def create_app(
 
     async def _handle_recording_stopped(metadata: dict[str, object]) -> None:
         _persist_surveillance_state(False)
+        _trigger_led_update()
 
     async def _apply_auto_purge(settings) -> None:
         days = getattr(settings, "auto_purge_days", None)
@@ -548,13 +549,68 @@ def create_app(
     app.state.led_ring = led_ring
     app.state.system_log = shared_system_log
 
-    async def _set_ready_pattern() -> None:
+    led_update_event = asyncio.Event()
+    led_automation_task: asyncio.Task[None] | None = None
+    led_loop: asyncio.AbstractEventLoop | None = None
+    latest_wifi_status: WiFiStatus | None = None
+
+    def _trigger_led_update() -> None:
+        loop = led_loop
+        if loop is None:
+            return
+        try:
+            running_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            running_loop = None
+        if running_loop is loop:
+            led_update_event.set()
+        else:
+            try:
+                loop.call_soon_threadsafe(led_update_event.set)
+            except RuntimeError:
+                pass
+
+    def _select_led_pattern() -> str:
+        if latest_wifi_status and latest_wifi_status.hotspot_active:
+            return "hotspot"
+        if current_mode is StreamMode.SURVEILLANCE:
+            if recording_manager is not None and recording_manager.is_recording:
+                return "recording"
+            if recording_manager is not None:
+                return "surveillance"
         available = (
             streamer is not None
             or webrtc_manager is not None
             or (recording_manager is not None and current_mode is StreamMode.SURVEILLANCE)
         )
-        await led_ring.set_pattern("ready" if available else "error")
+        return "ready" if available else "error"
+
+    def _handle_wifi_status(status: WiFiStatus) -> None:
+        nonlocal latest_wifi_status
+        latest_wifi_status = status
+        _trigger_led_update()
+
+    async def _apply_led_pattern() -> None:
+        target = _select_led_pattern()
+        await led_ring.set_pattern(target)
+
+    async def _led_automation_worker() -> None:
+        try:
+            while True:
+                await led_update_event.wait()
+                led_update_event.clear()
+                try:
+                    await _apply_led_pattern()
+                except Exception:  # pragma: no cover - defensive logging
+                    logger.exception("Failed to update LED automation")
+        except asyncio.CancelledError:  # pragma: no cover - cooperative cancellation
+            pass
+
+    if hasattr(wifi_manager, "set_status_listener"):
+        wifi_manager.set_status_listener(_handle_wifi_status)
+
+    async def _set_ready_pattern() -> None:
+        _trigger_led_update()
 
     async def _serialise_led_status() -> dict[str, object]:
         status = await led_ring.get_status()
@@ -977,11 +1033,18 @@ def create_app(
     async def startup() -> None:  # pragma: no cover - framework hook
         nonlocal camera, active_camera_choice, streamer, webrtc_manager, active_resolution
         nonlocal stream_error, webrtc_error, recording_manager, current_mode
+        nonlocal led_automation_task, led_loop
         if isinstance(shared_system_log, SystemLog):
             shared_system_log.record(
                 "system",
                 "startup",
                 "RevCam application starting up.",
+            )
+        led_loop = asyncio.get_running_loop()
+        if led_automation_task is None:
+            led_automation_task = asyncio.create_task(
+                _led_automation_worker(),
+                name="led-automation",
             )
         await led_ring.set_pattern("boot")
         try:
@@ -1063,18 +1126,29 @@ def create_app(
                 manager = await _activate_surveillance_mode()
                 if runtime_state.recording:
                     await manager.start_recording()
+                    _trigger_led_update()
             except Exception:  # pragma: no cover - defensive logging
                 logger.exception("Failed to resume surveillance recording state")
 
     @app.on_event("shutdown")
     async def shutdown() -> None:  # pragma: no cover - framework hook
-        nonlocal streamer, webrtc_manager, recording_manager
+        nonlocal streamer, webrtc_manager, recording_manager, led_automation_task, led_loop
         if isinstance(shared_system_log, SystemLog):
             shared_system_log.record(
                 "system",
                 "shutdown",
                 "RevCam application shutting down.",
             )
+        if hasattr(wifi_manager, "set_status_listener"):
+            wifi_manager.set_status_listener(None)
+        if led_automation_task is not None:
+            led_automation_task.cancel()
+            try:
+                await led_automation_task
+            except asyncio.CancelledError:
+                pass
+            led_automation_task = None
+        led_loop = None
         await led_ring.set_pattern("boot")
         if streamer is not None:
             await streamer.aclose()
@@ -1971,6 +2045,7 @@ def create_app(
         except RuntimeError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         _persist_surveillance_state(True)
+        _trigger_led_update()
         return {"recording": details}
 
     @app.post("/api/surveillance/recordings/start-motion")
@@ -2000,6 +2075,7 @@ def create_app(
         except RuntimeError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         _persist_surveillance_state(True)
+        _trigger_led_update()
         return {"recording": details}
 
     @app.post("/api/surveillance/recordings/stop")
@@ -2016,6 +2092,7 @@ def create_app(
         except RuntimeError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         _persist_surveillance_state(False)
+        _trigger_led_update()
         return {"recording": details}
 
     @app.get("/api/surveillance/recordings")

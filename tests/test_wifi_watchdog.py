@@ -435,3 +435,29 @@ def test_enable_hotspot_error_metadata(tmp_path: Path) -> None:
         assert metadata.get("diagnostics", {}).get("state") == "enable"
     finally:
         manager.close()
+
+def test_status_listener_receives_updates(
+    watchdog_manager: tuple[WiFiManager, WatchdogBackend, WiFiCredentialStore]
+) -> None:
+    manager, backend, _ = watchdog_manager
+    notifications: list[WiFiStatus] = []
+
+    def listener(status: WiFiStatus) -> None:
+        notifications.append(status)
+
+    manager.set_status_listener(listener)
+    manager.get_status()
+    backend.status = WiFiStatus(
+        connected=True,
+        ssid="RevCam",
+        signal=None,
+        ip_address="192.168.4.1",
+        mode="access-point",
+        hotspot_active=True,
+        profile="rev-hotspot",
+        detail="Hotspot enabled",
+    )
+    manager.enable_hotspot("RevCam", None)
+    manager.close()
+    assert notifications
+    assert any(entry.hotspot_active for entry in notifications)

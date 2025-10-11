@@ -28,7 +28,16 @@ def test_led_status_endpoint_reports_state(led_client: TestClient) -> None:
     payload = response.json()
     assert isinstance(payload.get("patterns"), list)
     patterns = set(payload["patterns"])
-    for expected in {"off", "boot", "ready", "error", "illumination"}:
+    for expected in {
+        "off",
+        "boot",
+        "ready",
+        "error",
+        "illumination",
+        "surveillance",
+        "recording",
+        "hotspot",
+    }:
         assert expected in patterns
     assert payload["pattern"] in patterns
     assert payload["active_pattern"] in patterns
