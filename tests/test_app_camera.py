@@ -203,6 +203,39 @@ def test_camera_update_surfaces_failure(client: TestClient) -> None:
     assert resolution_info["active"] == DEFAULT_RESOLUTION_KEY
 
 
+def test_camera_adjustments_persist_without_switching(client: TestClient) -> None:
+    initial_response = client.get("/api/camera")
+    assert initial_response.status_code == 200
+    initial = initial_response.json()
+    assert initial["image_adjustments"] == {"brightness": 100.0, "saturation": 100.0, "hue": 0.0}
+
+    desired_adjustments = {"brightness": 135, "saturation": 80, "hue": -25}
+    update_response = client.post(
+        "/api/camera",
+        json={
+            "source": initial["selected"],
+            "resolution": initial["resolution"]["selected"],
+            "image_adjustments": desired_adjustments,
+        },
+    )
+    assert update_response.status_code == 200
+    update_payload = update_response.json()
+    saved_adjustments = update_payload["image_adjustments"]
+    assert saved_adjustments["brightness"] == desired_adjustments["brightness"]
+    assert saved_adjustments["saturation"] == desired_adjustments["saturation"]
+    assert saved_adjustments["hue"] == desired_adjustments["hue"]
+
+    refreshed = client.get("/api/camera")
+    assert refreshed.status_code == 200
+    refreshed_payload = refreshed.json()
+    assert refreshed_payload["image_adjustments"] == saved_adjustments
+
+    config_path = getattr(client, "config_path", None)
+    assert config_path is not None
+    config_data = json.loads(Path(config_path).read_text())
+    assert config_data["camera_image_adjustments"] == saved_adjustments
+
+
 def test_camera_resolution_update(client: TestClient) -> None:
     response = client.post(
         "/api/camera",

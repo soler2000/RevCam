@@ -1854,6 +1854,16 @@ def create_app(
 
         current_selection = config_manager.get_camera()
         current_resolution = config_manager.get_resolution()
+        if payload.image_adjustments is not None:
+            try:
+                updated_adjustments = config_manager.set_reversing_image_adjustments(
+                    payload.image_adjustments.model_dump(exclude_none=True)
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+        else:
+            updated_adjustments = None
+
         if (
             camera is not None
             and selection == current_selection
@@ -1870,16 +1880,11 @@ def create_app(
                     "selected": current_resolution.key(),
                     "active": active_resolution.key(),
                 },
-                "image_adjustments": config_manager.get_reversing_image_adjustments().to_dict(),
+                "image_adjustments": (
+                    updated_adjustments
+                    or config_manager.get_reversing_image_adjustments()
+                ).to_dict(),
             }
-
-        if payload.image_adjustments is not None:
-            try:
-                config_manager.set_reversing_image_adjustments(
-                    payload.image_adjustments.model_dump(exclude_none=True)
-                )
-            except ValueError as exc:
-                raise HTTPException(status_code=400, detail=str(exc)) from exc
 
         await led_ring.set_pattern("boot")
         old_selection = current_selection
