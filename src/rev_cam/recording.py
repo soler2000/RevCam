@@ -8,6 +8,7 @@ import json
 import logging
 import shutil
 import time
+import math
 from fractions import Fraction
 from copy import deepcopy
 from contextlib import asynccontextmanager
@@ -1519,11 +1520,43 @@ class _ActiveChunkWriter:
 
         self._tick_increment = self._determine_tick_increment()
 
-    def _compute_pts(self, timestamp: float) -> int:
+    def _compute_pts(
+        self, timestamp: float, previous_timestamp: float | None
+    ) -> int:
         self._maybe_update_time_base()
         increment = self._tick_increment
         if increment is not None and increment > 0:
+            step_multiplier = 1
+            frame_duration_fraction = self._frame_duration
+            if (
+                frame_duration_fraction is not None
+                and isinstance(previous_timestamp, (int, float))
+            ):
+                try:
+                    current_value = float(timestamp)
+                    previous_value = float(previous_timestamp)
+                except Exception:  # pragma: no cover - defensive conversion
+                    try:
+                        current_value = float(timestamp)
+                    except Exception:
+                        current_value = 0.0
+                    previous_value = current_value
+                delta_seconds = current_value - previous_value
+                frame_duration_seconds = float(frame_duration_fraction)
+                if (
+                    frame_duration_seconds > 0
+                    and delta_seconds > 0
+                    and math.isfinite(delta_seconds)
+                ):
+                    threshold = frame_duration_seconds * 1.95
+                    if delta_seconds >= threshold:
+                        approx_frames = int(round(delta_seconds / frame_duration_seconds))
+                        if approx_frames < 1:
+                            approx_frames = 1
+                        step_multiplier = approx_frames
             current_cursor = self._tick_cursor
+            if step_multiplier > 1:
+                current_cursor = current_cursor + (increment * (step_multiplier - 1))
             pts = self._round_fraction_to_int(current_cursor)
             if pts <= self.last_pts:
                 pts = self.last_pts + 1
@@ -1570,6 +1603,7 @@ class _ActiveChunkWriter:
         self.bytes_written = max(self.bytes_written, int(size))
 
     def add_frame(self, array: "_np.ndarray", timestamp: float) -> None:
+        previous_timestamp = self.last_timestamp
         if self.first_timestamp is None:
             self.first_timestamp = float(timestamp)
         self.last_timestamp = float(timestamp)
@@ -1580,7 +1614,7 @@ class _ActiveChunkWriter:
         frame = frame.reformat(
             width=target_width, height=target_height, format=pixel_format
         )
-        frame.pts = self._compute_pts(timestamp)
+        frame.pts = self._compute_pts(timestamp, previous_timestamp)
         frame.time_base = self.time_base
         for packet in self.stream.encode(frame):
             self._maybe_update_time_base_from_packet(packet)
