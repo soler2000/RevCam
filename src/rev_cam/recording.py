@@ -1345,21 +1345,57 @@ class _ActiveChunkWriter:
     last_timestamp: float | None = None
     bytes_written: int = 0
     last_pts: int = field(init=False, default=-1)
+    next_pts: int = field(init=False, default=0)
+    _tick_increment: int | None = field(init=False, default=None, repr=False)
+
+    def __post_init__(self) -> None:
+        self._tick_increment = self._determine_tick_increment()
+
+    def _determine_tick_increment(self) -> int | None:
+        if self.time_base is None:
+            return None
+        try:
+            time_base_fraction = Fraction(self.time_base)
+        except Exception:  # pragma: no cover - defensive conversion
+            return None
+        if time_base_fraction <= 0:
+            return None
+        if not isinstance(self.fps, (int, float)) or self.fps <= 0:
+            return None
+        try:
+            frame_rate = Fraction(str(self.fps)).limit_denominator(1_000_000)
+        except Exception:  # pragma: no cover - defensive conversion
+            return None
+        if frame_rate <= 0:
+            return None
+        frame_duration = Fraction(1, 1) / frame_rate
+        ticks_per_frame = frame_duration / time_base_fraction
+        if ticks_per_frame <= 0:
+            return None
+        if ticks_per_frame.denominator == 1:
+            increment = ticks_per_frame.numerator
+        else:
+            try:
+                increment = int(round(float(ticks_per_frame)))
+            except Exception:  # pragma: no cover - defensive conversion
+                increment = 0
+        if increment <= 0:
+            return None
+        return increment
 
     def _compute_pts(self, timestamp: float) -> int:
-        base = self.first_timestamp if self.first_timestamp is not None else float(timestamp)
-        relative = float(timestamp) - float(base)
-        if relative < 0:
-            relative = 0.0
-        time_base_value = float(self.time_base) if self.time_base else 0.0
-        if time_base_value > 0:
-            pts = int(round(relative / time_base_value))
-        elif self.fps > 0:
-            pts = int(round(relative * float(self.fps)))
+        increment = self._tick_increment
+        if increment and increment > 0:
+            pts = self.next_pts
+            self.next_pts += increment
+            if pts <= self.last_pts:
+                pts = self.last_pts + increment
+                self.next_pts = pts + increment
         else:
             pts = self.frame_count
-        if pts <= self.last_pts:
-            pts = self.last_pts + 1
+            if pts <= self.last_pts:
+                pts = self.last_pts + 1
+            self.next_pts = pts + 1
         self.last_pts = pts
         return pts
 
@@ -1416,7 +1452,13 @@ class _ActiveChunkWriter:
                 fps_minimum = float(self.frame_count) / float(self.fps)
             except Exception:  # pragma: no cover - defensive conversion
                 fps_minimum = 0.0
-        if self.last_pts >= 0:
+        if self._tick_increment and self._tick_increment > 0:
+            try:
+                pts_duration = float(self.next_pts) * float(self.time_base)
+            except Exception:  # pragma: no cover - defensive conversion
+                pts_duration = 0.0
+            duration = max(duration, pts_duration)
+        elif self.last_pts >= 0:
             try:
                 pts_duration = float(self.last_pts + 1) * float(self.time_base)
             except Exception:  # pragma: no cover - defensive conversion
