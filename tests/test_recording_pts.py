@@ -104,6 +104,46 @@ def test_chunk_writer_pts_resist_timestamp_jitter(tmp_path):
     assert deltas[0] == expected_increment_fraction.numerator
 
 
+def test_chunk_writer_uses_stream_time_base_for_tick_math(tmp_path):
+    path = tmp_path / "chunk.mp4"
+    stream_time_base = Fraction(1, 1000)
+    stream = _DummyStream(stream_time_base)
+    container = _DummyContainer()
+    writer = recording._ActiveChunkWriter(
+        name="test",
+        index=3,
+        path=path,
+        container=container,
+        stream=stream,
+        time_base=Fraction(1, 24),
+        target_width=4,
+        target_height=4,
+        fps=7.0,
+        media_type="video/mp4",
+        codec="libx264",
+        relative_file="media/chunk.mp4",
+        pixel_format="yuv420p",
+    )
+
+    assert writer.time_base == stream_time_base
+
+    frame = np.zeros((4, 4, 3), dtype=np.uint8)
+    timestamps = [0.0, 0.19, 0.33, 0.51, 0.69, 0.82]
+    for ts in timestamps:
+        writer.add_frame(frame, timestamp=ts)
+
+    pts_values = stream.encoded_pts
+    assert len(pts_values) == len(timestamps)
+    deltas = [b - a for a, b in zip(pts_values, pts_values[1:])]
+    assert deltas
+    assert max(deltas) - min(deltas) <= 1
+
+    entry = writer.finalise()
+    expected_duration = len(pts_values) / writer.fps
+    assert entry["duration_seconds"] == pytest.approx(expected_duration, rel=1e-6, abs=1e-3)
+    assert container.closed
+
+
 class _DummyCodecContext:
     def __init__(self, formats) -> None:
         self.pix_fmts = formats

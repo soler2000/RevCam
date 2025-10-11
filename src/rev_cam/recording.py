@@ -1346,20 +1346,61 @@ class _ActiveChunkWriter:
     bytes_written: int = 0
     last_pts: int = field(init=False, default=-1)
     next_pts: int = field(init=False, default=0)
-    _tick_increment: int | None = field(init=False, default=None, repr=False)
+    _tick_increment: Fraction | None = field(init=False, default=None, repr=False)
+    _tick_accumulator: int = field(init=False, default=0, repr=False)
+    _tick_denominator: int = field(init=False, default=1, repr=False)
 
     def __post_init__(self) -> None:
-        self._tick_increment = self._determine_tick_increment()
+        resolved_time_base = self._resolve_time_base(self.time_base)
+        if resolved_time_base is not None:
+            self.time_base = resolved_time_base
+        self._initialise_tick_state()
 
-    def _determine_tick_increment(self) -> int | None:
-        if self.time_base is None:
-            return None
-        try:
-            time_base_fraction = Fraction(self.time_base)
-        except Exception:  # pragma: no cover - defensive conversion
-            return None
-        if time_base_fraction <= 0:
-            return None
+    def _resolve_time_base(
+        self, candidate: Fraction | float | int | None
+    ) -> Fraction | None:
+        values: list[object] = []
+        stream_time_base = getattr(self.stream, "time_base", None)
+        if stream_time_base is not None:
+            values.append(stream_time_base)
+        codec_context = getattr(self.stream, "codec_context", None)
+        if codec_context is not None:
+            codec_time_base = getattr(codec_context, "time_base", None)
+            if codec_time_base is not None:
+                values.append(codec_time_base)
+        if candidate is not None:
+            values.append(candidate)
+        for value in values:
+            try:
+                if isinstance(value, Fraction):
+                    fraction = value
+                elif isinstance(value, (int, float)):
+                    fraction = Fraction(str(value)).limit_denominator(1_000_000)
+                else:
+                    numerator = getattr(value, "numerator", None)
+                    denominator = getattr(value, "denominator", None)
+                    if numerator is None or denominator is None:
+                        continue
+                    fraction = Fraction(int(numerator), int(denominator))
+            except Exception:  # pragma: no cover - defensive conversion
+                continue
+            if fraction > 0:
+                return fraction
+        return None
+
+    def _initialise_tick_state(self) -> None:
+        tick_increment = self._determine_tick_increment()
+        self._tick_increment = tick_increment
+        if tick_increment is not None:
+            self._tick_denominator = tick_increment.denominator
+            self._tick_accumulator = 0
+            if self._tick_denominator <= 0:
+                self._tick_denominator = 1
+        else:
+            self._tick_denominator = 1
+            self._tick_accumulator = 0
+
+    def _determine_tick_increment(self) -> Fraction | None:
         if not isinstance(self.fps, (int, float)) or self.fps <= 0:
             return None
         try:
@@ -1368,29 +1409,34 @@ class _ActiveChunkWriter:
             return None
         if frame_rate <= 0:
             return None
+        time_base_fraction = None
+        try:
+            time_base_fraction = Fraction(self.time_base)
+        except Exception:  # pragma: no cover - defensive conversion
+            pass
+        if time_base_fraction is None or time_base_fraction <= 0:
+            return None
         frame_duration = Fraction(1, 1) / frame_rate
         ticks_per_frame = frame_duration / time_base_fraction
         if ticks_per_frame <= 0:
             return None
-        if ticks_per_frame.denominator == 1:
-            increment = ticks_per_frame.numerator
-        else:
-            try:
-                increment = int(round(float(ticks_per_frame)))
-            except Exception:  # pragma: no cover - defensive conversion
-                increment = 0
-        if increment <= 0:
-            return None
-        return increment
+        return ticks_per_frame
 
     def _compute_pts(self, timestamp: float) -> int:
         increment = self._tick_increment
-        if increment and increment > 0:
-            pts = self.next_pts
-            self.next_pts += increment
+        if increment is not None and increment > 0:
+            numerator = increment.numerator
+            denominator = self._tick_denominator or 1
+            pts = self._tick_accumulator // denominator
             if pts <= self.last_pts:
-                pts = self.last_pts + increment
-                self.next_pts = pts + increment
+                pts = self.last_pts + 1
+                self._tick_accumulator = pts * denominator
+            self._tick_accumulator += numerator
+            next_pts = self._tick_accumulator // denominator
+            if next_pts <= pts:
+                next_pts = pts + 1
+                self._tick_accumulator = next_pts * denominator
+            self.next_pts = next_pts
         else:
             pts = self.frame_count
             if pts <= self.last_pts:
