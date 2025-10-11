@@ -757,15 +757,50 @@
         setStatus("Idle. Ready to record.", "info");
       }
 
+      function snapshotIndicatesManualRecording(snapshot) {
+        if (!snapshot || typeof snapshot !== "object") {
+          return false;
+        }
+        if (snapshot.recording !== true) {
+          return false;
+        }
+        const mode =
+          typeof snapshot.recording_mode === "string" ? snapshot.recording_mode.toLowerCase() : null;
+        if (mode === "continuous") {
+          return true;
+        }
+        const motionInfo = snapshot.motion;
+        if (!motionInfo || typeof motionInfo !== "object") {
+          return mode !== null && mode !== "motion";
+        }
+        const overrideActive = motionInfo.session_override === true;
+        const motionEnabled = motionInfo.enabled === true;
+        if (overrideActive) {
+          if (!motionEnabled) {
+            return true;
+          }
+          return mode !== "motion";
+        }
+        if (motionInfo.enabled === false) {
+          return true;
+        }
+        return mode === "continuous";
+      }
+
       function applySessionVisuals(currentSession, options = {}) {
         const { processingActive = false, processingRecord = null } = options;
         sessionState = currentSession;
         if (recordButton) {
-          const manualActive = currentSession === "manual" || manualSessionPending;
+          const manualActive =
+            currentSession === "manual" ||
+            manualSessionPending ||
+            snapshotIndicatesManualRecording(lastStatusSnapshot);
           recordButton.textContent = manualActive ? "Stop recording" : "Start manual recording";
           recordButton.setAttribute("aria-pressed", String(manualActive));
-          recordButton.disabled =
-            currentSession === "motion-monitoring" || currentSession === "motion-recording";
+          const disableManualButton =
+            !manualActive &&
+            (currentSession === "motion-monitoring" || currentSession === "motion-recording");
+          recordButton.disabled = disableManualButton;
           recordButton.classList.toggle("recording-active", manualActive);
           recordButton.dataset.state = manualActive ? "stop" : "start";
         }
@@ -802,28 +837,7 @@
         if (sessionState === "manual" || manualSessionPending) {
           return true;
         }
-        const payload = lastStatusSnapshot;
-        if (!payload || typeof payload !== "object") {
-          return false;
-        }
-        if (payload.recording !== true) {
-          return false;
-        }
-        const mode = typeof payload.recording_mode === "string" ? payload.recording_mode : null;
-        if (mode === "continuous") {
-          return true;
-        }
-        const motionInfo = payload.motion;
-        if (!motionInfo || typeof motionInfo !== "object") {
-          return false;
-        }
-        if (motionInfo.session_override === true && motionInfo.enabled !== true) {
-          return true;
-        }
-        if (motionInfo.enabled === false) {
-          return true;
-        }
-        return false;
+        return snapshotIndicatesManualRecording(lastStatusSnapshot);
       }
 
       function formatBytes(bytes) {
