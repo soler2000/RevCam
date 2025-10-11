@@ -228,7 +228,7 @@ class MJPEGStreamer:
                     continue
 
                 try:
-                    processed = await asyncio.to_thread(self.pipeline.process, frame)
+                    processed = self.pipeline.process(frame)
                     jpeg = await asyncio.to_thread(self._encode_frame, processed)
                 except asyncio.CancelledError:  # pragma: no cover - cooperative exit
                     raise
