@@ -852,7 +852,7 @@ async def test_recording_finalise_cancellation(tmp_path: Path, anyio_backend) ->
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("anyio_backend", ["asyncio"], indirect=True)
-async def test_build_recording_video_exports_mp4(tmp_path: Path, anyio_backend) -> None:
+async def test_build_recording_video_exports_avi(tmp_path: Path, anyio_backend) -> None:
     camera = _StaticCamera()
     pipeline = _pipeline()
     manager = RecordingManager(
@@ -885,7 +885,8 @@ async def test_build_recording_video_exports_mp4(tmp_path: Path, anyio_backend) 
     assert safe_name == finalised["name"]
 
     header = handle.read(8)
-    assert header.startswith(b"\x00\x00\x00")
+    assert len(header) >= 8
+    assert header[4:8] == b"ftyp"
     handle.seek(0)
 
     with av.open(handle, mode="r") as container:

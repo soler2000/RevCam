@@ -109,6 +109,7 @@ def test_chunk_writer_pts_are_relative(tmp_path):
 
     entry = writer.finalise()
     assert entry["frame_count"] == 3
+    assert entry["resolution"] == {"width": 4, "height": 4}
     assert container.closed
 
 

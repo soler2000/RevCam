@@ -2229,7 +2229,9 @@ def create_app(
                 archive.close()
 
         return StreamingResponse(
-            _iterator(), media_type="video/mp4", headers={"Content-Disposition": disposition}
+            _iterator(),
+            media_type="video/mp4",
+            headers={"Content-Disposition": disposition},
         )
 
     @app.post("/api/surveillance/recordings/{name}/export")

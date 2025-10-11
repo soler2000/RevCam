@@ -8,6 +8,8 @@ import json
 import logging
 import shutil
 import time
+import math
+import re
 from fractions import Fraction
 from copy import deepcopy
 from contextlib import asynccontextmanager
@@ -61,6 +63,105 @@ _CODECS_REQUIRE_EVEN_DIMENSIONS: frozenset[str] = frozenset(
         "h264_omx",
     }
 )
+
+
+_RESOLUTION_PATTERN = re.compile(r"^\s*(\d+)\s*[x×]\s*(\d+)\s*$", re.IGNORECASE)
+
+
+def _coerce_positive_int(value: object | None) -> int | None:
+    """Return a positive integer for ``value`` when possible."""
+
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):  # pragma: no cover - defensive conversion
+            return None
+        if not math.isfinite(numeric):
+            return None
+        number = int(round(numeric))
+    elif isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            number = int(text, 10)
+        except ValueError:
+            try:
+                numeric = float(text)
+            except ValueError:
+                return None
+            if not math.isfinite(numeric):
+                return None
+            number = int(round(numeric))
+    else:
+        return None
+    if number <= 0:
+        return None
+    return number
+
+
+def _parse_resolution(
+    value: object,
+    *,
+    fallback_width: object | None = None,
+    fallback_height: object | None = None,
+) -> tuple[int, int] | None:
+    """Extract a positive width/height pair from ``value`` when available."""
+
+    width_candidate = fallback_width
+    height_candidate = fallback_height
+    if isinstance(value, Mapping):
+        if width_candidate is None:
+            for key in ("width", "w"):
+                if key in value:
+                    width_candidate = value[key]
+                    break
+        if height_candidate is None:
+            for key in ("height", "h"):
+                if key in value:
+                    height_candidate = value[key]
+                    break
+        if (width_candidate is None or height_candidate is None) and "resolution" in value:
+            nested = value.get("resolution")
+            if nested is not None and nested is not value:
+                nested_pair = _parse_resolution(
+                    nested,
+                    fallback_width=width_candidate,
+                    fallback_height=height_candidate,
+                )
+                if nested_pair:
+                    return nested_pair
+    elif isinstance(value, (list, tuple)) and len(value) >= 2:
+        if width_candidate is None:
+            width_candidate = value[0]
+        if height_candidate is None:
+            height_candidate = value[1]
+    elif isinstance(value, str):
+        match = _RESOLUTION_PATTERN.match(value)
+        if match:
+            if width_candidate is None:
+                width_candidate = match.group(1)
+            if height_candidate is None:
+                height_candidate = match.group(2)
+
+    width = _coerce_positive_int(width_candidate)
+    height = _coerce_positive_int(height_candidate)
+    if width is not None and height is not None:
+        return width, height
+    return None
+
+
+def _resolution_dict(pair: tuple[int, int] | None) -> dict[str, int] | None:
+    """Convert a width/height pair to a serialisable mapping."""
+
+    if pair is None:
+        return None
+    width, height = pair
+    return {"width": int(width), "height": int(height)}
 
 
 def _normalise_pixel_format(value: object) -> str | None:
@@ -138,8 +239,6 @@ def _codec_profile(codec: str) -> Mapping[str, object]:
         "pixel_format": "yuv420p",
         "media_type": "video/mp4",
     }
-    if codec.startswith("h264") or codec == "libx264":
-        base["container_options"] = {"movflags": "+faststart"}
     return base
 
 
@@ -576,6 +675,28 @@ def load_recording_metadata(directory: Path) -> list[dict[str, object]]:
                             total += int(size)
                 if total and "size_bytes" not in data:
                     data["size_bytes"] = total
+            resolution_pair = _parse_resolution(
+                data.get("resolution"),
+                fallback_width=data.get("width"),
+                fallback_height=data.get("height"),
+            )
+            if resolution_pair is None:
+                chunks_value = data.get("chunks")
+                if isinstance(chunks_value, list):
+                    for chunk_entry in chunks_value:
+                        if not isinstance(chunk_entry, Mapping):
+                            continue
+                        chunk_pair = _parse_resolution(
+                            chunk_entry.get("resolution"),
+                            fallback_width=chunk_entry.get("width"),
+                            fallback_height=chunk_entry.get("height"),
+                        )
+                        if chunk_pair is not None:
+                            resolution_pair = chunk_pair
+                            break
+            resolution_dict = _resolution_dict(resolution_pair)
+            if resolution_dict:
+                data["resolution"] = resolution_dict
             items.append(data)
     return items
 
@@ -722,6 +843,25 @@ def load_recording_payload(
                     chunk_entry["size_bytes"] = int(size)
                     total_size += int(size)
                 media_available = True
+            resolution_pair = _parse_resolution(
+                chunk_entry.get("resolution"),
+                fallback_width=chunk_entry.get("width"),
+                fallback_height=chunk_entry.get("height"),
+            )
+            if resolution_pair is not None:
+                resolution_dict = _resolution_dict(resolution_pair)
+                existing_resolution = chunk_entry.get("resolution")
+                if (
+                    not isinstance(existing_resolution, Mapping)
+                    or _parse_resolution(existing_resolution) != resolution_pair
+                ):
+                    chunk_entry["resolution"] = resolution_dict
+                    updated_metadata_entries[index - 1] = dict(chunk_entry)
+                    metadata_dirty = True
+            elif "resolution" in chunk_entry:
+                chunk_entry.pop("resolution", None)
+                updated_metadata_entries[index - 1] = dict(chunk_entry)
+                metadata_dirty = True
             normalised_chunks.append(chunk_entry)
         if primary_chunk := (normalised_chunks[0] if normalised_chunks else None):
             file_name = primary_chunk.get("file")
@@ -758,6 +898,48 @@ def load_recording_payload(
                 if isinstance(metadata, dict):
                     metadata["video_codec"] = codec_name
                     metadata_dirty = True
+        metadata_resolution_value = (
+            metadata.get("resolution") if isinstance(metadata, Mapping) else None
+        )
+        metadata_resolution_pair = (
+            _parse_resolution(metadata_resolution_value)
+            if metadata_resolution_value is not None
+            else None
+        )
+        resolution_pair = _parse_resolution(
+            payload.get("resolution"),
+            fallback_width=payload.get("width"),
+            fallback_height=payload.get("height"),
+        )
+        if resolution_pair is None:
+            for chunk_entry in normalised_chunks:
+                chunk_pair = _parse_resolution(
+                    chunk_entry.get("resolution"),
+                    fallback_width=chunk_entry.get("width"),
+                    fallback_height=chunk_entry.get("height"),
+                )
+                if chunk_pair is not None:
+                    resolution_pair = chunk_pair
+                    break
+        resolution_dict = _resolution_dict(resolution_pair)
+        if resolution_dict is not None:
+            payload["resolution"] = resolution_dict
+            if isinstance(metadata, dict):
+                metadata_resolution_is_mapping = isinstance(
+                    metadata_resolution_value, Mapping
+                )
+                metadata_changed = (
+                    metadata_resolution_pair != resolution_pair
+                    or not metadata_resolution_is_mapping
+                )
+                if metadata_changed:
+                    metadata_dirty = True
+                metadata["resolution"] = resolution_dict
+        else:
+            payload.pop("resolution", None)
+            if isinstance(metadata, dict) and metadata_resolution_value is not None:
+                metadata.pop("resolution", None)
+                metadata_dirty = True
         if updated_metadata_entries and isinstance(metadata, dict):
             raw_chunks = metadata.get("chunks")
             if isinstance(raw_chunks, list):
@@ -886,7 +1068,12 @@ def iter_recording_frames(
                 break
             if video_stream is None:
                 raise RuntimeError("Recording does not contain a video stream")
-            chunk_info = {"file": file_value, "media_type": base_metadata.get("media_type", "video/mp4")}
+            chunk_info = {
+                "file": file_value,
+                "media_type": base_metadata.get(
+                    "media_type", "video/mp4"
+                ),
+            }
             for frame in container.decode(video_stream):
                 try:
                     array = frame.to_ndarray(format="rgb24")
@@ -940,7 +1127,7 @@ def iter_recording_frames(
 def build_recording_video(
     directory: Path, name: str
 ) -> tuple[str, IO[bytes]]:
-    """Return the recorded MP4 file for ``name`` as a readable handle."""
+    """Return the recorded media file for ``name`` as a readable handle."""
 
     safe_name = _safe_recording_name(name)
     payload = load_recording_payload(directory, safe_name, include_frames=False)
@@ -1046,6 +1233,7 @@ def remove_recording_files(directory: Path, name: str) -> None:
                 candidates.add(chunk_path)
 
     for pattern in (
+        f"{safe_name}*.avi",
         f"{safe_name}*.mp4",
         f"{safe_name}*.jpg",
         f"{safe_name}*.jpeg",
@@ -1519,8 +1707,116 @@ class _ActiveChunkWriter:
 
         self._tick_increment = self._determine_tick_increment()
 
-    def _compute_pts(self, timestamp: float) -> int:
+    def _compute_pts(
+        self, timestamp: float, previous_timestamp: float | None
+    ) -> int:
         self._maybe_update_time_base()
+        time_base_fraction = self._coerce_fraction(self.time_base)
+        if time_base_fraction is not None and time_base_fraction > 0:
+            base_timestamp = self.first_timestamp
+            if base_timestamp is None:
+                try:
+                    base_timestamp = float(timestamp)
+                except Exception:  # pragma: no cover - defensive conversion
+                    base_timestamp = 0.0
+                self.first_timestamp = base_timestamp
+            try:
+                current_value = float(timestamp)
+            except Exception:  # pragma: no cover - defensive conversion
+                current_value = base_timestamp
+            if not math.isfinite(current_value):
+                current_value = base_timestamp
+            if isinstance(previous_timestamp, (int, float)):
+                try:
+                    previous_value = float(previous_timestamp)
+                except Exception:  # pragma: no cover - defensive conversion
+                    previous_value = current_value
+                if math.isfinite(previous_value) and current_value < previous_value:
+                    current_value = previous_value
+            if current_value < base_timestamp:
+                current_value = base_timestamp
+            offset_seconds = current_value - base_timestamp
+            if offset_seconds < 0:
+                offset_seconds = 0.0
+            increment = self._tick_increment
+            frame_duration_fraction = self._frame_duration
+            if (
+                increment is not None
+                and increment > 0
+                and frame_duration_fraction is not None
+                and frame_duration_fraction > 0
+            ):
+                try:
+                    frame_duration_seconds = float(frame_duration_fraction)
+                except Exception:  # pragma: no cover - defensive conversion
+                    frame_duration_seconds = 0.0
+                if frame_duration_seconds <= 0:
+                    approx_frames = self.frame_count
+                elif self.frame_count <= 0:
+                    approx_frames = 0
+                else:
+                    previous_index = self.frame_count - 1
+                    delta_seconds = frame_duration_seconds
+                    if isinstance(previous_timestamp, (int, float)):
+                        try:
+                            previous_value = float(previous_timestamp)
+                        except Exception:  # pragma: no cover - defensive conversion
+                            previous_value = current_value
+                        if math.isfinite(previous_value):
+                            delta_seconds = max(0.0, current_value - previous_value)
+                    threshold = frame_duration_seconds * 1.95
+                    missing = 1
+                    if delta_seconds >= threshold:
+                        missing = int(
+                            round(delta_seconds / frame_duration_seconds)
+                        )
+                        if missing < 1:
+                            missing = 1
+                    approx_frames = previous_index + missing
+                if approx_frames < 0:
+                    approx_frames = 0
+                if approx_frames < self.frame_count:
+                    approx_frames = self.frame_count
+                cursor = Fraction(approx_frames, 1) * increment
+                pts = self._round_fraction_to_int(cursor)
+                if pts <= self.last_pts:
+                    pts = self.last_pts + 1
+                    cursor = Fraction(pts, 1)
+                    approx_frames = max(approx_frames, self.frame_count + 1)
+                next_cursor = Fraction(approx_frames + 1, 1) * increment
+                next_pts = self._round_fraction_to_int(next_cursor)
+                if next_pts <= pts:
+                    next_pts = pts + 1
+                    next_cursor = Fraction(next_pts, 1)
+                self._tick_cursor = cursor
+                self._next_tick_cursor = next_cursor
+                self.next_pts = next_pts
+                self.last_pts = pts
+                return pts
+            try:
+                offset_fraction = Fraction(str(offset_seconds)).limit_denominator(1_000_000)
+            except Exception:  # pragma: no cover - defensive conversion
+                offset_fraction = Fraction(0, 1)
+            ticks_fraction = offset_fraction / time_base_fraction
+            pts = self._round_fraction_to_int(ticks_fraction)
+            if pts <= self.last_pts:
+                pts = self.last_pts + 1
+            increment = self._tick_increment
+            if increment is not None and increment > 0:
+                current_cursor = Fraction(pts, 1)
+                next_cursor = current_cursor + increment
+                next_pts = self._round_fraction_to_int(next_cursor)
+                if next_pts <= pts:
+                    next_pts = pts + 1
+                    next_cursor = Fraction(next_pts, 1)
+                self._tick_cursor = current_cursor
+                self._next_tick_cursor = next_cursor
+                self.next_pts = next_pts
+            else:
+                self.next_pts = pts + 1
+            self.last_pts = pts
+            return pts
+
         increment = self._tick_increment
         if increment is not None and increment > 0:
             current_cursor = self._tick_cursor
@@ -1543,6 +1839,30 @@ class _ActiveChunkWriter:
             self.next_pts = pts + 1
         self.last_pts = pts
         return pts
+
+    @staticmethod
+    def _normalise_timestamp_value(
+        timestamp: float, previous_timestamp: float | None
+    ) -> float:
+        try:
+            value = float(timestamp)
+        except Exception:  # pragma: no cover - defensive conversion
+            value = 0.0
+        if not math.isfinite(value):
+            value = 0.0
+        if isinstance(previous_timestamp, (int, float)):
+            try:
+                previous_value = float(previous_timestamp)
+            except Exception:  # pragma: no cover - defensive conversion
+                previous_value = value
+            if math.isfinite(previous_value):
+                if value < previous_value:
+                    value = previous_value
+                if value < 0.0 and previous_value >= 0.0:
+                    value = previous_value
+        if value < 0.0:
+            value = 0.0
+        return value
 
     @staticmethod
     def _round_fraction_to_int(value: Fraction) -> int:
@@ -1570,9 +1890,11 @@ class _ActiveChunkWriter:
         self.bytes_written = max(self.bytes_written, int(size))
 
     def add_frame(self, array: "_np.ndarray", timestamp: float) -> None:
+        previous_timestamp = self.last_timestamp
+        normalised_timestamp = self._normalise_timestamp_value(timestamp, previous_timestamp)
         if self.first_timestamp is None:
-            self.first_timestamp = float(timestamp)
-        self.last_timestamp = float(timestamp)
+            self.first_timestamp = normalised_timestamp
+        self.last_timestamp = normalised_timestamp
         frame = av.VideoFrame.from_ndarray(array, format="rgb24")
         target_width = self.target_width or frame.width
         target_height = self.target_height or frame.height
@@ -1580,7 +1902,7 @@ class _ActiveChunkWriter:
         frame = frame.reformat(
             width=target_width, height=target_height, format=pixel_format
         )
-        frame.pts = self._compute_pts(timestamp)
+        frame.pts = self._compute_pts(normalised_timestamp, previous_timestamp)
         frame.time_base = self.time_base
         for packet in self.stream.encode(frame):
             self._maybe_update_time_base_from_packet(packet)
@@ -1641,6 +1963,13 @@ class _ActiveChunkWriter:
             "media_type": self.media_type,
             "codec": self.codec,
         }
+        resolution = _resolution_dict(
+            _parse_resolution(
+                {"width": self.target_width, "height": self.target_height}
+            )
+        )
+        if resolution:
+            entry["resolution"] = resolution
         if self.first_timestamp is not None:
             entry["start_offset_seconds"] = round(float(self.first_timestamp), 3)
         return entry
@@ -1680,6 +2009,8 @@ def _remux_mjpeg_video_chunk(
 
     effective_fps = float(fps) if fps and fps > 0 else 10.0
     frame_base = float(start_offset) if isinstance(start_offset, (int, float)) else 0.0
+    frame_width: int | None = None
+    frame_height: int | None = None
     boundary_bytes = boundary.encode("ascii")
     first_timestamp: float | None = None
     last_timestamp: float | None = None
@@ -1726,6 +2057,13 @@ def _remux_mjpeg_video_chunk(
                 if first_timestamp is None:
                     first_timestamp = float(absolute_time)
                 last_timestamp = float(absolute_time)
+                if frame_width is None or frame_height is None:
+                    try:
+                        frame_height = int(array.shape[0])
+                        frame_width = int(array.shape[1])
+                    except Exception:  # pragma: no cover - defensive resolution capture
+                        frame_width = None
+                        frame_height = None
                 jpeg = simplejpeg.encode_jpeg(
                     array,
                     quality=max(1, min(100, int(jpeg_quality))),
@@ -1748,7 +2086,7 @@ def _remux_mjpeg_video_chunk(
     if frame_count and effective_fps > 0:
         duration = max(duration, frame_count / effective_fps)
 
-    return {
+    entry: dict[str, object] = {
         "file": target_path.name,
         "frame_count": frame_count,
         "size_bytes": target_path.stat().st_size,
@@ -1761,6 +2099,14 @@ def _remux_mjpeg_video_chunk(
             else None
         ),
     }
+    resolution = _resolution_dict(
+        _parse_resolution(
+            {"width": frame_width, "height": frame_height}
+        )
+    )
+    if resolution:
+        entry["resolution"] = resolution
+    return entry
 
 
 @dataclass
@@ -2104,6 +2450,21 @@ class RecordingManager:
             frame_total = primary_entry.get("frame_count")
             if isinstance(frame_total, (int, float)):
                 metadata["frame_count"] = int(frame_total)
+            resolution_pair = _parse_resolution(
+                primary_entry.get("resolution"),
+                fallback_width=primary_entry.get("width"),
+                fallback_height=primary_entry.get("height"),
+            )
+            resolution_dict = _resolution_dict(resolution_pair)
+            if resolution_dict is not None:
+                metadata["resolution"] = resolution_dict
+                existing_primary_resolution = primary_entry.get("resolution")
+                if (
+                    not isinstance(existing_primary_resolution, Mapping)
+                    or _parse_resolution(existing_primary_resolution) != resolution_pair
+                ):
+                    primary_entry["resolution"] = resolution_dict
+                    entries[0] = dict(primary_entry)
             duration_value = primary_entry.get("duration_seconds")
             if isinstance(duration_value, (int, float)):
                 metadata["duration_seconds"] = max(
