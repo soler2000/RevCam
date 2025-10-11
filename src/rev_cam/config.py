@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import math
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, replace
 from pathlib import Path
 from threading import Lock
 from typing import Any, Dict, Iterable, Mapping, Sequence
@@ -20,6 +20,7 @@ except ImportError:  # pragma: no cover - fallback when optional dependencies mi
     }
     DEFAULT_CAMERA_CHOICE = "auto"
 from .battery import BatteryLimits, DEFAULT_BATTERY_LIMITS
+from .image_adjustments import DEFAULT_IMAGE_ADJUSTMENTS, ImageAdjustments
 from .trailer_leveling import (
     DEFAULT_LEVELING_SETTINGS,
     LevelingSettings,
@@ -149,6 +150,7 @@ class SurveillanceSettings:
     motion_post_event_seconds: float = 2.0
     auto_purge_days: int | None = None
     storage_threshold_percent: float = 10.0
+    image_adjustments: ImageAdjustments = DEFAULT_IMAGE_ADJUSTMENTS
 
     def __post_init__(self) -> None:
         profile = self.profile if self.profile in ("standard", "expert") else DEFAULT_SURVEILLANCE_PROFILE
@@ -245,6 +247,23 @@ class SurveillanceSettings:
         object.__setattr__(self, "auto_purge_days", auto_purge)
         object.__setattr__(self, "storage_threshold_percent", threshold_percent)
 
+        adjustments = self.image_adjustments
+        if isinstance(adjustments, ImageAdjustments):
+            coerced = ImageAdjustments(
+                brightness=adjustments.brightness,
+                saturation=adjustments.saturation,
+                hue=adjustments.hue,
+            )
+        elif isinstance(adjustments, Mapping):
+            coerced = ImageAdjustments(
+                brightness=float(adjustments.get("brightness", DEFAULT_IMAGE_ADJUSTMENTS.brightness)),
+                saturation=float(adjustments.get("saturation", DEFAULT_IMAGE_ADJUSTMENTS.saturation)),
+                hue=float(adjustments.get("hue", DEFAULT_IMAGE_ADJUSTMENTS.hue)),
+            )
+        else:
+            raise ValueError("Image adjustments must be provided as a mapping")
+        object.__setattr__(self, "image_adjustments", coerced)
+
     def resolved_values(self) -> tuple[int, int]:
         """Return the effective fps and JPEG quality for surveillance recording."""
 
@@ -275,6 +294,7 @@ class SurveillanceSettings:
             "motion_post_event_seconds": float(self.motion_post_event_seconds),
             "auto_purge_days": self.auto_purge_days,
             "storage_threshold_percent": float(self.storage_threshold_percent),
+            "image_adjustments": self.image_adjustments.to_dict(),
         }
 
     def serialise(self) -> dict[str, object]:
@@ -409,6 +429,7 @@ RESOLUTION_PRESETS: Mapping[str, Resolution] = {
 DEFAULT_RESOLUTION_KEY = "1280x720"
 DEFAULT_RESOLUTION = RESOLUTION_PRESETS[DEFAULT_RESOLUTION_KEY]
 DEFAULT_STREAM_SETTINGS = StreamSettings()
+DEFAULT_CAMERA_IMAGE_ADJUSTMENTS = DEFAULT_IMAGE_ADJUSTMENTS
 DEFAULT_REVERSING_AIDS = ReversingAidsConfig()
 DEFAULT_SURVEILLANCE_SETTINGS = SurveillanceSettings()
 
@@ -529,6 +550,32 @@ def _parse_stream_settings(value: Any, *, default: StreamSettings) -> StreamSett
     return StreamSettings(fps=fps, jpeg_quality=quality)
 
 
+def _parse_image_adjustments(
+    value: Any, *, default: ImageAdjustments
+) -> ImageAdjustments:
+    if value is None:
+        return default
+    if isinstance(value, ImageAdjustments):
+        return ImageAdjustments(
+            brightness=value.brightness,
+            saturation=value.saturation,
+            hue=value.hue,
+        )
+    if not isinstance(value, Mapping):
+        raise ValueError("Image adjustments must be provided as a mapping")
+    brightness = value.get("brightness", default.brightness)
+    saturation = value.get("saturation", default.saturation)
+    hue = value.get("hue", default.hue)
+    try:
+        return ImageAdjustments(
+            brightness=float(brightness),
+            saturation=float(saturation),
+            hue=float(hue),
+        )
+    except ValueError as exc:
+        raise ValueError(str(exc)) from exc
+
+
 def _parse_surveillance_settings(
     value: Any, *, default: SurveillanceSettings
 ) -> SurveillanceSettings:
@@ -569,6 +616,12 @@ def _parse_surveillance_settings(
     chunk_duration_raw = value.get("chunk_duration_seconds", current.chunk_duration_seconds)
     purge_days_raw = value.get("auto_purge_days", current.auto_purge_days)
     threshold_raw = value.get("storage_threshold_percent", current.storage_threshold_percent)
+    image_adjustments_raw = value.get(
+        "image_adjustments", current.image_adjustments.to_dict()
+    )
+    image_adjustments = _parse_image_adjustments(
+        image_adjustments_raw, default=current.image_adjustments
+    )
 
     try:
         expert_fps = int(float(expert_fps_raw))
@@ -597,6 +650,7 @@ def _parse_surveillance_settings(
         motion_post_event_seconds=motion_post_event_raw,
         auto_purge_days=purge_days_raw,
         storage_threshold_percent=threshold_raw,
+        image_adjustments=image_adjustments,
     )
 
 
@@ -922,6 +976,7 @@ class ConfigManager:
             self._battery_limits,
             self._battery_capacity,
             self._stream_settings,
+            self._camera_image_adjustments,
             self._surveillance_settings,
             self._surveillance_state,
             self._reversing_aids,
@@ -949,6 +1004,7 @@ class ConfigManager:
         BatteryLimits,
         int,
         StreamSettings,
+        ImageAdjustments,
         SurveillanceSettings,
         SurveillanceRuntimeState,
         ReversingAidsConfig,
@@ -971,6 +1027,7 @@ class ConfigManager:
                 DEFAULT_BATTERY_LIMITS,
                 DEFAULT_BATTERY_CAPACITY_MAH,
                 DEFAULT_STREAM_SETTINGS,
+                DEFAULT_CAMERA_IMAGE_ADJUSTMENTS,
                 DEFAULT_SURVEILLANCE_SETTINGS,
                 DEFAULT_SURVEILLANCE_STATE,
                 DEFAULT_REVERSING_AIDS,
@@ -1027,6 +1084,11 @@ class ConfigManager:
                 stream_payload, default=DEFAULT_STREAM_SETTINGS
             )
 
+            camera_image_payload = payload.get("camera_image_adjustments")
+            camera_image_adjustments = _parse_image_adjustments(
+                camera_image_payload, default=DEFAULT_CAMERA_IMAGE_ADJUSTMENTS
+            )
+
             surveillance_payload = payload.get("surveillance")
             surveillance_settings = _parse_surveillance_settings(
                 surveillance_payload, default=DEFAULT_SURVEILLANCE_SETTINGS
@@ -1081,13 +1143,14 @@ class ConfigManager:
                 distance_mounting,
                 distance_use_projected,
                 battery_limits,
-                battery_capacity,
-                stream_settings,
-                surveillance_settings,
-                surveillance_state,
-                reversing_aids,
-                overlay_master_enabled,
-                battery_overlay_enabled,
+            battery_capacity,
+            stream_settings,
+            camera_image_adjustments,
+            surveillance_settings,
+            surveillance_state,
+            reversing_aids,
+            overlay_master_enabled,
+            battery_overlay_enabled,
                 wifi_overlay_enabled,
                 reversing_overlay_enabled,
                 leveling_settings,
@@ -1112,6 +1175,7 @@ class ConfigManager:
                 "capacity_mah": self._battery_capacity,
             },
             "stream": self._stream_settings.to_dict(),
+            "camera_image_adjustments": self._camera_image_adjustments.to_dict(),
             "surveillance": self._surveillance_settings.to_dict(),
             "surveillance_state": self._surveillance_state.to_dict(),
             "reversing_aids": self._reversing_aids.to_dict(),
@@ -1319,9 +1383,29 @@ class ConfigManager:
             self._save()
         return settings
 
+    def get_reversing_image_adjustments(self) -> ImageAdjustments:
+        with self._lock:
+            return self._camera_image_adjustments
+
+    def set_reversing_image_adjustments(
+        self, data: Mapping[str, Any] | ImageAdjustments
+    ) -> ImageAdjustments:
+        adjustments = _parse_image_adjustments(
+            data, default=self._camera_image_adjustments
+        )
+        with self._lock:
+            if adjustments != self._camera_image_adjustments:
+                self._camera_image_adjustments = adjustments
+                self._save()
+        return adjustments
+
     def get_surveillance_settings(self) -> SurveillanceSettings:
         with self._lock:
             return self._surveillance_settings
+
+    def get_surveillance_image_adjustments(self) -> ImageAdjustments:
+        with self._lock:
+            return self._surveillance_settings.image_adjustments
 
     def set_surveillance_settings(
         self, data: Mapping[str, Any] | SurveillanceSettings
@@ -1331,6 +1415,20 @@ class ConfigManager:
             self._surveillance_settings = settings
             self._save()
         return settings
+
+    def set_surveillance_image_adjustments(
+        self, data: Mapping[str, Any] | ImageAdjustments
+    ) -> ImageAdjustments:
+        adjustments = _parse_image_adjustments(
+            data, default=self._surveillance_settings.image_adjustments
+        )
+        with self._lock:
+            if adjustments != self._surveillance_settings.image_adjustments:
+                self._surveillance_settings = replace(
+                    self._surveillance_settings, image_adjustments=adjustments
+                )
+                self._save()
+        return adjustments
 
     def get_surveillance_state(self) -> SurveillanceRuntimeState:
         with self._lock:
@@ -1386,4 +1484,6 @@ __all__ = [
     "DEFAULT_SURVEILLANCE_STATE",
     "SURVEILLANCE_STANDARD_PRESETS",
     "SurveillanceRuntimeState",
+    "ImageAdjustments",
+    "DEFAULT_CAMERA_IMAGE_ADJUSTMENTS",
 ]

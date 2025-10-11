@@ -40,6 +40,7 @@ from .led_matrix import LedRing
 from .reversing_aids import create_reversing_aids_overlay
 from .gy85 import Gy85Error, Gy85Sensor, Gy85UnavailableError
 from .sensor_fusion import Gy85KalmanFilter, SensorSample, Vector3
+from .image_adjustments import build_adjustment_filter
 from .pipeline import FramePipeline
 from .recording import (
     RecordingManager,
@@ -115,9 +116,16 @@ class StreamMode(str, Enum):
     SURVEILLANCE = "surveillance"
 
 
+class ImageAdjustmentsPayload(BaseModel):
+    brightness: float | None = None
+    saturation: float | None = None
+    hue: float | None = None
+
+
 class CameraPayload(BaseModel):
     source: str
     resolution: str | None = None
+    image_adjustments: ImageAdjustmentsPayload | None = None
 
 
 class WiFiConnectPayload(BaseModel):
@@ -197,6 +205,7 @@ class SurveillanceSettingsPayload(BaseModel):
     motion_post_event_seconds: float | None = None
     auto_purge_days: int | None = None
     storage_threshold_percent: float | None = None
+    image_adjustments: ImageAdjustmentsPayload | None = None
 
 
 class WebRTCOfferPayload(BaseModel):
@@ -396,6 +405,16 @@ def create_app(
         lambda: config_manager.get_orientation(),
         overlay_enabled_provider=_overlays_enabled,
     )
+
+    def _image_adjustments_provider():
+        if current_mode is StreamMode.SURVEILLANCE:
+            try:
+                return config_manager.get_surveillance_image_adjustments()
+            except Exception:  # pragma: no cover - defensive fallback
+                return config_manager.get_reversing_image_adjustments()
+        return config_manager.get_reversing_image_adjustments()
+
+    pipeline.add_preprocessor(build_adjustment_filter(_image_adjustments_provider))
     pipeline.add_overlay(
         create_wifi_overlay(
             wifi_manager.get_status,
@@ -1440,6 +1459,7 @@ def create_app(
                 "active": active_resolution.key(),
                 "options": resolution_options,
             },
+            "image_adjustments": config_manager.get_reversing_image_adjustments().to_dict(),
         }
 
     @app.get("/api/stream")
@@ -1850,7 +1870,16 @@ def create_app(
                     "selected": current_resolution.key(),
                     "active": active_resolution.key(),
                 },
+                "image_adjustments": config_manager.get_reversing_image_adjustments().to_dict(),
             }
+
+        if payload.image_adjustments is not None:
+            try:
+                config_manager.set_reversing_image_adjustments(
+                    payload.image_adjustments.model_dump(exclude_none=True)
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
 
         await led_ring.set_pattern("boot")
         old_selection = current_selection
@@ -1911,6 +1940,7 @@ def create_app(
                 "selected": requested_resolution.key(),
                 "active": active_resolution.key(),
             },
+            "image_adjustments": config_manager.get_reversing_image_adjustments().to_dict(),
         }
 
     @app.get("/api/camera/snapshot")

@@ -240,6 +240,18 @@
         color: var(--text-primary);
         font-size: 1rem;
       }
+      .image-adjustments {
+        display: grid;
+        gap: var(--space-md);
+      }
+      .image-adjustment-control {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-xs);
+      }
+      .image-adjustment-label {
+        font-weight: 600;
+      }
       .summary {
         padding: var(--space-md);
         border-radius: var(--radius-md);
@@ -436,6 +448,50 @@
                 <span class="helper">Return to surveillance mode and continue recording automatically.</span>
               </div>
             </label>
+            <fieldset>
+              <legend>Image adjustments</legend>
+              <p class="muted">
+                Tune the hue, brightness and colour saturation used for surveillance recordings.
+              </p>
+              <div class="image-adjustments">
+                <label class="image-adjustment-control" for="surveillance-brightness">
+                  <span class="image-adjustment-label">Brightness</span>
+                  <input
+                    id="surveillance-brightness"
+                    type="range"
+                    min="0"
+                    max="200"
+                    step="1"
+                    value="100"
+                  />
+                  <span class="muted">Current: <span id="surveillance-brightness-value">100%</span></span>
+                </label>
+                <label class="image-adjustment-control" for="surveillance-saturation">
+                  <span class="image-adjustment-label">Colour intensity</span>
+                  <input
+                    id="surveillance-saturation"
+                    type="range"
+                    min="0"
+                    max="200"
+                    step="1"
+                    value="100"
+                  />
+                  <span class="muted">Current: <span id="surveillance-saturation-value">100%</span></span>
+                </label>
+                <label class="image-adjustment-control" for="surveillance-hue">
+                  <span class="image-adjustment-label">Hue shift</span>
+                  <input
+                    id="surveillance-hue"
+                    type="range"
+                    min="-180"
+                    max="180"
+                    step="1"
+                    value="0"
+                  />
+                  <span class="muted">Current: <span id="surveillance-hue-value">0°</span></span>
+                </label>
+              </div>
+            </fieldset>
           </section>
           <section class="tab-panel" data-tab-panel="motion" hidden>
             <h2>Motion detection</h2>
@@ -553,6 +609,12 @@
       const motionDecimationInput = document.getElementById("motion-decimation");
       const motionEffectiveFpsText = document.getElementById("motion-effective-fps");
       const motionPostSecondsInput = document.getElementById("motion-post-seconds");
+      const surveillanceBrightnessInput = document.getElementById("surveillance-brightness");
+      const surveillanceBrightnessValue = document.getElementById("surveillance-brightness-value");
+      const surveillanceSaturationInput = document.getElementById("surveillance-saturation");
+      const surveillanceSaturationValue = document.getElementById("surveillance-saturation-value");
+      const surveillanceHueInput = document.getElementById("surveillance-hue");
+      const surveillanceHueValue = document.getElementById("surveillance-hue-value");
 
       let currentSettings = null;
       let cameraConfig = null;
@@ -1021,6 +1083,98 @@
         updateMotionGuidance();
       }
 
+      function clampSurveillanceAdjustment(value, min, max, fallback) {
+        const numeric = Number(value);
+        if (!Number.isFinite(numeric)) {
+          return fallback;
+        }
+        if (numeric < min) {
+          return min;
+        }
+        if (numeric > max) {
+          return max;
+        }
+        return numeric;
+      }
+
+      function updateSurveillanceAdjustmentLabels() {
+        if (surveillanceBrightnessInput && surveillanceBrightnessValue) {
+          const brightness = clampSurveillanceAdjustment(
+            surveillanceBrightnessInput.value,
+            0,
+            200,
+            100,
+          );
+          surveillanceBrightnessValue.textContent = `${Math.round(brightness)}%`;
+        }
+        if (surveillanceSaturationInput && surveillanceSaturationValue) {
+          const saturation = clampSurveillanceAdjustment(
+            surveillanceSaturationInput.value,
+            0,
+            200,
+            100,
+          );
+          surveillanceSaturationValue.textContent = `${Math.round(saturation)}%`;
+        }
+        if (surveillanceHueInput && surveillanceHueValue) {
+          const hue = clampSurveillanceAdjustment(
+            surveillanceHueInput.value,
+            -180,
+            180,
+            0,
+          );
+          surveillanceHueValue.textContent = `${Math.round(hue)}°`;
+        }
+      }
+
+      function applySurveillanceAdjustments(adjustments, options = {}) {
+        const settings = adjustments && typeof adjustments === "object" ? adjustments : {};
+        const force = options.force === true;
+        if (surveillanceBrightnessInput) {
+          const brightness = clampSurveillanceAdjustment(
+            settings.brightness ?? surveillanceBrightnessInput.value,
+            0,
+            200,
+            100,
+          );
+          if (force || surveillanceBrightnessInput.dataset.userEdited !== "true") {
+            surveillanceBrightnessInput.value = String(brightness);
+            if (force) {
+              delete surveillanceBrightnessInput.dataset.userEdited;
+            }
+          }
+        }
+        if (surveillanceSaturationInput) {
+          const saturation = clampSurveillanceAdjustment(
+            settings.saturation ?? surveillanceSaturationInput.value,
+            0,
+            200,
+            100,
+          );
+          if (force || surveillanceSaturationInput.dataset.userEdited !== "true") {
+            surveillanceSaturationInput.value = String(saturation);
+            if (force) {
+              delete surveillanceSaturationInput.dataset.userEdited;
+            }
+          }
+        }
+        if (surveillanceHueInput) {
+          const hue = clampSurveillanceAdjustment(
+            settings.hue ?? surveillanceHueInput.value,
+            -180,
+            180,
+            0,
+          );
+          if (force || surveillanceHueInput.dataset.userEdited !== "true") {
+            surveillanceHueInput.value = String(hue);
+            if (force) {
+              delete surveillanceHueInput.dataset.userEdited;
+            }
+          }
+        }
+        updateSurveillanceAdjustmentLabels();
+      }
+
       function applySettings(settings) {
         if (!settings || typeof settings !== "object") {
           return;
@@ -1075,6 +1229,7 @@
               : 0;
           motionPostSecondsInput.value = normalised;
         }
+        applySurveillanceAdjustments(settings.image_adjustments, { force: true });
         updateSummary();
       }
 
@@ -1107,6 +1262,24 @@
           updateSummary();
         });
       });
+      if (surveillanceBrightnessInput) {
+        surveillanceBrightnessInput.addEventListener("input", () => {
+          surveillanceBrightnessInput.dataset.userEdited = "true";
+          updateSurveillanceAdjustmentLabels();
+        });
+      }
+      if (surveillanceSaturationInput) {
+        surveillanceSaturationInput.addEventListener("input", () => {
+          surveillanceSaturationInput.dataset.userEdited = "true";
+          updateSurveillanceAdjustmentLabels();
+        });
+      }
+      if (surveillanceHueInput) {
+        surveillanceHueInput.addEventListener("input", () => {
+          surveillanceHueInput.dataset.userEdited = "true";
+          updateSurveillanceAdjustmentLabels();
+        });
+      }
       expertFpsInput.addEventListener("input", updateSummary);
       expertQualityInput.addEventListener("input", updateSummary);
 
@@ -1191,6 +1364,26 @@
           const purgeValue = parseInt(autoPurgeInput.value, 10);
           payload.auto_purge_days = Number.isFinite(purgeValue) && purgeValue > 0 ? purgeValue : 0;
         }
+        payload.image_adjustments = {
+          brightness: clampSurveillanceAdjustment(
+            surveillanceBrightnessInput?.value,
+            0,
+            200,
+            100,
+          ),
+          saturation: clampSurveillanceAdjustment(
+            surveillanceSaturationInput?.value,
+            0,
+            200,
+            100,
+          ),
+          hue: clampSurveillanceAdjustment(
+            surveillanceHueInput?.value,
+            -180,
+            180,
+            0,
+          ),
+        };
         statusText.textContent = "Saving settings…";
         form.querySelector("button[type='submit']").disabled = true;
         try {
@@ -1220,6 +1413,7 @@
       loadCameraConfig();
       loadSettings();
       refreshSystemTemperature();
+      updateSurveillanceAdjustmentLabels();
     </script>
   </body>
 </html>

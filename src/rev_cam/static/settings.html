@@ -711,6 +711,18 @@
       #orientation-form h3 {
         margin-top: 0;
       }
+      .image-adjustments {
+        display: grid;
+        gap: var(--space-md);
+      }
+      .adjustment-control {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-xs);
+      }
+      .adjustment-label {
+        font-weight: 600;
+      }
       .form-actions {
         display: flex;
         align-items: center;
@@ -1891,6 +1903,51 @@
             <label>
               <input type="checkbox" name="flip_vertical" /> Flip vertically
             </label>
+            <h3>Image adjustments</h3>
+            <div class="image-adjustments">
+              <label class="adjustment-control" for="camera-brightness">
+                <span class="adjustment-label">Brightness</span>
+                <input
+                  id="camera-brightness"
+                  type="range"
+                  min="0"
+                  max="200"
+                  step="1"
+                  value="100"
+                />
+                <span class="muted helper-text">
+                  Current: <span id="camera-brightness-value">100%</span>
+                </span>
+              </label>
+              <label class="adjustment-control" for="camera-saturation">
+                <span class="adjustment-label">Colour intensity</span>
+                <input
+                  id="camera-saturation"
+                  type="range"
+                  min="0"
+                  max="200"
+                  step="1"
+                  value="100"
+                />
+                <span class="muted helper-text">
+                  Current: <span id="camera-saturation-value">100%</span>
+                </span>
+              </label>
+              <label class="adjustment-control" for="camera-hue">
+                <span class="adjustment-label">Hue shift</span>
+                <input
+                  id="camera-hue"
+                  type="range"
+                  min="-180"
+                  max="180"
+                  step="1"
+                  value="0"
+                />
+                <span class="muted helper-text">
+                  Current: <span id="camera-hue-value">0°</span>
+                </span>
+              </label>
+            </div>
             <div class="form-actions">
               <button type="submit">Save settings</button>
               <div id="status" class="muted helper-text status-text">Loading…</div>
@@ -3769,6 +3826,12 @@
       const streamSettingsStatus = document.getElementById("stream-settings-status");
       let streamSettingsStatusTimer = null;
       const wifiSummary = document.getElementById("wifi-summary");
+      const cameraBrightnessInput = document.getElementById("camera-brightness");
+      const cameraBrightnessValue = document.getElementById("camera-brightness-value");
+      const cameraSaturationInput = document.getElementById("camera-saturation");
+      const cameraSaturationValue = document.getElementById("camera-saturation-value");
+      const cameraHueInput = document.getElementById("camera-hue");
+      const cameraHueValue = document.getElementById("camera-hue-value");
       const wifiRefreshButton = document.getElementById("wifi-refresh");
       const wifiScanButton = document.getElementById("wifi-scan");
       const wifiFeedback = document.getElementById("wifi-feedback");
@@ -8525,6 +8588,83 @@
         copyResetTimer = null;
       }
 
+      function clampAdjustment(value, min, max, fallback) {
+        const numeric = Number(value);
+        if (!Number.isFinite(numeric)) {
+          return fallback;
+        }
+        if (numeric < min) {
+          return min;
+        }
+        if (numeric > max) {
+          return max;
+        }
+        return numeric;
+      }
+
+      function updateCameraAdjustmentLabels() {
+        if (cameraBrightnessInput && cameraBrightnessValue) {
+          const brightness = clampAdjustment(cameraBrightnessInput.value, 0, 200, 100);
+          cameraBrightnessValue.textContent = `${Math.round(brightness)}%`;
+        }
+        if (cameraSaturationInput && cameraSaturationValue) {
+          const saturation = clampAdjustment(cameraSaturationInput.value, 0, 200, 100);
+          cameraSaturationValue.textContent = `${Math.round(saturation)}%`;
+        }
+        if (cameraHueInput && cameraHueValue) {
+          const hue = clampAdjustment(cameraHueInput.value, -180, 180, 0);
+          cameraHueValue.textContent = `${Math.round(hue)}°`;
+        }
+      }
+
+      function applyCameraAdjustments(adjustments, options = {}) {
+        const settings = adjustments && typeof adjustments === "object" ? adjustments : {};
+        const force = options.force === true;
+        if (cameraBrightnessInput) {
+          const brightness = clampAdjustment(
+            settings.brightness ?? cameraBrightnessInput.value,
+            0,
+            200,
+            100,
+          );
+          if (force || cameraBrightnessInput.dataset.userEdited !== "true") {
+            cameraBrightnessInput.value = String(brightness);
+            if (force) {
+              delete cameraBrightnessInput.dataset.userEdited;
+            }
+          }
+        }
+        if (cameraSaturationInput) {
+          const saturation = clampAdjustment(
+            settings.saturation ?? cameraSaturationInput.value,
+            0,
+            200,
+            100,
+          );
+          if (force || cameraSaturationInput.dataset.userEdited !== "true") {
+            cameraSaturationInput.value = String(saturation);
+            if (force) {
+              delete cameraSaturationInput.dataset.userEdited;
+            }
+          }
+        }
+        if (cameraHueInput) {
+          const hue = clampAdjustment(
+            settings.hue ?? cameraHueInput.value,
+            -180,
+            180,
+            0,
+          );
+          if (force || cameraHueInput.dataset.userEdited !== "true") {
+            cameraHueInput.value = String(hue);
+            if (force) {
+              delete cameraHueInput.dataset.userEdited;
+            }
+          }
+        }
+        updateCameraAdjustmentLabels();
+      }
+
       function applySettings(orientation, camera, message = "Settings loaded") {
         form.rotation.value = orientation.rotation;
         form.flip_horizontal.checked = orientation.flip_horizontal;
@@ -8532,6 +8672,12 @@
 
         updateVersion(camera);
         updateStreamSection(camera);
+        applyCameraAdjustments(
+          camera && typeof camera.image_adjustments === "object"
+            ? camera.image_adjustments
+            : null,
+          { force: true },
+        );
 
         const cameraSelect = form.elements.namedItem("camera");
         if (!(cameraSelect instanceof HTMLSelectElement)) {
@@ -8791,6 +8937,29 @@
           }
         });
       }
+
+      if (cameraBrightnessInput) {
+        cameraBrightnessInput.addEventListener("input", () => {
+          cameraBrightnessInput.dataset.userEdited = "true";
+          updateCameraAdjustmentLabels();
+        });
+      }
+
+      if (cameraSaturationInput) {
+        cameraSaturationInput.addEventListener("input", () => {
+          cameraSaturationInput.dataset.userEdited = "true";
+          updateCameraAdjustmentLabels();
+        });
+      }
+
+      if (cameraHueInput) {
+        cameraHueInput.addEventListener("input", () => {
+          cameraHueInput.dataset.userEdited = "true";
+          updateCameraAdjustmentLabels();
+        });
+      }
+
+      updateCameraAdjustmentLabels();
 
       if (ledForm) {
         ledForm.addEventListener("submit", async (event) => {
@@ -9138,13 +9307,22 @@
           statusLabel.textContent = "Error: resolution selector missing";
           return;
         }
+        const cameraPayload = {
+          source: cameraSelect.value,
+          resolution: resolutionSelect.value,
+        };
+        if (cameraBrightnessInput || cameraSaturationInput || cameraHueInput) {
+          cameraPayload.image_adjustments = {
+            brightness: clampAdjustment(cameraBrightnessInput?.value, 0, 200, 100),
+            saturation: clampAdjustment(cameraSaturationInput?.value, 0, 200, 100),
+            hue: clampAdjustment(cameraHueInput?.value, -180, 180, 0),
+          };
+        }
+
         const cameraResponse = await fetch("/api/camera", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            source: cameraSelect.value,
-            resolution: resolutionSelect.value,
-          }),
+          body: JSON.stringify(cameraPayload),
         });
         if (!cameraResponse.ok) {
           let errorDetail = "Unable to update camera";

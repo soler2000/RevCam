@@ -12,7 +12,8 @@ except ImportError:  # pragma: no cover - optional dependency
 from .config import Orientation
 
 FrameLike = Any
-OverlayFn = Callable[[FrameLike], FrameLike]
+FrameFn = Callable[[FrameLike], FrameLike]
+OverlayFn = FrameFn
 
 
 def _overlays_enabled_default() -> bool:
@@ -25,10 +26,14 @@ class FramePipeline:
 
     orientation_provider: Callable[[], Orientation]
     overlays: List[OverlayFn] = field(default_factory=list)
+    preprocessors: List[FrameFn] = field(default_factory=list)
     overlay_enabled_provider: Callable[[], bool] = _overlays_enabled_default
 
     def add_overlay(self, overlay: OverlayFn) -> None:
         self.overlays.append(overlay)
+
+    def add_preprocessor(self, transform: FrameFn) -> None:
+        self.preprocessors.append(transform)
 
     def _apply_orientation(self, frame: FrameLike, orientation: Orientation) -> FrameLike:
         output = frame
@@ -59,6 +64,7 @@ class FramePipeline:
     def process(self, frame: FrameLike) -> FrameLike:
         orientation = self.orientation_provider().normalise()
         transformed = self._apply_orientation(frame, orientation)
+        transformed = self._apply_preprocessors(transformed)
         return self._apply_overlays(transformed)
 
     def _rotate(self, frame: FrameLike, k: int) -> FrameLike:
@@ -78,6 +84,14 @@ class FramePipeline:
         if _np is not None and isinstance(frame, _np.ndarray):  # pragma: no cover - optional path
             return _np.flip(frame, axis=0)
         return list(reversed(frame))
+
+    def _apply_preprocessors(self, frame: FrameLike) -> FrameLike:
+        if not self.preprocessors:
+            return frame
+        result = frame
+        for transform in self.preprocessors:
+            result = transform(result)
+        return result
 
 
 def compose_overlays(overlays: Iterable[OverlayFn]) -> OverlayFn:

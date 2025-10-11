@@ -23,6 +23,8 @@ from rev_cam.config import (
     DEFAULT_DISTANCE_USE_PROJECTED,
     DEFAULT_LEVELING_SETTINGS,
     DEFAULT_SURVEILLANCE_SETTINGS,
+    DEFAULT_CAMERA_IMAGE_ADJUSTMENTS,
+    ImageAdjustments,
     SURVEILLANCE_STANDARD_PRESETS,
 )
 from rev_cam.distance import DistanceCalibration
@@ -224,6 +226,7 @@ def test_default_surveillance_settings(tmp_path: Path) -> None:
     assert settings.motion_post_event_seconds == 2.0
     assert settings.auto_purge_days is None
     assert settings.storage_threshold_percent == 10.0
+    assert settings.image_adjustments == DEFAULT_SURVEILLANCE_SETTINGS.image_adjustments
 
 
 def test_surveillance_settings_persistence(tmp_path: Path) -> None:
@@ -243,6 +246,7 @@ def test_surveillance_settings_persistence(tmp_path: Path) -> None:
             "motion_post_event_seconds": 0.75,
             "auto_purge_days": 5,
             "storage_threshold_percent": 15,
+            "image_adjustments": {"brightness": 120, "saturation": 80, "hue": 30},
         }
     )
     assert isinstance(updated, SurveillanceSettings)
@@ -258,6 +262,7 @@ def test_surveillance_settings_persistence(tmp_path: Path) -> None:
     assert updated.motion_post_event_seconds == 0.75
     assert updated.auto_purge_days == 5
     assert updated.storage_threshold_percent == 15
+    assert updated.image_adjustments == ImageAdjustments(brightness=120, saturation=80, hue=30)
     reloaded = ConfigManager(config_file)
     reloaded_settings = reloaded.get_surveillance_settings()
     assert reloaded_settings.profile == "expert"
@@ -272,6 +277,7 @@ def test_surveillance_settings_persistence(tmp_path: Path) -> None:
     assert reloaded_settings.motion_post_event_seconds == 0.75
     assert reloaded_settings.auto_purge_days == 5
     assert reloaded_settings.storage_threshold_percent == 15
+    assert reloaded_settings.image_adjustments == ImageAdjustments(brightness=120, saturation=80, hue=30)
 
 
 def test_surveillance_settings_validation(tmp_path: Path) -> None:
@@ -297,6 +303,20 @@ def test_surveillance_state_persistence(tmp_path: Path) -> None:
     persisted = reloaded.get_surveillance_state()
     assert persisted.mode == "surveillance"
     assert persisted.recording is True
+
+
+def test_reversing_image_adjustments(tmp_path: Path) -> None:
+    config_file = tmp_path / "config.json"
+    manager = ConfigManager(config_file)
+    assert manager.get_reversing_image_adjustments() == DEFAULT_CAMERA_IMAGE_ADJUSTMENTS
+    updated = manager.set_reversing_image_adjustments(
+        {"brightness": 150, "saturation": 90, "hue": -20}
+    )
+    assert updated == ImageAdjustments(brightness=150, saturation=90, hue=-20)
+    reloaded = ConfigManager(config_file)
+    assert reloaded.get_reversing_image_adjustments() == ImageAdjustments(
+        brightness=150, saturation=90, hue=-20
+    )
 
 
 def test_default_reversing_aids(tmp_path: Path) -> None:

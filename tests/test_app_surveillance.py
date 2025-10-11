@@ -16,7 +16,11 @@ pytest.importorskip("httpx")
 from fastapi.testclient import TestClient
 
 from rev_cam import app as app_module
-from rev_cam.config import ConfigManager, SURVEILLANCE_STANDARD_PRESETS
+from rev_cam.config import (
+    ConfigManager,
+    SURVEILLANCE_STANDARD_PRESETS,
+    ImageAdjustments,
+)
 import rev_cam.recording as recording
 from rev_cam.recording import load_recording_payload
 
@@ -81,6 +85,10 @@ def test_get_surveillance_settings(client: TestClient) -> None:
     assert settings["motion_detection_enabled"] is False
     assert settings["motion_frame_decimation"] == 1
     assert settings["motion_post_event_seconds"] == 2.0
+    adjustments = settings.get("image_adjustments", {})
+    assert adjustments.get("brightness") == 100
+    assert adjustments.get("saturation") == 100
+    assert adjustments.get("hue") == 0
     assert "presets" in payload
     assert any(item["name"] == settings["preset"] for item in payload["presets"])
 
@@ -120,6 +128,7 @@ def test_update_surveillance_settings_advanced(client: TestClient) -> None:
             "motion_post_event_seconds": 0.5,
             "auto_purge_days": 10,
             "storage_threshold_percent": 20,
+            "image_adjustments": {"brightness": 140, "saturation": 70, "hue": -45},
         },
     )
     assert response.status_code == 200
@@ -135,12 +144,22 @@ def test_update_surveillance_settings_advanced(client: TestClient) -> None:
     assert payload["motion_post_event_seconds"] == 0.5
     assert payload["auto_purge_days"] == 10
     assert payload["storage_threshold_percent"] == 20
+    assert payload["image_adjustments"]["brightness"] == 140
+    assert payload["image_adjustments"]["saturation"] == 70
+    assert payload["image_adjustments"]["hue"] == -45
 
     status_response = client.get("/api/surveillance/status")
     assert status_response.status_code == 200
     status_payload = status_response.json()["settings"]
     assert status_payload["motion_frame_decimation"] == 2
     assert status_payload["motion_post_event_seconds"] == 0.5
+    adjustments = status_payload.get("image_adjustments", {})
+    assert adjustments.get("brightness") == 140
+    assert adjustments.get("saturation") == 70
+    assert adjustments.get("hue") == -45
+    manager = ConfigManager(client.config_path)
+    stored = manager.get_surveillance_settings()
+    assert stored.image_adjustments == ImageAdjustments(brightness=140, saturation=70, hue=-45)
 
 
 def test_update_surveillance_settings_expert_validation(client: TestClient) -> None:
