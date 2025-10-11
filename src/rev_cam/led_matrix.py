@@ -211,6 +211,9 @@ class LedRing:
             "boot": self._pattern_boot,
             "ready": self._pattern_ready,
             "error": self._pattern_error,
+            "surveillance": self._pattern_surveillance,
+            "recording": self._pattern_recording,
+            "hotspot": self._pattern_hotspot,
             "illumination": self._pattern_illumination,
         }
 
@@ -444,6 +447,45 @@ class LedRing:
         while True:
             yield PatternStep(colors=(intense,) * self._pixel_count, duration=0.3)
             yield PatternStep(colors=(dim,) * self._pixel_count, duration=0.12)
+
+    def _pattern_surveillance(self) -> Iterator[PatternStep]:
+        brightness = 32
+        direction = 1
+        while True:
+            value = max(0, min(200, brightness))
+            color: Color = (value, value // 2, 0)
+            yield PatternStep(colors=(color,) * self._pixel_count, duration=0.12)
+            brightness += direction * 12
+            if brightness >= 160 or brightness <= 32:
+                direction *= -1
+
+    def _pattern_recording(self) -> Iterator[PatternStep]:
+        index = 0
+        tail = max(1, self._pixel_count // 4)
+        base: Color = (16, 0, 0)
+        while True:
+            frame: list[Color] = [base] * self._pixel_count
+            for offset in range(tail):
+                position = (index - offset) % self._pixel_count
+                scale = (tail - offset) / tail
+                intensity = max(32, min(255, int(round(200 * scale))))
+                frame[position] = (intensity, 0, 0)
+            index = (index + 1) % self._pixel_count
+            yield PatternStep(colors=tuple(frame), duration=0.06)
+
+    def _pattern_hotspot(self) -> Iterator[PatternStep]:
+        step = 0
+        highlight: Color = (0, 0, 128)
+        ambient: Color = (0, 0, 24)
+        while True:
+            frame: list[Color] = []
+            for index in range(self._pixel_count):
+                if (index + step) % 4 == 0:
+                    frame.append(highlight)
+                else:
+                    frame.append(ambient)
+            step = (step + 1) % 4
+            yield PatternStep(colors=tuple(frame), duration=0.1)
 
     def _pattern_illumination(self) -> Iterator[PatternStep]:
         while True:

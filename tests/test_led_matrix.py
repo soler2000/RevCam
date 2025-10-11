@@ -57,6 +57,24 @@ def test_led_ring_patterns_cycle() -> None:
 
         status = await ring.get_status()
         assert "illumination" in status.patterns
+        assert {"surveillance", "recording", "hotspot"}.issubset(set(status.patterns))
+
+        await ring.set_pattern("surveillance")
+        await asyncio.sleep(0.15)
+        surveillance_frame = driver.frames[-1]
+        assert len(set(surveillance_frame)) == 1
+
+        await ring.set_pattern("recording")
+        await asyncio.sleep(0.15)
+        recording_frame = driver.frames[-1]
+        assert any(pixel[0] > 64 for pixel in recording_frame)
+        assert any(pixel == (16, 0, 0) for pixel in recording_frame)
+
+        await ring.set_pattern("hotspot")
+        await asyncio.sleep(0.15)
+        hotspot_frame = driver.frames[-1]
+        assert any(pixel == (0, 0, 128) for pixel in hotspot_frame)
+        assert any(pixel == (0, 0, 24) for pixel in hotspot_frame)
 
         await ring.aclose()
         assert driver.closed
