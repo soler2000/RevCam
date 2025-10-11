@@ -65,19 +65,7 @@ def encode_frame_to_jpeg(
             "simplejpeg is required for JPEG encoding"
         ) from _SIMPLEJPEG_IMPORT_ERROR
 
-    array = np.asarray(frame)
-    if array.ndim != 3:
-        raise ValueError("Expected an RGB frame for MJPEG encoding")
-    if array.shape[2] == 1:
-        array = np.repeat(array, 3, axis=2)
-    elif array.shape[2] > 3:
-        array = array[..., :3]
-    if array.dtype != np.uint8:
-        array = np.clip(array, 0, 255).astype(np.uint8)
-
-    if not array.flags["C_CONTIGUOUS"]:
-        array = np.ascontiguousarray(array)
-
+    array = _prepare_rgb_frame(frame)
     encode_kwargs: dict[str, object] = {
         "quality": int(quality),
         "colorspace": "RGB",
@@ -240,7 +228,7 @@ class MJPEGStreamer:
                     continue
 
                 try:
-                    processed = self.pipeline.process(frame)
+                    processed = await asyncio.to_thread(self.pipeline.process, frame)
                     jpeg = await asyncio.to_thread(self._encode_frame, processed)
                 except asyncio.CancelledError:  # pragma: no cover - cooperative exit
                     raise
