@@ -195,6 +195,7 @@ def test_fetch_surveillance_recording_metadata_and_media(client: TestClient) -> 
                 "size_bytes": video_file.stat().st_size,
                 "duration_seconds": 2.5,
                 "media_type": "video/x-msvideo",
+                "resolution": {"width": 1920, "height": 1080},
                 "preview_file": f"previews/{name}.jpg",
             }
         ),
@@ -210,6 +211,7 @@ def test_fetch_surveillance_recording_metadata_and_media(client: TestClient) -> 
     assert payload["file"] == f"media/{video_file.name}"
     assert payload.get("preview_file") == f"previews/{name}.jpg"
     assert payload["media_type"] == "video/x-msvideo"
+    assert payload["resolution"] == {"width": 1920, "height": 1080}
     assert payload["duration_seconds"] == 2.5
     assert "frames" not in payload
 
@@ -218,6 +220,42 @@ def test_fetch_surveillance_recording_metadata_and_media(client: TestClient) -> 
     assert media_response.headers["content-type"].startswith("video/x-msvideo")
     assert "inline" in media_response.headers["content-disposition"].lower()
     assert media_response.content == video_payload
+
+
+def test_fetch_surveillance_recording_infers_resolution(client: TestClient) -> None:
+    recordings_dir: Path = client.recordings_dir
+    name = "20230606-060606"
+    video_file = recordings_dir / "media" / f"{name}.avi"
+    video_file.write_bytes(b"avi-data")
+    meta = recordings_dir / f"{name}.meta.json"
+    chunk_metadata = {
+        "file": f"media/{video_file.name}",
+        "media_type": "video/x-msvideo",
+        "frame_count": 5,
+        "width": 1024,
+        "height": 576,
+    }
+    meta.write_text(
+        json.dumps(
+            {
+                "name": name,
+                "file": f"media/{video_file.name}",
+                "media_type": "video/x-msvideo",
+                "chunks": [chunk_metadata],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    response = client.get(
+        f"/api/surveillance/recordings/{name}", params={"include_frames": "false"}
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["resolution"] == {"width": 1024, "height": 576}
+
+    stored_metadata = json.loads(meta.read_text(encoding="utf-8"))
+    assert stored_metadata["resolution"] == {"width": 1024, "height": 576}
 
 
 def test_load_recording_payload_migrates_legacy_assets(client: TestClient) -> None:

@@ -9,6 +9,7 @@ import logging
 import shutil
 import time
 import math
+import re
 from fractions import Fraction
 from copy import deepcopy
 from contextlib import asynccontextmanager
@@ -62,6 +63,105 @@ _CODECS_REQUIRE_EVEN_DIMENSIONS: frozenset[str] = frozenset(
         "h264_omx",
     }
 )
+
+
+_RESOLUTION_PATTERN = re.compile(r"^\s*(\d+)\s*[x×]\s*(\d+)\s*$", re.IGNORECASE)
+
+
+def _coerce_positive_int(value: object | None) -> int | None:
+    """Return a positive integer for ``value`` when possible."""
+
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):  # pragma: no cover - defensive conversion
+            return None
+        if not math.isfinite(numeric):
+            return None
+        number = int(round(numeric))
+    elif isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            number = int(text, 10)
+        except ValueError:
+            try:
+                numeric = float(text)
+            except ValueError:
+                return None
+            if not math.isfinite(numeric):
+                return None
+            number = int(round(numeric))
+    else:
+        return None
+    if number <= 0:
+        return None
+    return number
+
+
+def _parse_resolution(
+    value: object,
+    *,
+    fallback_width: object | None = None,
+    fallback_height: object | None = None,
+) -> tuple[int, int] | None:
+    """Extract a positive width/height pair from ``value`` when available."""
+
+    width_candidate = fallback_width
+    height_candidate = fallback_height
+    if isinstance(value, Mapping):
+        if width_candidate is None:
+            for key in ("width", "w"):
+                if key in value:
+                    width_candidate = value[key]
+                    break
+        if height_candidate is None:
+            for key in ("height", "h"):
+                if key in value:
+                    height_candidate = value[key]
+                    break
+        if (width_candidate is None or height_candidate is None) and "resolution" in value:
+            nested = value.get("resolution")
+            if nested is not None and nested is not value:
+                nested_pair = _parse_resolution(
+                    nested,
+                    fallback_width=width_candidate,
+                    fallback_height=height_candidate,
+                )
+                if nested_pair:
+                    return nested_pair
+    elif isinstance(value, (list, tuple)) and len(value) >= 2:
+        if width_candidate is None:
+            width_candidate = value[0]
+        if height_candidate is None:
+            height_candidate = value[1]
+    elif isinstance(value, str):
+        match = _RESOLUTION_PATTERN.match(value)
+        if match:
+            if width_candidate is None:
+                width_candidate = match.group(1)
+            if height_candidate is None:
+                height_candidate = match.group(2)
+
+    width = _coerce_positive_int(width_candidate)
+    height = _coerce_positive_int(height_candidate)
+    if width is not None and height is not None:
+        return width, height
+    return None
+
+
+def _resolution_dict(pair: tuple[int, int] | None) -> dict[str, int] | None:
+    """Convert a width/height pair to a serialisable mapping."""
+
+    if pair is None:
+        return None
+    width, height = pair
+    return {"width": int(width), "height": int(height)}
 
 
 def _normalise_pixel_format(value: object) -> str | None:
@@ -575,6 +675,28 @@ def load_recording_metadata(directory: Path) -> list[dict[str, object]]:
                             total += int(size)
                 if total and "size_bytes" not in data:
                     data["size_bytes"] = total
+            resolution_pair = _parse_resolution(
+                data.get("resolution"),
+                fallback_width=data.get("width"),
+                fallback_height=data.get("height"),
+            )
+            if resolution_pair is None:
+                chunks_value = data.get("chunks")
+                if isinstance(chunks_value, list):
+                    for chunk_entry in chunks_value:
+                        if not isinstance(chunk_entry, Mapping):
+                            continue
+                        chunk_pair = _parse_resolution(
+                            chunk_entry.get("resolution"),
+                            fallback_width=chunk_entry.get("width"),
+                            fallback_height=chunk_entry.get("height"),
+                        )
+                        if chunk_pair is not None:
+                            resolution_pair = chunk_pair
+                            break
+            resolution_dict = _resolution_dict(resolution_pair)
+            if resolution_dict:
+                data["resolution"] = resolution_dict
             items.append(data)
     return items
 
@@ -721,6 +843,25 @@ def load_recording_payload(
                     chunk_entry["size_bytes"] = int(size)
                     total_size += int(size)
                 media_available = True
+            resolution_pair = _parse_resolution(
+                chunk_entry.get("resolution"),
+                fallback_width=chunk_entry.get("width"),
+                fallback_height=chunk_entry.get("height"),
+            )
+            if resolution_pair is not None:
+                resolution_dict = _resolution_dict(resolution_pair)
+                existing_resolution = chunk_entry.get("resolution")
+                if (
+                    not isinstance(existing_resolution, Mapping)
+                    or _parse_resolution(existing_resolution) != resolution_pair
+                ):
+                    chunk_entry["resolution"] = resolution_dict
+                    updated_metadata_entries[index - 1] = dict(chunk_entry)
+                    metadata_dirty = True
+            elif "resolution" in chunk_entry:
+                chunk_entry.pop("resolution", None)
+                updated_metadata_entries[index - 1] = dict(chunk_entry)
+                metadata_dirty = True
             normalised_chunks.append(chunk_entry)
         if primary_chunk := (normalised_chunks[0] if normalised_chunks else None):
             file_name = primary_chunk.get("file")
@@ -757,6 +898,48 @@ def load_recording_payload(
                 if isinstance(metadata, dict):
                     metadata["video_codec"] = codec_name
                     metadata_dirty = True
+        metadata_resolution_value = (
+            metadata.get("resolution") if isinstance(metadata, Mapping) else None
+        )
+        metadata_resolution_pair = (
+            _parse_resolution(metadata_resolution_value)
+            if metadata_resolution_value is not None
+            else None
+        )
+        resolution_pair = _parse_resolution(
+            payload.get("resolution"),
+            fallback_width=payload.get("width"),
+            fallback_height=payload.get("height"),
+        )
+        if resolution_pair is None:
+            for chunk_entry in normalised_chunks:
+                chunk_pair = _parse_resolution(
+                    chunk_entry.get("resolution"),
+                    fallback_width=chunk_entry.get("width"),
+                    fallback_height=chunk_entry.get("height"),
+                )
+                if chunk_pair is not None:
+                    resolution_pair = chunk_pair
+                    break
+        resolution_dict = _resolution_dict(resolution_pair)
+        if resolution_dict is not None:
+            payload["resolution"] = resolution_dict
+            if isinstance(metadata, dict):
+                metadata_resolution_is_mapping = isinstance(
+                    metadata_resolution_value, Mapping
+                )
+                metadata_changed = (
+                    metadata_resolution_pair != resolution_pair
+                    or not metadata_resolution_is_mapping
+                )
+                if metadata_changed:
+                    metadata_dirty = True
+                metadata["resolution"] = resolution_dict
+        else:
+            payload.pop("resolution", None)
+            if isinstance(metadata, dict) and metadata_resolution_value is not None:
+                metadata.pop("resolution", None)
+                metadata_dirty = True
         if updated_metadata_entries and isinstance(metadata, dict):
             raw_chunks = metadata.get("chunks")
             if isinstance(raw_chunks, list):
@@ -1780,6 +1963,13 @@ class _ActiveChunkWriter:
             "media_type": self.media_type,
             "codec": self.codec,
         }
+        resolution = _resolution_dict(
+            _parse_resolution(
+                {"width": self.target_width, "height": self.target_height}
+            )
+        )
+        if resolution:
+            entry["resolution"] = resolution
         if self.first_timestamp is not None:
             entry["start_offset_seconds"] = round(float(self.first_timestamp), 3)
         return entry
@@ -1819,6 +2009,8 @@ def _remux_mjpeg_video_chunk(
 
     effective_fps = float(fps) if fps and fps > 0 else 10.0
     frame_base = float(start_offset) if isinstance(start_offset, (int, float)) else 0.0
+    frame_width: int | None = None
+    frame_height: int | None = None
     boundary_bytes = boundary.encode("ascii")
     first_timestamp: float | None = None
     last_timestamp: float | None = None
@@ -1865,6 +2057,13 @@ def _remux_mjpeg_video_chunk(
                 if first_timestamp is None:
                     first_timestamp = float(absolute_time)
                 last_timestamp = float(absolute_time)
+                if frame_width is None or frame_height is None:
+                    try:
+                        frame_height = int(array.shape[0])
+                        frame_width = int(array.shape[1])
+                    except Exception:  # pragma: no cover - defensive resolution capture
+                        frame_width = None
+                        frame_height = None
                 jpeg = simplejpeg.encode_jpeg(
                     array,
                     quality=max(1, min(100, int(jpeg_quality))),
@@ -1887,7 +2086,7 @@ def _remux_mjpeg_video_chunk(
     if frame_count and effective_fps > 0:
         duration = max(duration, frame_count / effective_fps)
 
-    return {
+    entry: dict[str, object] = {
         "file": target_path.name,
         "frame_count": frame_count,
         "size_bytes": target_path.stat().st_size,
@@ -1900,6 +2099,14 @@ def _remux_mjpeg_video_chunk(
             else None
         ),
     }
+    resolution = _resolution_dict(
+        _parse_resolution(
+            {"width": frame_width, "height": frame_height}
+        )
+    )
+    if resolution:
+        entry["resolution"] = resolution
+    return entry
 
 
 @dataclass
@@ -2243,6 +2450,21 @@ class RecordingManager:
             frame_total = primary_entry.get("frame_count")
             if isinstance(frame_total, (int, float)):
                 metadata["frame_count"] = int(frame_total)
+            resolution_pair = _parse_resolution(
+                primary_entry.get("resolution"),
+                fallback_width=primary_entry.get("width"),
+                fallback_height=primary_entry.get("height"),
+            )
+            resolution_dict = _resolution_dict(resolution_pair)
+            if resolution_dict is not None:
+                metadata["resolution"] = resolution_dict
+                existing_primary_resolution = primary_entry.get("resolution")
+                if (
+                    not isinstance(existing_primary_resolution, Mapping)
+                    or _parse_resolution(existing_primary_resolution) != resolution_pair
+                ):
+                    primary_entry["resolution"] = resolution_dict
+                    entries[0] = dict(primary_entry)
             duration_value = primary_entry.get("duration_seconds")
             if isinstance(duration_value, (int, float)):
                 metadata["duration_seconds"] = max(

@@ -762,6 +762,81 @@
         return `${value.toFixed(precision).replace(/\.0$/, "")} ${units[unitIndex]}`;
       }
 
+      const RESOLUTION_PATTERN = /^(\d+)\s*[x×]\s*(\d+)$/i;
+
+      function normaliseDimension(value) {
+        if (typeof value === "number") {
+          if (!Number.isFinite(value) || value <= 0) {
+            return null;
+          }
+          return Math.round(value);
+        }
+        if (typeof value === "string") {
+          const trimmed = value.trim();
+          if (!trimmed) {
+            return null;
+          }
+          const numeric = Number(trimmed);
+          if (!Number.isFinite(numeric) || numeric <= 0) {
+            return null;
+          }
+          return Math.round(numeric);
+        }
+        return null;
+      }
+
+      function parseResolutionValue(value) {
+        if (!value) {
+          return null;
+        }
+        if (Array.isArray(value) && value.length >= 2) {
+          const width = normaliseDimension(value[0]);
+          const height = normaliseDimension(value[1]);
+          if (width && height) {
+            return { width, height };
+          }
+        }
+        if (typeof value === "object") {
+          const width = normaliseDimension(value.width ?? value.w);
+          const height = normaliseDimension(value.height ?? value.h);
+          if (width && height) {
+            return { width, height };
+          }
+          if ("resolution" in value) {
+            return parseResolutionValue(value.resolution);
+          }
+        }
+        if (typeof value === "string") {
+          const match = value.trim().match(RESOLUTION_PATTERN);
+          if (match) {
+            const width = normaliseDimension(match[1]);
+            const height = normaliseDimension(match[2]);
+            if (width && height) {
+              return { width, height };
+            }
+          }
+        }
+        return null;
+      }
+
+      function resolveRecordingResolution(record) {
+        if (!record || typeof record !== "object") {
+          return null;
+        }
+        const direct = parseResolutionValue(record.resolution);
+        if (direct) {
+          return direct;
+        }
+        const fallback = parseResolutionValue({
+          width: record.width,
+          height: record.height,
+        });
+        if (fallback) {
+          return fallback;
+        }
+        return null;
+      }
+
       function formatDuration(seconds) {
         if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds <= 0) {
           return null;
@@ -932,6 +1007,12 @@
             span.textContent = `Duration ${label}`;
             meta.appendChild(span);
           }
+        }
+        const resolution = resolveRecordingResolution(record);
+        if (resolution) {
+          const span = document.createElement("span");
+          span.textContent = `${resolution.width}×${resolution.height}`;
+          meta.appendChild(span);
         }
         if (typeof record.frame_count === "number") {
           const span = document.createElement("span");
