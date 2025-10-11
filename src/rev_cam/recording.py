@@ -1347,8 +1347,8 @@ class _ActiveChunkWriter:
     last_pts: int = field(init=False, default=-1)
     next_pts: int = field(init=False, default=0)
     _tick_increment: Fraction | None = field(init=False, default=None, repr=False)
-    _tick_accumulator: int = field(init=False, default=0, repr=False)
-    _tick_denominator: int = field(init=False, default=1, repr=False)
+    _tick_cursor: Fraction = field(init=False, default=Fraction(0, 1), repr=False)
+    _next_tick_cursor: Fraction = field(init=False, default=Fraction(0, 1), repr=False)
 
     def __post_init__(self) -> None:
         resolved_time_base = self._resolve_time_base(self.time_base)
@@ -1391,14 +1391,8 @@ class _ActiveChunkWriter:
     def _initialise_tick_state(self) -> None:
         tick_increment = self._determine_tick_increment()
         self._tick_increment = tick_increment
-        if tick_increment is not None:
-            self._tick_denominator = tick_increment.denominator
-            self._tick_accumulator = 0
-            if self._tick_denominator <= 0:
-                self._tick_denominator = 1
-        else:
-            self._tick_denominator = 1
-            self._tick_accumulator = 0
+        self._tick_cursor = Fraction(0, 1)
+        self._next_tick_cursor = Fraction(0, 1)
 
     def _determine_tick_increment(self) -> Fraction | None:
         if not isinstance(self.fps, (int, float)) or self.fps <= 0:
@@ -1425,17 +1419,18 @@ class _ActiveChunkWriter:
     def _compute_pts(self, timestamp: float) -> int:
         increment = self._tick_increment
         if increment is not None and increment > 0:
-            numerator = increment.numerator
-            denominator = self._tick_denominator or 1
-            pts = self._tick_accumulator // denominator
+            current_cursor = self._tick_cursor
+            pts = self._round_fraction_to_int(current_cursor)
             if pts <= self.last_pts:
                 pts = self.last_pts + 1
-                self._tick_accumulator = pts * denominator
-            self._tick_accumulator += numerator
-            next_pts = self._tick_accumulator // denominator
+                current_cursor = Fraction(pts, 1)
+            next_cursor = current_cursor + increment
+            next_pts = self._round_fraction_to_int(next_cursor)
             if next_pts <= pts:
                 next_pts = pts + 1
-                self._tick_accumulator = next_pts * denominator
+                next_cursor = Fraction(next_pts, 1)
+            self._tick_cursor = next_cursor
+            self._next_tick_cursor = next_cursor
             self.next_pts = next_pts
         else:
             pts = self.frame_count
@@ -1444,6 +1439,24 @@ class _ActiveChunkWriter:
             self.next_pts = pts + 1
         self.last_pts = pts
         return pts
+
+    @staticmethod
+    def _round_fraction_to_int(value: Fraction) -> int:
+        if value <= 0:
+            return int(value + Fraction(1, 2))
+        numerator, denominator = value.numerator, value.denominator
+        quotient, remainder = divmod(numerator, denominator)
+        if remainder == 0:
+            return quotient
+        doubled = remainder * 2
+        if doubled < denominator:
+            return quotient
+        if doubled > denominator:
+            return quotient + 1
+        # Tie: prefer even to minimise drift.
+        if quotient % 2 == 0:
+            return quotient
+        return quotient + 1
 
     def _refresh_size(self) -> None:
         try:
@@ -1500,7 +1513,9 @@ class _ActiveChunkWriter:
                 fps_minimum = 0.0
         if self._tick_increment and self._tick_increment > 0:
             try:
-                pts_duration = float(self.next_pts) * float(self.time_base)
+                time_base_fraction = Fraction(self.time_base).limit_denominator(1_000_000)
+                tick_fraction = self._next_tick_cursor * time_base_fraction
+                pts_duration = float(tick_fraction)
             except Exception:  # pragma: no cover - defensive conversion
                 pts_duration = 0.0
             duration = max(duration, pts_duration)
