@@ -252,6 +252,45 @@
       .image-adjustment-label {
         font-weight: 600;
       }
+      .adjustment-actions {
+        display: flex;
+        gap: var(--space-sm);
+        flex-wrap: wrap;
+        margin-top: var(--space-sm);
+      }
+      .adjustment-actions button {
+        padding: 0.55rem 1.4rem;
+        border-radius: var(--radius-pill);
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--text-primary);
+        font-weight: 600;
+        cursor: pointer;
+        transition: background 160ms ease, border-color 160ms ease, color 160ms ease;
+      }
+      .adjustment-actions button:hover,
+      .adjustment-actions button:focus-visible {
+        background: rgba(255, 255, 255, 0.14);
+        border-color: rgba(255, 255, 255, 0.28);
+        outline: none;
+      }
+      .hue-preview {
+        width: 100%;
+        height: 0.55rem;
+        border-radius: var(--radius-pill);
+        background: linear-gradient(
+          90deg,
+          #ff0040 0%,
+          #ff9900 16%,
+          #ffee00 32%,
+          #3cff00 48%,
+          #00f0ff 64%,
+          #0066ff 80%,
+          #ff00c8 100%
+        );
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+        transition: filter 160ms ease;
+      }
       .summary {
         padding: var(--space-md);
         border-radius: var(--radius-md);
@@ -489,7 +528,18 @@
                     value="0"
                   />
                   <span class="muted">Current: <span id="surveillance-hue-value">0°</span></span>
+                  <div
+                    class="hue-preview"
+                    id="surveillance-hue-preview"
+                    aria-hidden="true"
+                    title="Hue shift preview"
+                  ></div>
                 </label>
+              </div>
+              <div class="adjustment-actions">
+                <button type="button" id="surveillance-adjustments-reset">
+                  Reset image adjustments
+                </button>
               </div>
             </fieldset>
           </section>
@@ -615,10 +665,31 @@
       const surveillanceSaturationValue = document.getElementById("surveillance-saturation-value");
       const surveillanceHueInput = document.getElementById("surveillance-hue");
       const surveillanceHueValue = document.getElementById("surveillance-hue-value");
+      const surveillanceHuePreview = document.getElementById("surveillance-hue-preview");
+      const surveillanceAdjustmentsResetButton = document.getElementById(
+        "surveillance-adjustments-reset",
+      );
 
       let currentSettings = null;
       let cameraConfig = null;
       const resolutionLabels = new Map();
+
+      const DEFAULT_SURVEILLANCE_IMAGE_ADJUSTMENTS = Object.freeze({
+        brightness: 100,
+        saturation: 100,
+        hue: 0,
+      });
+
+      function updateHuePreview(element, hue) {
+        if (!element) {
+          return;
+        }
+        const numericHue = Number(hue);
+        const rotation = Number.isFinite(numericHue) ? numericHue : 0;
+        element.style.filter = `hue-rotate(${rotation}deg)`;
+        element.dataset.hueRotation = String(rotation);
+        element.title = `Hue shift preview (${Math.round(rotation)}°)`;
+      }
 
       function setActiveTab(tab) {
         const target = typeof tab === "string" && tab ? tab : "recording";
@@ -1116,14 +1187,17 @@
           );
           surveillanceSaturationValue.textContent = `${Math.round(saturation)}%`;
         }
-        if (surveillanceHueInput && surveillanceHueValue) {
+        if (surveillanceHueInput) {
           const hue = clampSurveillanceAdjustment(
             surveillanceHueInput.value,
             -180,
             180,
             0,
           );
-          surveillanceHueValue.textContent = `${Math.round(hue)}°`;
+          if (surveillanceHueValue) {
+            surveillanceHueValue.textContent = `${Math.round(hue)}°`;
+          }
+          updateHuePreview(surveillanceHuePreview, hue);
         }
       }
 
@@ -1278,6 +1352,16 @@
         surveillanceHueInput.addEventListener("input", () => {
           surveillanceHueInput.dataset.userEdited = "true";
           updateSurveillanceAdjustmentLabels();
+        });
+      }
+      if (surveillanceAdjustmentsResetButton) {
+        surveillanceAdjustmentsResetButton.addEventListener("click", () => {
+          applySurveillanceAdjustments(DEFAULT_SURVEILLANCE_IMAGE_ADJUSTMENTS, {
+            force: true,
+          });
+          if (statusText) {
+            statusText.textContent = "Image adjustments reset to defaults.";
+          }
         });
       }
       expertFpsInput.addEventListener("input", updateSummary);

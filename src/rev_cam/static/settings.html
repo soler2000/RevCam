@@ -723,6 +723,28 @@
       .adjustment-label {
         font-weight: 600;
       }
+      .adjustment-actions {
+        display: flex;
+        gap: var(--space-sm);
+        flex-wrap: wrap;
+      }
+      .hue-preview {
+        width: 100%;
+        height: 0.65rem;
+        border-radius: var(--radius-pill);
+        background: linear-gradient(
+          90deg,
+          #ff0040 0%,
+          #ff9900 16%,
+          #ffee00 32%,
+          #3cff00 48%,
+          #00f0ff 64%,
+          #0066ff 80%,
+          #ff00c8 100%
+        );
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
+        transition: filter var(--transition);
+      }
       .form-actions {
         display: flex;
         align-items: center;
@@ -1946,7 +1968,22 @@
                 <span class="muted helper-text">
                   Current: <span id="camera-hue-value">0°</span>
                 </span>
+                <div
+                  class="hue-preview"
+                  id="camera-hue-preview"
+                  aria-hidden="true"
+                  title="Hue shift preview"
+                ></div>
               </label>
+            </div>
+            <div class="adjustment-actions">
+              <button
+                type="button"
+                id="camera-adjustments-reset"
+                class="secondary-button"
+              >
+                Reset image adjustments
+              </button>
             </div>
             <div class="form-actions">
               <button type="submit">Save settings</button>
@@ -3832,6 +3869,10 @@
       const cameraSaturationValue = document.getElementById("camera-saturation-value");
       const cameraHueInput = document.getElementById("camera-hue");
       const cameraHueValue = document.getElementById("camera-hue-value");
+      const cameraHuePreview = document.getElementById("camera-hue-preview");
+      const cameraAdjustmentsResetButton = document.getElementById(
+        "camera-adjustments-reset",
+      );
       const wifiRefreshButton = document.getElementById("wifi-refresh");
       const wifiScanButton = document.getElementById("wifi-scan");
       const wifiFeedback = document.getElementById("wifi-feedback");
@@ -8602,6 +8643,23 @@
         return numeric;
       }
 
+      const DEFAULT_CAMERA_IMAGE_ADJUSTMENTS = Object.freeze({
+        brightness: 100,
+        saturation: 100,
+        hue: 0,
+      });
+
+      function updateHuePreview(element, hue) {
+        if (!element) {
+          return;
+        }
+        const numericHue = Number(hue);
+        const rotation = Number.isFinite(numericHue) ? numericHue : 0;
+        element.style.filter = `hue-rotate(${rotation}deg)`;
+        element.dataset.hueRotation = String(rotation);
+        element.title = `Hue shift preview (${Math.round(rotation)}°)`;
+      }
+
       function updateCameraAdjustmentLabels() {
         if (cameraBrightnessInput && cameraBrightnessValue) {
           const brightness = clampAdjustment(cameraBrightnessInput.value, 0, 200, 100);
@@ -8611,9 +8669,12 @@
           const saturation = clampAdjustment(cameraSaturationInput.value, 0, 200, 100);
           cameraSaturationValue.textContent = `${Math.round(saturation)}%`;
         }
-        if (cameraHueInput && cameraHueValue) {
+        if (cameraHueInput) {
           const hue = clampAdjustment(cameraHueInput.value, -180, 180, 0);
-          cameraHueValue.textContent = `${Math.round(hue)}°`;
+          if (cameraHueValue) {
+            cameraHueValue.textContent = `${Math.round(hue)}°`;
+          }
+          updateHuePreview(cameraHuePreview, hue);
         }
       }
 
@@ -8956,6 +9017,15 @@
         cameraHueInput.addEventListener("input", () => {
           cameraHueInput.dataset.userEdited = "true";
           updateCameraAdjustmentLabels();
+        });
+      }
+
+      if (cameraAdjustmentsResetButton) {
+        cameraAdjustmentsResetButton.addEventListener("click", () => {
+          applyCameraAdjustments(DEFAULT_CAMERA_IMAGE_ADJUSTMENTS, { force: true });
+          if (statusLabel) {
+            statusLabel.textContent = "Image adjustments reset to defaults";
+          }
         });
       }
 
