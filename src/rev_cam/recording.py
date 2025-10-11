@@ -1357,35 +1357,38 @@ class _ActiveChunkWriter:
             self.time_base = resolved_time_base
         self._initialise_tick_state()
 
+    @staticmethod
+    def _coerce_fraction(value: object | None) -> Fraction | None:
+        if value is None:
+            return None
+        try:
+            if isinstance(value, Fraction):
+                fraction = value
+            elif isinstance(value, (int, float)):
+                fraction = Fraction(str(value)).limit_denominator(1_000_000)
+            else:
+                numerator = getattr(value, "numerator", None)
+                denominator = getattr(value, "denominator", None)
+                if numerator is None or denominator is None:
+                    return None
+                fraction = Fraction(int(numerator), int(denominator))
+        except Exception:  # pragma: no cover - defensive conversion
+            return None
+        return fraction if fraction > 0 else None
+
     def _resolve_time_base(
         self, candidate: Fraction | float | int | None
     ) -> Fraction | None:
-        values: list[object] = []
-        stream_time_base = getattr(self.stream, "time_base", None)
-        if stream_time_base is not None:
-            values.append(stream_time_base)
+        values: list[object | None] = []
+        values.append(getattr(self.stream, "time_base", None))
         codec_context = getattr(self.stream, "codec_context", None)
         if codec_context is not None:
-            codec_time_base = getattr(codec_context, "time_base", None)
-            if codec_time_base is not None:
-                values.append(codec_time_base)
+            values.append(getattr(codec_context, "time_base", None))
         if candidate is not None:
             values.append(candidate)
         for value in values:
-            try:
-                if isinstance(value, Fraction):
-                    fraction = value
-                elif isinstance(value, (int, float)):
-                    fraction = Fraction(str(value)).limit_denominator(1_000_000)
-                else:
-                    numerator = getattr(value, "numerator", None)
-                    denominator = getattr(value, "denominator", None)
-                    if numerator is None or denominator is None:
-                        continue
-                    fraction = Fraction(int(numerator), int(denominator))
-            except Exception:  # pragma: no cover - defensive conversion
-                continue
-            if fraction > 0:
+            fraction = self._coerce_fraction(value)
+            if fraction is not None:
                 return fraction
         return None
 
@@ -1430,23 +1433,45 @@ class _ActiveChunkWriter:
             return None
         return Fraction(1, 1) / frame_rate
 
-    def _maybe_update_time_base(self) -> None:
-        resolved_time_base = self._resolve_time_base(self.time_base)
-        if resolved_time_base is None:
-            return
-        try:
-            new_time_base = Fraction(resolved_time_base)
-        except Exception:  # pragma: no cover - defensive conversion
+    def _propagate_time_base(self, value: Fraction) -> None:
+        stream = getattr(self, "stream", None)
+        if stream is not None:
+            try:
+                stream.time_base = value
+            except Exception:  # pragma: no cover - property may be read-only
+                pass
+            codec_context = getattr(stream, "codec_context", None)
+            if codec_context is not None:
+                try:
+                    codec_context.time_base = value
+                except Exception:  # pragma: no cover - defensive assignment
+                    pass
+
+    def _update_time_base(self, new_time_base: Fraction | None) -> None:
+        if new_time_base is None or new_time_base <= 0:
             return
         try:
             current_time_base = Fraction(self.time_base)
         except Exception:  # pragma: no cover - defensive conversion
             current_time_base = None
-        if current_time_base is None or new_time_base == current_time_base:
-            if current_time_base is None:
-                self.time_base = new_time_base
+        if current_time_base is None:
+            self.time_base = new_time_base
+            self._tick_increment = self._determine_tick_increment()
+            self._propagate_time_base(new_time_base)
+            return
+        if new_time_base == current_time_base:
             return
         self._retime_tick_state(current_time_base, new_time_base)
+        self._propagate_time_base(new_time_base)
+
+    def _maybe_update_time_base(self) -> None:
+        resolved_time_base = self._resolve_time_base(self.time_base)
+        self._update_time_base(resolved_time_base)
+
+    def _maybe_update_time_base_from_packet(self, packet: object) -> None:
+        packet_time_base = self._coerce_fraction(getattr(packet, "time_base", None))
+        if packet_time_base is not None:
+            self._update_time_base(packet_time_base)
 
     def _retime_tick_state(
         self, current_time_base: Fraction, new_time_base: Fraction
@@ -1558,6 +1583,7 @@ class _ActiveChunkWriter:
         frame.pts = self._compute_pts(timestamp)
         frame.time_base = self.time_base
         for packet in self.stream.encode(frame):
+            self._maybe_update_time_base_from_packet(packet)
             self.container.mux(packet)
             packet_size = getattr(packet, "size", None)
             if isinstance(packet_size, int) and packet_size > 0:
@@ -1567,6 +1593,7 @@ class _ActiveChunkWriter:
 
     def finalise(self) -> dict[str, object]:
         for packet in self.stream.encode():
+            self._maybe_update_time_base_from_packet(packet)
             self.container.mux(packet)
             packet_size = getattr(packet, "size", None)
             if isinstance(packet_size, int) and packet_size > 0:

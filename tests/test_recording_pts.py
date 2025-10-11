@@ -20,6 +20,12 @@ class _DummyStream:
         return []
 
 
+class _DummyPacket:
+    def __init__(self, time_base: Fraction | None = None, size: int = 0) -> None:
+        self.time_base = time_base
+        self.size = size
+
+
 class _DummyContainer:
     def __init__(self) -> None:
         self.muxed = []
@@ -52,6 +58,23 @@ class _DynamicTimeBaseStream(_DummyStream):
             if len(self.encoded_pts) == self._switch_after:
                 self.time_base = self._updated
                 self.codec_context.time_base = self._updated
+        return []
+
+
+class _PacketTimeBaseStream(_DummyStream):
+    def __init__(self, initial: Fraction, packet: Fraction) -> None:
+        super().__init__(initial)
+        self._packet_time_base = packet
+        self._packets_emitted = 0
+
+    def encode(self, frame=None):
+        if frame is not None:
+            self.encoded_pts.append(frame.pts)
+            time_base = (
+                self._packet_time_base if self._packets_emitted == 0 else self.time_base
+            )
+            self._packets_emitted += 1
+            return [_DummyPacket(time_base=time_base)]
         return []
 
 
@@ -207,6 +230,49 @@ def test_chunk_writer_retimes_when_stream_updates_time_base(tmp_path):
     )
     assert expected_increment_fraction.denominator == 1
     assert all(delta == expected_increment_fraction.numerator for delta in deltas)
+
+    entry = writer.finalise()
+    expected_duration = len(pts_values) / writer.fps
+    assert entry["duration_seconds"] == pytest.approx(expected_duration, rel=1e-6, abs=1e-3)
+    assert container.closed
+
+
+def test_chunk_writer_tracks_packet_announced_time_base(tmp_path):
+    path = tmp_path / "chunk.mp4"
+    initial_time_base = Fraction(1, 20)
+    packet_time_base = Fraction(1, 10240)
+    stream = _PacketTimeBaseStream(initial_time_base, packet_time_base)
+    container = _DummyContainer()
+    writer = recording._ActiveChunkWriter(
+        name="test",
+        index=5,
+        path=path,
+        container=container,
+        stream=stream,
+        time_base=initial_time_base,
+        target_width=4,
+        target_height=4,
+        fps=20.0,
+        media_type="video/mp4",
+        codec="libx264",
+        relative_file="media/chunk.mp4",
+        pixel_format="yuv420p",
+    )
+
+    frame = np.zeros((4, 4, 3), dtype=np.uint8)
+    timestamps = [i * 0.05 for i in range(4)]
+    for ts in timestamps:
+        writer.add_frame(frame, timestamp=ts)
+
+    assert writer.time_base == packet_time_base
+
+    pts_values = stream.encoded_pts
+    assert len(pts_values) == len(timestamps)
+    expected_increment = ((Fraction(1, 1) / Fraction(20, 1)) / packet_time_base).limit_denominator()
+    assert expected_increment.denominator == 1
+    deltas = [b - a for a, b in zip(pts_values, pts_values[1:])]
+    assert deltas
+    assert all(delta == expected_increment.numerator for delta in deltas)
 
     entry = writer.finalise()
     expected_duration = len(pts_values) / writer.fps
