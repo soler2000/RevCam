@@ -1,0 +1,79 @@
+name: Action checklist from issue
+
+on:
+  issues:
+    types: [labeled]
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  run:
+    # Run when the label 'action-checklist' is added OR when someone comments '/action-checklist'
+    if: |
+      (github.event_name == 'issues' && github.event.label.name == 'action-checklist') ||
+      (github.event_name == 'issue_comment' && startsWith(github.event.comment.body, '/action-checklist'))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const number = context.payload.issue.number;
+            const { owner, repo } = context.repo;
+
+            // Load the latest issue body (the parent with the checklist)
+            const parent = await github.rest.issues.get({ owner, repo, issue_number: number });
+            const lines = (parent.data.body || '').split(/\r?\n/);
+
+            const created = [];
+            const taskRe = /^\s*[-*]\s+\[( |x|X)\]\s+(.*)$/;
+
+            for (let i = 0; i < lines.length; i++) {
+              const m = lines[i].match(taskRe);
+              if (!m) continue;
+
+              const checked = (m[1].trim().toLowerCase() === 'x');
+              let text = m[2].trim();
+
+              // Skip done items or items already linked to an issue (#123)
+              if (checked || /#\d+\b/.test(text)) continue;
+
+              // Optional inline metadata: @assignees and label:xyz
+              const assignees = [];
+              const labels = [];
+              text = text.replace(/@([A-Za-z0-9-]+)/g, (_,$1) => { assignees.push($1); return ''; });
+              text = text.replace(/label:([^\s,]+)/ig, (_,$1) => { labels.push($1); return ''; });
+              text = text.replace(/\s{2,}/g,' ').trim();
+              if (!text) continue;
+
+              // Create a child issue for this task
+              const child = await github.rest.issues.create({
+                owner, repo,
+                title: text,
+                body: `Spawned from checklist in #${number}\n\nOriginal line:\n\`\`\`\n${lines[i]}\n\`\`\``,
+                assignees: assignees.length ? assignees : undefined,
+                labels: labels.length ? labels : undefined
+              });
+
+              const url = child.data.html_url;
+
+              // Append a link back to the child issue on this line
+              lines[i] = lines[i].replace(/\s*$/, `  (${url})`);
+              created.push({ title: text, url });
+            }
+
+            // Save the edited parent issue body (now with links)
+            if (created.length) {
+              await github.rest.issues.update({
+                owner, repo, issue_number: number,
+                body: lines.join('\n')
+              });
+            }
+
+            // Nice summary in the workflow run
+            core.summary.addHeading('Checklist actioned');
+            created.forEach(it => core.summary.addRaw(`- ${it.title} → ${it.url}\n`));
+            await core.summary.write();
