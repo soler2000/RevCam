@@ -8,6 +8,7 @@ import os
 import subprocess
 import time
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Iterable, Literal
 
@@ -128,30 +129,75 @@ class LensSettings:
 DEFAULT_LENS_SETTINGS = LensSettings()
 
 
-def _discover_picamera_lens_controls() -> tuple[dict[str, object], object | None]:
+def _discover_picamera_lens_controls(
+    camera: object | None = None,
+) -> tuple[dict[str, object], object | None]:
     """Return the Picamera2 lens control mapping and autofocus trigger."""
+
+    mode_mapping: dict[str, object] = {}
+    trigger_value: object | None = None
 
     try:
         from picamera2 import controls as picamera_controls  # type: ignore
     except Exception:  # pragma: no cover - optional dependency introspection
-        return {}, None
+        picamera_controls = None
+    else:
+        af_mode_enum = getattr(picamera_controls, "AfModeEnum", None)
+        if af_mode_enum is not None:
+            for mode, attribute in (
+                (LENS_MODE_AUTO, "Auto"),
+                (LENS_MODE_CONTINUOUS, "Continuous"),
+                (LENS_MODE_MANUAL, "Manual"),
+            ):
+                value = getattr(af_mode_enum, attribute, None)
+                if value is not None:
+                    mode_mapping[mode] = value
 
-    af_mode_enum = getattr(picamera_controls, "AfModeEnum", None)
-    if af_mode_enum is None:
-        return {}, None
+        trigger_enum = getattr(picamera_controls, "AfTriggerEnum", None)
+        if trigger_enum is not None:
+            trigger_value = getattr(trigger_enum, "Start", None)
 
-    mode_mapping: dict[str, object] = {}
-    for mode, attribute in (
-        (LENS_MODE_AUTO, "Auto"),
-        (LENS_MODE_CONTINUOUS, "Continuous"),
-        (LENS_MODE_MANUAL, "Manual"),
-    ):
-        value = getattr(af_mode_enum, attribute, None)
-        if value is not None:
-            mode_mapping[mode] = value
+    if not mode_mapping and camera is not None:
+        metadata = getattr(camera, "camera_controls", None)
+        if isinstance(metadata, Mapping):
+            af_mode_info = metadata.get("AfMode")
+            if isinstance(af_mode_info, Mapping):
+                raw_values = af_mode_info.get("values")
+                if isinstance(raw_values, Mapping):
+                    def _match_value(key: str) -> object | None:
+                        for candidate in (key, key.lower(), key.upper(), key.capitalize()):
+                            if candidate in raw_values:
+                                return raw_values[candidate]
+                        return None
 
-    trigger_enum = getattr(picamera_controls, "AfTriggerEnum", None)
-    trigger_value = getattr(trigger_enum, "Start", None) if trigger_enum else None
+                    manual_value = _match_value("Manual")
+                    auto_value = _match_value("Auto")
+                    continuous_value = _match_value("Continuous")
+                    if manual_value is not None:
+                        mode_mapping[LENS_MODE_MANUAL] = manual_value
+                    if auto_value is not None:
+                        mode_mapping[LENS_MODE_AUTO] = auto_value
+                    if continuous_value is not None:
+                        mode_mapping[LENS_MODE_CONTINUOUS] = continuous_value
+
+            if not mode_mapping and "AfMode" in metadata:
+                mode_mapping = {
+                    LENS_MODE_MANUAL: 0,
+                    LENS_MODE_AUTO: 1,
+                    LENS_MODE_CONTINUOUS: 2,
+                }
+
+            if trigger_value is None:
+                trigger_info = metadata.get("AfTrigger")
+                if isinstance(trigger_info, Mapping):
+                    trigger_values = trigger_info.get("values")
+                    if isinstance(trigger_values, Mapping):
+                        for candidate in ("Start", "start"):
+                            if candidate in trigger_values:
+                                trigger_value = trigger_values[candidate]
+                                break
+                if trigger_value is None and "AfTrigger" in metadata:
+                    trigger_value = 1
 
     return mode_mapping, trigger_value
 
@@ -450,7 +496,7 @@ class Picamera2Camera(BaseCamera):
             (
                 self._lens_mode_controls,
                 self._af_trigger_start,
-            ) = _discover_picamera_lens_controls()
+            ) = _discover_picamera_lens_controls(camera_instance)
             if (
                 self._lens_settings.mode != LENS_MODE_DRIVER_DEFAULT
                 and self._lens_settings.mode not in self.supported_lens_modes()

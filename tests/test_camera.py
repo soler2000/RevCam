@@ -507,6 +507,10 @@ def test_picamera_lens_settings_apply_controls(monkeypatch: pytest.MonkeyPatch) 
     class DummyCamera:
         def __init__(self) -> None:
             self._closed = False
+            self.camera_controls = {
+                "AfMode": {"values": {"Manual": 0, "Auto": 1, "Continuous": 2}},
+                "AfTrigger": {"values": {"Start": 5}},
+            }
 
         def create_video_configuration(self, **_: object) -> object:
             return object()
@@ -559,6 +563,7 @@ def test_picamera_lens_settings_missing_controls(monkeypatch: pytest.MonkeyPatch
     class DummyCamera:
         def __init__(self) -> None:
             self._closed = False
+            self.camera_controls = {}
 
         def create_video_configuration(self, **_: object) -> object:
             return object()
@@ -590,6 +595,54 @@ def test_picamera_lens_settings_missing_controls(monkeypatch: pytest.MonkeyPatch
         with pytest.raises(CameraError, match="Focus mode 'auto' is not supported"):
             camera.apply_lens_settings(camera_module.LensSettings(mode=camera_module.LENS_MODE_AUTO))
         assert not applied_controls
+    finally:
+        asyncio.run(camera.close())
+
+
+def test_picamera_lens_settings_metadata_controls(monkeypatch: pytest.MonkeyPatch) -> None:
+    applied_controls: list[dict[str, object]] = []
+
+    class DummyCamera:
+        def __init__(self) -> None:
+            self._closed = False
+            self.camera_controls = {
+                "AfMode": {"values": {"manual": 0, "Auto": 1, "continuous": 2}},
+                "AfTrigger": {},
+            }
+
+        def create_video_configuration(self, **_: object) -> object:
+            return object()
+
+        def configure(self, _: object) -> None:
+            return None
+
+        def start(self) -> None:
+            return None
+
+        def set_controls(self, controls: dict[str, object]) -> None:
+            applied_controls.append(dict(controls))
+
+        def stop(self) -> None:
+            return None
+
+        def close(self) -> None:
+            self._closed = True
+
+    module = types.SimpleNamespace(Picamera2=DummyCamera)
+    module.controls = types.SimpleNamespace()  # AfModeEnum intentionally missing
+    monkeypatch.setitem(sys.modules, "picamera2", module)
+    monkeypatch.setitem(sys.modules, "picamera2.controls", module.controls)
+
+    camera = Picamera2Camera()
+    try:
+        assert camera.supported_lens_modes() == (
+            camera_module.LENS_MODE_DRIVER_DEFAULT,
+            camera_module.LENS_MODE_AUTO,
+            camera_module.LENS_MODE_CONTINUOUS,
+            camera_module.LENS_MODE_MANUAL,
+        )
+        camera.apply_lens_settings(camera_module.LensSettings(mode=camera_module.LENS_MODE_AUTO))
+        assert any(ctrl.get("AfMode") == 1 for ctrl in applied_controls)
     finally:
         asyncio.run(camera.close())
 
