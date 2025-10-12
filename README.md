@@ -35,6 +35,40 @@ position so supported modules can be tuned directly from RevCam. If the
 Picamera2 build on your system does not expose autofocus controls RevCam keeps
 the menu at the driver defaults to avoid presenting unsupported options.
 
+### Enabling autofocus
+
+1. Connect a focus-capable module such as the Raspberry Pi Camera Module 3 or a
+   ZeroCam FishEye/NOIR lens and start RevCam.
+2. Open the settings panel (`http://<revcam-host>:9000/settings` in a browser or
+   the gear icon in the viewer) and pick your active camera under **Camera
+   source** if it is not already selected.
+3. Locate the **Lens** section and choose either **Single-shot autofocus** (runs
+   a one-off focus sweep and leaves the lens parked) or **Continuous autofocus**
+   (keeps focus adjustments running) from the **Focus mode** dropdown. Click
+   **Save settings** to apply the change.
+
+RevCam pushes the new mode straight to Picamera2, so autofocus should activate
+as soon as the settings form reports success. The dropdown is hidden when the
+connected lens or Picamera2 build does not report autofocus controls; in that
+case the driver keeps its default behaviour.
+
+Prefer automating configuration? Send a JSON payload to the REST API instead of
+using the UI:
+
+```bash
+curl -X POST http://<revcam-host>:9000/api/camera \
+  -H 'Content-Type: application/json' \
+  -d '{
+        "source": "picamera",
+        "lens": { "mode": "auto" }
+      }'
+```
+
+Replace `"auto"` with `"continuous"` to keep autofocus running, or with
+`"driver"` to revert to the firmware defaults. Manual focus is available by
+specifying `"mode": "manual"` plus a `"manual_position"` value between 0.0 and
+10.0.
+
 ## Project layout
 
 ```
