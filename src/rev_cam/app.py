@@ -9,7 +9,7 @@ import shutil
 import string
 from enum import Enum
 from pathlib import Path
-from typing import Literal, Mapping
+from typing import Iterable, Literal, Mapping
 from urllib.parse import quote as urlquote
 
 from datetime import datetime, timedelta, timezone
@@ -149,26 +149,46 @@ LENS_MODE_LABELS: Mapping[str, str] = {
 }
 
 
-def _serialise_lens_settings(settings: LensSettings) -> dict[str, object]:
+def _serialise_lens_settings(
+    settings: LensSettings,
+    *,
+    supported_modes: Iterable[str] | None = None,
+) -> dict[str, object]:
+    supported = (
+        LENS_MODE_DRIVER_DEFAULT,
+        LENS_MODE_AUTO,
+        LENS_MODE_CONTINUOUS,
+        LENS_MODE_MANUAL,
+    )
+    if supported_modes is not None:
+        supported_set = {mode for mode in supported_modes}
+        supported = tuple(mode for mode in supported if mode in supported_set)
+
     options = [
         {"value": mode, "label": LENS_MODE_LABELS.get(mode, mode)}
-        for mode in (
-            LENS_MODE_DRIVER_DEFAULT,
-            LENS_MODE_AUTO,
-            LENS_MODE_CONTINUOUS,
-            LENS_MODE_MANUAL,
-        )
+        for mode in supported
     ]
+    manual_range: dict[str, float] | None
+    if LENS_MODE_MANUAL in supported:
+        manual_range = {
+            "min": LENS_POSITION_MIN,
+            "max": LENS_POSITION_MAX,
+            "step": LENS_POSITION_STEP,
+        }
+    else:
+        manual_range = None
     return {
         "mode": settings.mode,
         "manual_position": settings.manual_position,
         "options": options,
-        "manual_range": {
-            "min": LENS_POSITION_MIN,
-            "max": LENS_POSITION_MAX,
-            "step": LENS_POSITION_STEP,
-        },
+        "manual_range": manual_range,
     }
+
+
+def _lens_modes_for_camera(camera: BaseCamera | None) -> tuple[str, ...]:
+    if isinstance(camera, Picamera2Camera):
+        return camera.supported_lens_modes()
+    return (LENS_MODE_DRIVER_DEFAULT,)
 
 
 class WiFiConnectPayload(BaseModel):
@@ -1129,6 +1149,10 @@ def create_app(
             fallback_to_synthetic=True,
             lens_settings=lens_settings,
         )
+        if isinstance(camera, Picamera2Camera):
+            applied_lens = camera.get_lens_settings()
+            if applied_lens != lens_settings:
+                config_manager.set_lens_settings(applied_lens)
         active_resolution = resolution
         stream_settings = config_manager.get_stream_settings()
         try:
@@ -1504,7 +1528,10 @@ def create_app(
                 "active": active_resolution.key(),
                 "options": resolution_options,
             },
-            "lens": _serialise_lens_settings(config_manager.get_lens_settings()),
+            "lens": _serialise_lens_settings(
+                config_manager.get_lens_settings(),
+                supported_modes=_lens_modes_for_camera(camera),
+            ),
         }
 
     @app.get("/api/stream")
@@ -1930,7 +1957,10 @@ def create_app(
                     "selected": current_resolution.key(),
                     "active": active_resolution.key(),
                 },
-                "lens": _serialise_lens_settings(current_lens_settings),
+                "lens": _serialise_lens_settings(
+                    current_lens_settings,
+                    supported_modes=_lens_modes_for_camera(camera),
+                ),
             }
 
         if (
@@ -1956,7 +1986,10 @@ def create_app(
                     "selected": current_resolution.key(),
                     "active": active_resolution.key(),
                 },
-                "lens": _serialise_lens_settings(requested_lens_settings),
+                "lens": _serialise_lens_settings(
+                    requested_lens_settings,
+                    supported_modes=_lens_modes_for_camera(camera),
+                ),
             }
 
         await led_ring.set_pattern("boot")
@@ -2004,7 +2037,12 @@ def create_app(
         active_resolution = requested_resolution
         config_manager.set_camera(selection)
         config_manager.set_resolution(requested_resolution)
-        config_manager.set_lens_settings(requested_lens_settings)
+        applied_lens_settings = (
+            new_camera.get_lens_settings()
+            if isinstance(new_camera, Picamera2Camera)
+            else requested_lens_settings
+        )
+        config_manager.set_lens_settings(applied_lens_settings)
         try:
             await _refresh_video_services()
         except Exception as exc:
@@ -2021,7 +2059,10 @@ def create_app(
                 "selected": requested_resolution.key(),
                 "active": active_resolution.key(),
             },
-            "lens": _serialise_lens_settings(requested_lens_settings),
+            "lens": _serialise_lens_settings(
+                applied_lens_settings,
+                supported_modes=_lens_modes_for_camera(camera),
+            ),
         }
 
     @app.get("/api/camera/snapshot")

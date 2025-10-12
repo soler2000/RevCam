@@ -31,7 +31,9 @@ Picamera2-compatible lens with controllable focus—such as the ZeroCam FishEye
 and ZeroCam NoIR modules—is connected, the application exposes lens controls
 alongside the resolution picker. Use the **Lens** menu to keep the driver
 defaults, enable single-shot or continuous autofocus, or set a manual focus
-position so supported modules can be tuned directly from RevCam.
+position so supported modules can be tuned directly from RevCam. If the
+Picamera2 build on your system does not expose autofocus controls RevCam keeps
+the menu at the driver defaults to avoid presenting unsupported options.
 
 ## Project layout
 

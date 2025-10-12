@@ -128,6 +128,34 @@ class LensSettings:
 DEFAULT_LENS_SETTINGS = LensSettings()
 
 
+def _discover_picamera_lens_controls() -> tuple[dict[str, object], object | None]:
+    """Return the Picamera2 lens control mapping and autofocus trigger."""
+
+    try:
+        from picamera2 import controls as picamera_controls  # type: ignore
+    except Exception:  # pragma: no cover - optional dependency introspection
+        return {}, None
+
+    af_mode_enum = getattr(picamera_controls, "AfModeEnum", None)
+    if af_mode_enum is None:
+        return {}, None
+
+    mode_mapping: dict[str, object] = {}
+    for mode, attribute in (
+        (LENS_MODE_AUTO, "Auto"),
+        (LENS_MODE_CONTINUOUS, "Continuous"),
+        (LENS_MODE_MANUAL, "Manual"),
+    ):
+        value = getattr(af_mode_enum, attribute, None)
+        if value is not None:
+            mode_mapping[mode] = value
+
+    trigger_enum = getattr(picamera_controls, "AfTriggerEnum", None)
+    trigger_value = getattr(trigger_enum, "Start", None) if trigger_enum else None
+
+    return mode_mapping, trigger_value
+
+
 class CameraError(RuntimeError):
     """Raised when the camera cannot be initialised."""
 
@@ -403,6 +431,8 @@ class Picamera2Camera(BaseCamera):
 
         self._camera = None
         self._lens_settings = lens_settings or DEFAULT_LENS_SETTINGS
+        self._lens_mode_controls: dict[str, object] = {}
+        self._af_trigger_start: object | None = None
         camera_instance = None
         started = False
         try:
@@ -417,6 +447,19 @@ class Picamera2Camera(BaseCamera):
             camera_instance.configure(config)
             camera_instance.start()
             started = True
+            (
+                self._lens_mode_controls,
+                self._af_trigger_start,
+            ) = _discover_picamera_lens_controls()
+            if (
+                self._lens_settings.mode != LENS_MODE_DRIVER_DEFAULT
+                and self._lens_settings.mode not in self.supported_lens_modes()
+            ):
+                logger.warning(
+                    "Lens focus mode '%s' is not supported; falling back to driver defaults",
+                    self._lens_settings.mode,
+                )
+                self._lens_settings = LensSettings()
             self._apply_lens_settings(self._lens_settings)
         except Exception as exc:  # pragma: no cover - hardware dependent
             camera = camera_instance or self._camera
@@ -484,6 +527,24 @@ class Picamera2Camera(BaseCamera):
         await asyncio.to_thread(self._camera.stop)
         await asyncio.to_thread(self._camera.close)
 
+    def supported_lens_modes(self) -> tuple[str, ...]:
+        """Return the focus modes supported by the active lens."""
+
+        supported: list[str] = [LENS_MODE_DRIVER_DEFAULT]
+        for mode in (
+            LENS_MODE_AUTO,
+            LENS_MODE_CONTINUOUS,
+            LENS_MODE_MANUAL,
+        ):
+            if mode in self._lens_mode_controls and mode not in supported:
+                supported.append(mode)
+        return tuple(supported)
+
+    def get_lens_settings(self) -> LensSettings:
+        """Return the most recently applied lens settings."""
+
+        return self._lens_settings
+
     def apply_lens_settings(self, settings: LensSettings) -> None:
         """Apply new lens settings to the active camera."""
 
@@ -496,29 +557,25 @@ class Picamera2Camera(BaseCamera):
             self._lens_settings = settings
             return
 
-        try:
-            from picamera2 import controls as picamera_controls
-        except Exception as exc:  # pragma: no cover - hardware dependent
-            detail = summarise_exception(exc)
-            message = "Lens controls are unavailable on this system"
-            if detail:
-                message = f"{message}: {detail}"
-            raise CameraError(message) from exc
+        if settings.mode not in self.supported_lens_modes():
+            if settings.mode == LENS_MODE_DRIVER_DEFAULT:
+                self._lens_settings = settings
+                return
+            raise CameraError(
+                f"Focus mode '{settings.mode}' is not supported by this camera"
+            )
 
-        af_mode_enum = getattr(picamera_controls, "AfModeEnum", None)
-        if af_mode_enum is None:  # pragma: no cover - defensive guard
-            raise CameraError("Picamera2 did not expose autofocus mode controls")
+        if settings.mode == LENS_MODE_DRIVER_DEFAULT:
+            self._lens_settings = settings
+            return
 
-        mode_mapping = {
-            LENS_MODE_AUTO: getattr(af_mode_enum, "Auto", None),
-            LENS_MODE_CONTINUOUS: getattr(af_mode_enum, "Continuous", None),
-            LENS_MODE_MANUAL: getattr(af_mode_enum, "Manual", None),
-        }
+        mode_value = self._lens_mode_controls.get(settings.mode)
+        if mode_value is None:
+            raise CameraError(
+                f"Focus mode '{settings.mode}' is not supported by this camera"
+            )
 
-        if settings.mode not in mode_mapping or mode_mapping[settings.mode] is None:
-            raise CameraError(f"Focus mode '{settings.mode}' is not supported by this lens")
-
-        controls: dict[str, object] = {"AfMode": mode_mapping[settings.mode]}
+        controls: dict[str, object] = {"AfMode": mode_value}
 
         if settings.mode == LENS_MODE_MANUAL:
             if settings.manual_position is None:
@@ -534,14 +591,11 @@ class Picamera2Camera(BaseCamera):
                 message = f"{message}: {detail}"
             raise CameraError(message) from exc
 
-        if settings.mode == LENS_MODE_AUTO:
-            trigger_enum = getattr(picamera_controls, "AfTriggerEnum", None)
-            trigger_value = getattr(trigger_enum, "Start", None) if trigger_enum else None
-            if trigger_value is not None:
-                try:
-                    self._camera.set_controls({"AfTrigger": trigger_value})
-                except Exception:  # pragma: no cover - autofocus trigger is best-effort
-                    logger.debug("Unable to trigger autofocus sweep", exc_info=True)
+        if settings.mode == LENS_MODE_AUTO and self._af_trigger_start is not None:
+            try:
+                self._camera.set_controls({"AfTrigger": self._af_trigger_start})
+            except Exception:  # pragma: no cover - autofocus trigger is best-effort
+                logger.debug("Unable to trigger autofocus sweep", exc_info=True)
 
         self._lens_settings = settings
 
