@@ -5,35 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Surveillance Recording Playback</title>
     <link rel="icon" type="image/svg+xml" href="images/favicon.svg" />
+    <link rel="stylesheet" href="styles/theme.css" />
     <style>
-      :root {
-        color-scheme: dark;
-        --font-family: "Inter", "Manrope", "Segoe UI", system-ui, -apple-system,
-          BlinkMacSystemFont, sans-serif;
-        --surface-0: rgba(14, 16, 22, 0.9);
-        --surface-1: rgba(26, 28, 36, 0.85);
-        --border-subtle: rgba(255, 255, 255, 0.12);
-        --text-primary: #f5f7fb;
-        --text-muted: rgba(245, 247, 250, 0.7);
-        --accent: #0a84ff;
-        --accent-soft: rgba(10, 132, 255, 0.18);
-        --danger: #ff453a;
-        --radius-lg: 1.2rem;
-        --radius-sm: 0.75rem;
-        --space-md: 1rem;
-        --space-lg: 1.6rem;
-        --page-gradient: radial-gradient(
-          120% 140% at top,
-          #1b1e26 0%,
-          #0b0d13 60%,
-          #050609 100%
-        );
-      }
       body {
-        margin: 0;
-        background: var(--page-gradient);
-        font-family: var(--font-family);
-        color: var(--text-primary);
         min-height: 100vh;
         display: flex;
         align-items: center;
@@ -203,7 +177,7 @@
       }
     </style>
   </head>
-  <body>
+  <body data-scheme="surveillance">
     <div class="player-card" role="document">
       <header>
         <h1 id="recording-title">Loading recording…</h1>

@@ -5,84 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>RevCam Live View</title>
     <link rel="icon" type="image/svg+xml" href="images/favicon.svg" />
+    <link rel="stylesheet" href="styles/theme.css" />
     <style>
-      :root {
-        color-scheme: dark;
-        --font-family: "Inter", "Manrope", "Segoe UI", system-ui, -apple-system,
-          BlinkMacSystemFont, sans-serif;
-        --line-height: 1.65;
-        --transition: 200ms ease;
-        --surface-0: rgba(14, 16, 22, 0.8);
-        --surface-1: rgba(26, 28, 36, 0.75);
-        --surface-muted: rgba(255, 255, 255, 0.08);
-        --surface-soft: rgba(255, 255, 255, 0.04);
-        --border-subtle: rgba(255, 255, 255, 0.08);
-        --border-muted: rgba(255, 255, 255, 0.12);
-        --text-primary: #f5f7fb;
-        --text-muted: rgba(245, 247, 250, 0.72);
-        --text-on-accent: #ffffff;
-        --accent: #0a84ff;
-        --accent-hover: #2f95ff;
-        --accent-active: #55adff;
-        --accent-soft: rgba(10, 132, 255, 0.16);
-        --accent-ring: rgba(10, 132, 255, 0.45);
-        --accent-shadow: rgba(10, 132, 255, 0.35);
-        --success: #4ade80;
-        --success-soft: rgba(74, 222, 128, 0.16);
-        --caution: #facc15;
-        --caution-soft: rgba(250, 204, 21, 0.18);
-        --warning: #ff9f0a;
-        --warning-soft: rgba(255, 159, 10, 0.18);
-        --danger: #ff453a;
-        --danger-soft: rgba(255, 69, 58, 0.2);
-        --info: #38bdf8;
-        --info-soft: rgba(56, 189, 248, 0.18);
-        --radius-sm: 0.5rem;
-        --radius-md: 0.75rem;
-        --radius-lg: 1rem;
-        --radius-pill: 999px;
-        --space-xs: 0.25rem;
-        --space-sm: 0.5rem;
-        --space-md: 0.75rem;
-        --space-lg: 1.25rem;
-        --space-xl: 1.75rem;
-        --space-2xl: 2.5rem;
-        --control-padding-y: 0.6rem;
-        --control-padding-x: 1.25rem;
-        --card-padding: 1.5rem;
-        --shadow-sm: 0 12px 26px rgba(0, 0, 0, 0.35);
-        --shadow-md: 0 18px 40px rgba(0, 0, 0, 0.45);
-        --shadow-lg: 0 40px 90px rgba(0, 0, 0, 0.6);
-        --shadow-top-md: 0 -18px 40px rgba(0, 0, 0, 0.45);
-        --glow-success: 0 24px 48px rgba(48, 209, 88, 0.3);
-        --glow-danger: 0 20px 44px rgba(255, 69, 58, 0.32);
-        --page-gradient: radial-gradient(120% 140% at top, #1b1e26 0%, #10131a 60%, #050609 100%);
-      }
       body {
-        margin: 0;
-        font-family: var(--font-family);
-        line-height: var(--line-height);
-        background: var(--page-gradient);
-        color: var(--text-primary);
         display: flex;
         flex-direction: column;
         min-height: 100vh;
-      }
-      header,
-      footer {
-        padding: calc(var(--space-sm) + 0.35rem) var(--space-xl);
-        background: var(--surface-0);
-        backdrop-filter: blur(18px) saturate(125%);
-        -webkit-backdrop-filter: blur(18px) saturate(125%);
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        flex-wrap: wrap;
-        gap: var(--space-md);
-        box-shadow: var(--shadow-md);
-      }
-      header {
-        border-bottom: 1px solid var(--border-subtle);
       }
       .header-panels {
         display: flex;
@@ -92,15 +20,6 @@
         align-items: stretch;
         gap: var(--space-md);
         margin-left: auto;
-      }
-      footer {
-        border-top: 1px solid var(--border-subtle);
-        box-shadow: var(--shadow-top-md);
-      }
-      strong.brand {
-        font-size: 1.25rem;
-        letter-spacing: 0.04em;
-        color: var(--success);
       }
       .pill {
         display: inline-flex;
@@ -206,34 +125,28 @@
         align-items: center;
         justify-content: center;
         gap: var(--space-xs);
-        background: var(--surface-1);
-        border: 1px solid var(--border-muted);
-        color: var(--text-primary);
         padding: calc(var(--control-padding-y) - 0.1rem)
           calc(var(--control-padding-x) + 0.25rem);
         border-radius: var(--radius-pill);
         font-weight: 600;
-        box-shadow: var(--shadow-sm);
-        backdrop-filter: blur(18px);
-        -webkit-backdrop-filter: blur(18px);
+        background: linear-gradient(135deg, var(--accent), var(--accent-hover));
+        color: var(--text-on-accent);
+        border: none;
+        box-shadow: 0 18px 36px var(--accent-shadow);
         transition: transform var(--transition), box-shadow var(--transition),
-          border-color var(--transition), background var(--transition),
-          color var(--transition);
+          background var(--transition), color var(--transition);
       }
       .control-group button:not(:disabled):hover {
-        background: var(--surface-0);
-        border-color: var(--accent-active);
-        box-shadow: 0 16px 36px rgba(0, 0, 0, 0.45);
+        background: linear-gradient(135deg, var(--accent-hover), var(--accent-active));
+        box-shadow: 0 22px 44px var(--accent-shadow);
         transform: translateY(-1px);
-        color: var(--accent-active);
       }
       .control-group button:not(:disabled):focus-visible {
-        background: var(--surface-0);
-        border-color: var(--accent-active);
-        color: var(--accent-active);
-        box-shadow: 0 16px 36px rgba(0, 0, 0, 0.45),
+        background: linear-gradient(135deg, var(--accent-hover), var(--accent-active));
+        box-shadow: 0 22px 44px var(--accent-shadow),
           0 0 0 1px var(--accent-active), 0 0 0 4px var(--accent-soft);
         transform: translateY(-1px);
+        outline: none;
       }
       .control-group button:disabled {
         opacity: 0.6;
@@ -248,31 +161,26 @@
         padding: calc(var(--control-padding-y) - 0.1rem)
           calc(var(--control-padding-x) + 0.25rem);
         border-radius: var(--radius-pill);
-        background: var(--surface-1);
-        border: 1px solid var(--border-muted);
-        color: var(--text-primary);
+        background: linear-gradient(135deg, var(--accent), var(--accent-hover));
+        color: var(--text-on-accent);
         font-weight: 600;
         text-decoration: none;
-        box-shadow: var(--shadow-sm);
-        backdrop-filter: blur(18px);
-        -webkit-backdrop-filter: blur(18px);
+        box-shadow: 0 18px 36px var(--accent-shadow);
         cursor: pointer;
         transition: transform var(--transition), box-shadow var(--transition),
-          border-color var(--transition), background var(--transition),
-          color var(--transition);
+          background var(--transition), color var(--transition);
         white-space: nowrap;
       }
       a.settings-link:hover,
       a.settings-link:focus-visible {
-        background: var(--surface-0);
-        border-color: var(--accent-active);
-        box-shadow: 0 16px 36px rgba(0, 0, 0, 0.45);
+        background: linear-gradient(135deg, var(--accent-hover), var(--accent-active));
+        box-shadow: 0 22px 44px var(--accent-shadow);
         transform: translateY(-1px);
-        color: var(--accent-active);
+        color: var(--text-on-accent);
       }
       a.settings-link:focus-visible {
         outline: none;
-        box-shadow: 0 16px 36px rgba(0, 0, 0, 0.45),
+        box-shadow: 0 22px 44px var(--accent-shadow),
           0 0 0 1px var(--accent-active), 0 0 0 4px var(--accent-soft);
       }
       .status-pill {
@@ -640,8 +548,8 @@
         }
       }
       @media (max-width: 640px) {
-        header,
-        footer {
+        .site-header,
+        .site-footer {
           align-items: stretch;
         }
         .header-panels {
@@ -661,7 +569,7 @@
           width: 100%;
           justify-content: center;
         }
-        footer {
+        .site-footer {
           justify-content: center;
           text-align: center;
         }
@@ -672,8 +580,8 @@
       }
     </style>
   </head>
-  <body>
-    <header>
+  <body data-scheme="revcam">
+    <header class="site-header">
       <div class="brand-area">
         <strong class="brand">RevCam</strong>
         <div class="mode-toggle" data-mode-toggle role="group" aria-label="Viewing mode">
@@ -809,7 +717,7 @@
         </div>
       </div>
     </header>
-    <main>
+    <main class="site-main">
       <figure class="stream-wrapper" aria-labelledby="stream-caption">
         <video
           id="stream-video"
@@ -830,7 +738,7 @@
       aria-live="polite"
       aria-hidden="true"
     ></div>
-    <footer>
+    <footer class="site-footer">
       <div class="control-group">
         <button id="toggle-stream" type="button" aria-pressed="false">Pause stream</button>
         <button id="toggle-fullscreen" type="button" aria-pressed="false">

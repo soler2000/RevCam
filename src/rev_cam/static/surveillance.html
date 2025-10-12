@@ -5,84 +5,23 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>RevCam Surveillance</title>
     <link rel="icon" type="image/svg+xml" href="images/favicon.svg" />
+    <link rel="stylesheet" href="styles/theme.css" />
     <style>
-      :root {
-        color-scheme: dark;
-        --font-family: "Inter", "Manrope", "Segoe UI", system-ui, -apple-system,
-          BlinkMacSystemFont, sans-serif;
-        --line-height: 1.6;
-        --transition: 200ms ease;
-        --surface-0: rgba(14, 16, 22, 0.9);
-        --surface-1: rgba(26, 28, 36, 0.85);
-        --surface-soft: rgba(255, 255, 255, 0.06);
-        --border-subtle: rgba(255, 255, 255, 0.08);
-        --border-muted: rgba(255, 255, 255, 0.14);
-        --text-primary: #f5f7fb;
-        --text-muted: rgba(245, 247, 250, 0.7);
-        --accent: #0a84ff;
-        --accent-hover: #2f95ff;
-        --accent-active: #55adff;
-        --accent-soft: rgba(10, 132, 255, 0.15);
-        --accent-ring: rgba(10, 132, 255, 0.45);
-        --accent-shadow: rgba(10, 132, 255, 0.35);
-        --success: #34c759;
-        --danger: #ff453a;
-        --warning: #ffd60a;
-        --radius-md: 0.85rem;
-        --radius-lg: 1.2rem;
-        --radius-pill: 999px;
-        --space-sm: 0.5rem;
-        --space-md: 0.9rem;
-        --space-lg: 1.4rem;
-        --space-xl: 2.1rem;
-        --shadow-sm: 0 12px 24px rgba(0, 0, 0, 0.28);
-        --shadow-md: 0 26px 46px rgba(0, 0, 0, 0.4);
-        --page-gradient: radial-gradient(115% 140% at top, #1b1e26 0%, #0b0d13 60%, #050609 100%);
-      }
       *,
       *::before,
       *::after {
         box-sizing: border-box;
       }
       body {
-        margin: 0;
-        font-family: var(--font-family);
-        line-height: var(--line-height);
-        background: var(--page-gradient);
-        color: var(--text-primary);
         min-height: 100vh;
         display: flex;
         flex-direction: column;
-      }
-      header,
-      footer {
-        padding: var(--space-md) var(--space-xl);
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: var(--space-lg);
-        background: var(--surface-0);
-        border-bottom: 1px solid var(--border-subtle);
-        backdrop-filter: blur(18px) saturate(130%);
-        -webkit-backdrop-filter: blur(18px) saturate(130%);
-        box-shadow: var(--shadow-md);
-      }
-      footer {
-        border-top: 1px solid var(--border-subtle);
-        border-bottom: none;
-        margin-top: auto;
-        justify-content: center;
       }
       .brand-area {
         display: flex;
         align-items: center;
         gap: var(--space-lg);
         flex-wrap: wrap;
-      }
-      strong.brand {
-        font-size: 1.3rem;
-        letter-spacing: 0.05em;
-        color: var(--success);
       }
       .mode-toggle {
         display: inline-flex;
@@ -142,7 +81,7 @@
         color: var(--danger);
         text-shadow: 0 0 16px rgba(255, 69, 58, 0.45);
       }
-      main {
+      .site-main {
         padding: var(--space-xl);
         display: grid;
         grid-template-columns: minmax(280px, 1fr) minmax(260px, 320px);
@@ -380,7 +319,7 @@
         text-decoration: underline;
       }
       @media (max-width: 960px) {
-        main {
+        .site-main {
           grid-template-columns: 1fr;
         }
         .recordings-card {
@@ -388,8 +327,8 @@
         }
       }
       @media (max-width: 640px) {
-        header,
-        footer {
+        .site-header,
+        .site-footer {
           flex-direction: column;
           align-items: stretch;
           text-align: center;
@@ -397,7 +336,7 @@
         .brand-area {
           justify-content: center;
         }
-        main {
+        .site-main {
           padding: var(--space-lg);
         }
         .controls {
@@ -410,8 +349,8 @@
       }
     </style>
   </head>
-  <body>
-    <header>
+  <body data-scheme="surveillance">
+    <header class="site-header">
       <div class="brand-area">
         <strong class="brand">RevCam</strong>
         <div class="mode-toggle" data-mode-toggle role="group" aria-label="Viewing mode">
@@ -425,7 +364,7 @@
       </div>
       <div class="status-message" id="status-message" data-tone="busy">Initialising…</div>
     </header>
-    <main>
+    <main class="site-main">
       <section class="preview-card">
         <h1>Surveillance preview</h1>
         <img id="surveillance-preview" alt="Surveillance preview" hidden />
@@ -461,7 +400,7 @@
         <ul class="recordings-list" id="recordings-list" aria-live="polite"></ul>
       </section>
     </main>
-    <footer>
+    <footer class="site-footer">
       <a class="link" href="/surveillance/settings">Surveillance settings</a>
       <a class="link" href="/">Back to live view</a>
     </footer>

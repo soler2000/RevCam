@@ -5,62 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>RevCam Trailer Leveling</title>
     <link rel="icon" type="image/svg+xml" href="images/favicon.svg" />
+    <link rel="stylesheet" href="styles/theme.css" />
     <style>
-      :root {
-        color-scheme: dark;
-        --font-family: "Inter", "Manrope", "Segoe UI", system-ui, -apple-system,
-          BlinkMacSystemFont, sans-serif;
-        --line-height: 1.65;
-        --transition: 200ms ease;
-        --surface-0: rgba(14, 16, 22, 0.82);
-        --surface-1: rgba(26, 28, 36, 0.78);
-        --surface-muted: rgba(255, 255, 255, 0.08);
-        --surface-soft: rgba(255, 255, 255, 0.04);
-        --surface-panel: rgba(30, 33, 44, 0.82);
-        --surface-primary: rgba(38, 42, 55, 0.85);
-        --surface-secondary: rgba(24, 27, 38, 0.88);
-        --border-subtle: rgba(255, 255, 255, 0.08);
-        --border-muted: rgba(255, 255, 255, 0.12);
-        --text-primary: #f5f7fb;
-        --text-muted: rgba(245, 247, 250, 0.72);
-        --text-on-accent: #ffffff;
-        --accent: #4ade80;
-        --accent-hover: #5ee39a;
-        --accent-active: #38c66b;
-        --accent-soft: rgba(74, 222, 128, 0.18);
-        --accent-soft-hover: rgba(74, 222, 128, 0.26);
-        --accent-ring: rgba(74, 222, 128, 0.45);
-        --success: #4ade80;
-        --success-soft: rgba(74, 222, 128, 0.16);
-        --warning: #ff9f0a;
-        --danger: #ff453a;
-        --danger-soft: rgba(255, 69, 58, 0.2);
-        --radius-sm: 0.5rem;
-        --radius-md: 0.75rem;
-        --radius-lg: 1rem;
-        --radius-xl: 1.5rem;
-        --radius-pill: 999px;
-        --shell-padding-y: clamp(2rem, 7vh, 3.5rem);
-        --shell-padding-x: clamp(1.25rem, 5vw, 3.5rem);
-        --rhythm: 1.5rem;
-        --space-xs: 0.25rem;
-        --space-sm: 0.5rem;
-        --space-md: 0.75rem;
-        --space-lg: 1.25rem;
-        --space-xl: 1.75rem;
-        --space-2xl: 2.5rem;
-        --control-padding-y: 0.6rem;
-        --control-padding-x: 1.25rem;
-        --card-padding: calc(var(--rhythm) + 0.25rem);
-        --stack-gap: calc(var(--rhythm) / 2);
-        --stack-gap-lg: var(--rhythm);
-        --shadow-sm: 0 18px 44px rgba(0, 0, 0, 0.45);
-        --shadow-md: 0 26px 60px rgba(0, 0, 0, 0.5);
-        --shadow-lg: 0 40px 120px rgba(0, 0, 0, 0.55);
-        --page-gradient: radial-gradient(120% 140% at top, #1b1e26 0%, #10131a 60%, #050609 100%);
-        --panel-max-width: 1100px;
-      }
-
       * {
         box-sizing: border-box;
       }
@@ -70,54 +16,16 @@
       }
 
       body {
-        margin: 0;
-        font-family: var(--font-family);
-        line-height: var(--line-height);
-        background: var(--page-gradient);
-        color: var(--text-primary);
-        min-height: 100vh;
         display: flex;
         justify-content: center;
         align-items: flex-start;
         padding: var(--shell-padding-y) var(--shell-padding-x);
       }
 
-      .shell {
-        width: 100%;
-        max-width: var(--panel-max-width);
+      .page-shell {
         display: flex;
         flex-direction: column;
         gap: var(--rhythm);
-      }
-
-      header,
-      footer {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: var(--space-md);
-        flex-wrap: wrap;
-        background: var(--surface-panel);
-        border-radius: var(--radius-lg);
-        padding: 1rem calc(var(--space-lg) + 0.25rem);
-        box-shadow: var(--shadow-sm);
-        border: 1px solid var(--border-muted);
-      }
-
-      header {
-        backdrop-filter: blur(18px) saturate(125%);
-        -webkit-backdrop-filter: blur(18px) saturate(125%);
-      }
-
-      footer {
-        font-size: 0.95rem;
-        justify-content: space-between;
-      }
-
-      strong.brand {
-        font-size: 1.35rem;
-        letter-spacing: 0.04em;
-        color: var(--success);
       }
 
       nav {
@@ -376,16 +284,16 @@
         body {
           padding: var(--space-xl);
         }
-        header,
-        footer {
+        .site-header,
+        .site-footer {
           padding-inline: var(--space-lg);
         }
       }
     </style>
   </head>
-  <body>
-    <div class="shell">
-      <header>
+  <body data-scheme="revcam">
+    <div class="page-shell">
+      <header class="site-header">
         <strong class="brand">RevCam</strong>
         <nav>
           <a href="/">Live View</a>
@@ -446,7 +354,7 @@
           </div>
         </article>
       </main>
-    <footer>
+    <footer class="site-footer">
       <span>&copy; RevCam – Trailer leveling preview</span>
       <span id="sample-rate" class="status"></span>
     </footer>

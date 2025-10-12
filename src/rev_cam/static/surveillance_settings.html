@@ -5,127 +5,41 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Surveillance settings</title>
     <link rel="icon" type="image/svg+xml" href="images/favicon.svg" />
+    <link rel="stylesheet" href="styles/theme.css" />
     <style>
-      :root {
-        color-scheme: dark;
-        --font-family: "Inter", "Manrope", "Segoe UI", system-ui, -apple-system,
-          BlinkMacSystemFont, sans-serif;
-        --surface-0: rgba(14, 16, 22, 0.92);
-        --surface-1: rgba(24, 26, 34, 0.88);
-        --surface-2: rgba(36, 38, 48, 0.82);
-        --border-subtle: rgba(255, 255, 255, 0.14);
-        --border-strong: rgba(255, 255, 255, 0.26);
-        --text-primary: #f5f7fb;
-        --text-muted: rgba(245, 247, 250, 0.72);
-        --text-accent: #0a84ff;
-        --danger: #ff453a;
-        --success: #32d74b;
-        --radius-lg: 1.2rem;
-        --radius-md: 0.9rem;
-        --radius-sm: 0.6rem;
-        --space-xs: 0.4rem;
-        --space-sm: 0.6rem;
-        --space-md: 1rem;
-        --space-lg: 1.6rem;
-        --space-xl: 2.4rem;
-        --line-height: 1.55;
-        --shadow-lg: 0 32px 60px rgba(0, 0, 0, 0.5);
-        --shadow-md: 0 20px 40px rgba(0, 0, 0, 0.35);
-        --page-gradient: radial-gradient(120% 160% at top, #1b1e26 0%, #090b12 60%, #050609 100%);
-      }
       *,
       *::before,
       *::after {
         box-sizing: border-box;
       }
       body {
-        margin: 0;
-        font-family: var(--font-family);
-        line-height: var(--line-height);
-        background: var(--page-gradient);
-        color: var(--text-primary);
+        display: flex;
+        justify-content: center;
+        align-items: flex-start;
         min-height: 100vh;
-        display: flex;
-        flex-direction: column;
+        padding: var(--shell-padding-y) var(--shell-padding-x);
       }
-      header,
-      footer {
-        padding: var(--space-md) var(--space-xl);
+      .page-shell {
+        width: 100%;
+        max-width: var(--panel-max-width);
+      }
+      .page-header {
+        align-items: flex-start;
+        gap: var(--space-lg);
+      }
+      .page-header .brand-area {
         display: flex;
         align-items: center;
-        justify-content: space-between;
-        gap: var(--space-lg);
-        background: var(--surface-0);
-        border-bottom: 1px solid var(--border-subtle);
-        backdrop-filter: blur(18px) saturate(130%);
-        -webkit-backdrop-filter: blur(18px) saturate(130%);
-        box-shadow: var(--shadow-md);
-      }
-      footer {
-        border-top: 1px solid var(--border-subtle);
-        border-bottom: none;
-        justify-content: center;
-        margin-top: auto;
-      }
-      main {
-        padding: var(--space-xl);
-        display: flex;
-        justify-content: center;
-      }
-      .brand-area {
-        display: flex;
-        align-items: center;
-        gap: var(--space-lg);
-        flex-wrap: wrap;
-      }
-      .brand {
-        font-size: 1.4rem;
-        font-weight: 700;
-      }
-      .settings-card {
-        width: min(960px, 100%);
-        background: var(--surface-1);
-        border-radius: var(--radius-lg);
-        border: 1px solid var(--border-subtle);
-        padding: var(--space-xl);
-        box-shadow: var(--shadow-lg);
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-lg);
-      }
-      .tablist {
-        display: flex;
         gap: var(--space-sm);
-        margin-bottom: var(--space-lg);
         flex-wrap: wrap;
       }
-      .tab-button {
-        border: 1px solid var(--border-subtle);
-        background: var(--surface-soft);
-        color: var(--text-primary);
-        padding: 0.45rem 1.1rem;
-        border-radius: var(--radius-pill);
-        cursor: pointer;
-        font-weight: 600;
-        transition: border-color var(--transition), color var(--transition), background var(--transition);
+      .header-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-sm);
       }
-      .tab-button[aria-selected="true"] {
-        background: linear-gradient(135deg, #0a84ff, #54d1ff);
-        color: #041026;
-        border-color: transparent;
-        box-shadow: 0 12px 24px rgba(10, 132, 255, 0.25);
-      }
-      .tab-button:not([aria-selected="true"]):hover,
-      .tab-button:not([aria-selected="true"]):focus-visible {
-        border-color: var(--accent);
-        color: var(--accent);
-        outline: none;
-      }
-      [data-tab-panel][hidden] {
-        display: none !important;
-      }
-      .settings-card h1 {
-        margin: 0;
+      .header-actions .tab-button {
+        text-decoration: none;
       }
       .muted {
         color: var(--text-muted);
@@ -243,8 +157,8 @@
       .summary {
         padding: var(--space-md);
         border-radius: var(--radius-md);
-        background: rgba(10, 132, 255, 0.16);
-        border: 1px solid rgba(10, 132, 255, 0.4);
+        background: var(--accent-soft);
+        border: 1px solid var(--accent);
         font-weight: 600;
       }
       .motion-control {
@@ -265,83 +179,100 @@
       button[type="submit"] {
         align-self: flex-start;
         padding: 0.75rem 1.8rem;
-        border-radius: 999px;
-        border: none;
-        background: linear-gradient(135deg, #0a84ff, #54d1ff);
-        color: #041026;
         font-weight: 700;
-        font-size: 1rem;
-        cursor: pointer;
-        box-shadow: 0 18px 36px rgba(10, 132, 255, 0.35);
-        transition: transform 160ms ease, box-shadow 160ms ease;
-      }
-      button[type="submit"]:hover,
-      button[type="submit"]:focus-visible {
-        transform: translateY(-1px);
-        box-shadow: 0 22px 40px rgba(10, 132, 255, 0.45);
-      }
-      button[type="submit"]:disabled {
-        opacity: 0.6;
-        cursor: wait;
       }
       .status {
         min-height: 1.4rem;
       }
-      a.link {
-        color: var(--text-accent);
-        text-decoration: none;
-        font-weight: 600;
-      }
-      a.link:hover,
-      a.link:focus-visible {
-        text-decoration: underline;
-      }
       @media (max-width: 720px) {
-        header,
-        footer {
+        body {
+          padding: var(--space-xl);
+        }
+        .page-header {
           flex-direction: column;
           align-items: stretch;
           text-align: center;
+          gap: var(--space-md);
         }
-        main {
-          padding: var(--space-lg);
+        .header-actions {
+          justify-content: center;
         }
-        .settings-card {
-          padding: var(--space-lg);
+        .tab-container {
+          gap: var(--space-lg);
         }
       }
     </style>
   </head>
-  <body>
-    <header>
-      <div class="brand-area">
-        <strong class="brand">RevCam</strong>
-        <span class="muted">Surveillance mode</span>
-      </div>
-      <a class="link" href="/surveillance">Back to surveillance</a>
-    </header>
-    <main>
-      <section class="settings-card">
-        <header>
-          <h1>Surveillance settings</h1>
-          <p class="muted">
-            Configure recording behaviour for standard deployments or switch to expert
-            mode for full control over frame rate and compression.
-          </p>
-        </header>
-        <form id="surveillance-settings-form">
-          <div class="tablist" role="tablist" aria-label="Surveillance settings sections">
-            <button class="tab-button" type="button" data-tab="recording" aria-selected="true">
-              Recording
-            </button>
-            <button class="tab-button" type="button" data-tab="motion" aria-selected="false">
-              Motion detection
-            </button>
-            <button class="tab-button" type="button" data-tab="storage" aria-selected="false">
-              Storage &amp; maintenance
-            </button>
+  <body data-scheme="surveillance">
+    <div class="page-shell">
+      <div class="page-panel">
+        <div class="page-content">
+          <header class="page-header">
+            <div>
+              <div class="brand-area">
+                <strong class="brand">RevCam</strong>
+                <span class="muted">Surveillance mode</span>
+              </div>
+              <h1>Surveillance settings</h1>
+              <p class="muted">
+                Configure recording behaviour for standard deployments or switch to expert
+                mode for full control over frame rate and compression.
+              </p>
+            </div>
+            <div class="header-actions">
+              <a class="tab-button back-link" href="/surveillance">Back to surveillance</a>
+              <a class="tab-button back-link" href="/">Live view</a>
+            </div>
+          </header>
+
+          <form id="surveillance-settings-form" class="tab-container">
+          <div class="tab-header">
+            <div class="tab-list" role="tablist" aria-label="Surveillance settings sections">
+              <button
+                type="button"
+                class="tab-button"
+                role="tab"
+                id="tab-recording"
+                aria-controls="panel-recording"
+                aria-selected="true"
+                data-tab="recording"
+                tabindex="0"
+              >
+                Recording
+              </button>
+              <button
+                type="button"
+                class="tab-button"
+                role="tab"
+                id="tab-motion"
+                aria-controls="panel-motion"
+                aria-selected="false"
+                data-tab="motion"
+                tabindex="-1"
+              >
+                Motion detection
+              </button>
+              <button
+                type="button"
+                class="tab-button"
+                role="tab"
+                id="tab-storage"
+                aria-controls="panel-storage"
+                aria-selected="false"
+                data-tab="storage"
+                tabindex="-1"
+              >
+                Storage &amp; maintenance
+              </button>
+            </div>
           </div>
-          <section class="tab-panel" data-tab-panel="recording">
+          <section
+            class="tab-panel"
+            role="tabpanel"
+            id="panel-recording"
+            aria-labelledby="tab-recording"
+            data-tab="recording"
+          >
             <fieldset>
               <legend>Configuration mode</legend>
               <label class="option">
@@ -437,7 +368,14 @@
               </div>
             </label>
           </section>
-          <section class="tab-panel" data-tab-panel="motion" hidden>
+          <section
+            class="tab-panel"
+            role="tabpanel"
+            id="panel-motion"
+            aria-labelledby="tab-motion"
+            data-tab="motion"
+            hidden
+          >
             <h2>Motion detection</h2>
             <p class="muted">
               Enable motion detection to reduce storage usage and focus recordings on activity.
@@ -470,7 +408,14 @@
               </span>
             </div>
           </section>
-          <section class="tab-panel" data-tab-panel="storage" hidden>
+          <section
+            class="tab-panel"
+            role="tabpanel"
+            id="panel-storage"
+            aria-labelledby="tab-storage"
+            data-tab="storage"
+            hidden
+          >
             <h2>Storage &amp; maintenance</h2>
             <p class="muted">
               Automatically split recordings, protect storage capacity and remove old clips on a schedule.
@@ -502,12 +447,9 @@
           <button type="submit">Save surveillance settings</button>
           <p class="muted status" id="settings-status"></p>
         </form>
-      </section>
-    </main>
-    <footer>
-      <a class="link" href="/surveillance">Back to surveillance</a>
-      <a class="link" href="/">Back to live view</a>
-    </footer>
+        </div>
+      </div>
+    </div>
     <script>
       const STANDARD_PRESETS = {
         balanced: {
@@ -540,8 +482,12 @@
       const activeResolutionLabel = document.getElementById("active-resolution-label");
       const summary = document.getElementById("settings-summary");
       const systemTemperatureText = document.getElementById("system-temperature");
-      const tabButtons = Array.from(document.querySelectorAll(".tab-button"));
-      const tabPanels = Array.from(document.querySelectorAll("[data-tab-panel]"));
+      const tabButtons = Array.from(
+        document.querySelectorAll('.tab-button[role="tab"]')
+      );
+      const tabPanels = Array.from(
+        document.querySelectorAll('.tab-panel[role="tabpanel"]')
+      );
       const overlayCheckbox = document.getElementById("recording-overlays");
       const rememberCheckbox = document.getElementById("remember-recording");
       const chunkDurationInput = document.getElementById("chunk-duration");
@@ -563,15 +509,26 @@
         tabButtons.forEach((button) => {
           const isActive = button.dataset.tab === target;
           button.setAttribute("aria-selected", String(isActive));
+          button.tabIndex = isActive ? 0 : -1;
         });
         tabPanels.forEach((panel) => {
-          const isActive = panel.dataset.tabPanel === target;
+          const isActive = panel.dataset.tab === target;
           if (isActive) {
             panel.removeAttribute("hidden");
           } else {
             panel.setAttribute("hidden", "hidden");
           }
         });
+      }
+
+      function focusTabByIndex(index) {
+        if (!tabButtons.length) {
+          return;
+        }
+        const total = tabButtons.length;
+        const normalized = ((index % total) + total) % total;
+        const target = tabButtons[normalized];
+        target.focus();
       }
 
       function updateMotionSensitivityLabel(value) {
@@ -875,9 +832,38 @@
         motionEffectiveFpsText.textContent = formatFpsLabel(motionFps ?? 0);
       }
 
-      tabButtons.forEach((button) => {
+      tabButtons.forEach((button, index) => {
         button.addEventListener("click", () => {
           setActiveTab(button.dataset.tab || "recording");
+        });
+        button.addEventListener("keydown", (event) => {
+          switch (event.key) {
+            case "ArrowRight":
+            case "ArrowDown":
+              event.preventDefault();
+              focusTabByIndex(index + 1);
+              break;
+            case "ArrowLeft":
+            case "ArrowUp":
+              event.preventDefault();
+              focusTabByIndex(index - 1);
+              break;
+            case "Home":
+              event.preventDefault();
+              focusTabByIndex(0);
+              break;
+            case "End":
+              event.preventDefault();
+              focusTabByIndex(tabButtons.length - 1);
+              break;
+            case " ":
+            case "Enter":
+              event.preventDefault();
+              setActiveTab(button.dataset.tab || "recording");
+              break;
+            default:
+              break;
+          }
         });
       });
       setActiveTab("recording");
