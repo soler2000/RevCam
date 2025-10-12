@@ -500,3 +500,48 @@ def test_picamera_frames_are_returned_in_rgb(monkeypatch: pytest.MonkeyPatch) ->
     finally:
         asyncio.run(camera.close())
 
+
+def test_picamera_lens_settings_apply_controls(monkeypatch: pytest.MonkeyPatch) -> None:
+    applied_controls: list[dict[str, object]] = []
+
+    class DummyCamera:
+        def __init__(self) -> None:
+            self._closed = False
+
+        def create_video_configuration(self, **_: object) -> object:
+            return object()
+
+        def configure(self, _: object) -> None:
+            return None
+
+        def start(self) -> None:
+            return None
+
+        def set_controls(self, controls: dict[str, object]) -> None:
+            applied_controls.append(dict(controls))
+
+        def stop(self) -> None:
+            return None
+
+        def close(self) -> None:
+            self._closed = True
+
+    af_modes = types.SimpleNamespace(Manual=0, Auto=1, Continuous=2)
+    controls_module = types.SimpleNamespace(AfModeEnum=af_modes, AfTriggerEnum=types.SimpleNamespace(Start=5))
+    module = types.SimpleNamespace(Picamera2=DummyCamera)
+    module.controls = controls_module
+    monkeypatch.setitem(sys.modules, "picamera2", module)
+    monkeypatch.setitem(sys.modules, "picamera2.controls", controls_module)
+
+    manual_settings = camera_module.LensSettings(
+        mode=camera_module.LENS_MODE_MANUAL,
+        manual_position=3.1,
+    )
+    camera = Picamera2Camera(lens_settings=manual_settings)
+    try:
+        assert {"AfMode": af_modes.Manual, "LensPosition": 3.1} in applied_controls
+        camera.apply_lens_settings(camera_module.LensSettings(mode=camera_module.LENS_MODE_AUTO))
+        assert any(ctrl.get("AfMode") == af_modes.Auto for ctrl in applied_controls)
+    finally:
+        asyncio.run(camera.close())
+

@@ -13,7 +13,7 @@ pytest.importorskip("httpx")
 from fastapi.testclient import TestClient
 
 from rev_cam.app import create_app
-from rev_cam.camera import BaseCamera, CameraError
+from rev_cam.camera import BaseCamera, CameraError, DEFAULT_LENS_SETTINGS
 from rev_cam.config import DEFAULT_RESOLUTION_KEY
 from rev_cam.version import APP_VERSION
 
@@ -53,7 +53,7 @@ def _apply_common_stubs(monkeypatch: pytest.MonkeyPatch) -> None:
 class _BrokenPicamera:
     """Stub Picamera implementation that always fails."""
 
-    def __init__(self) -> None:
+    def __init__(self, *args, **kwargs) -> None:
         raise CameraError("picamera backend unavailable")
 
 
@@ -168,6 +168,10 @@ def test_camera_endpoint_reports_picamera_error(client: TestClient) -> None:
     assert resolution_info["selected"] == DEFAULT_RESOLUTION_KEY
     assert resolution_info["active"] == DEFAULT_RESOLUTION_KEY
     assert any(opt["value"] == DEFAULT_RESOLUTION_KEY for opt in resolution_info["options"])
+    lens_info = payload.get("lens")
+    assert isinstance(lens_info, dict)
+    assert lens_info.get("mode") == DEFAULT_LENS_SETTINGS.mode
+    assert any(option.get("value") == DEFAULT_LENS_SETTINGS.mode for option in lens_info.get("options", []))
 
 
 def test_stream_status_endpoint_reports_capabilities(client: TestClient) -> None:
@@ -198,6 +202,9 @@ def test_camera_update_surfaces_failure(client: TestClient) -> None:
     assert stream_info["active"] == {"fps": 20, "jpeg_quality": 85}
     assert stream_info["webrtc"]["enabled"] is True
     assert stream_info["webrtc"]["endpoint"] == "/stream/webrtc"
+    lens_info = refreshed.get("lens")
+    assert isinstance(lens_info, dict)
+    assert lens_info.get("mode") == DEFAULT_LENS_SETTINGS.mode
     resolution_info = refreshed["resolution"]
     assert resolution_info["selected"] == DEFAULT_RESOLUTION_KEY
     assert resolution_info["active"] == DEFAULT_RESOLUTION_KEY
@@ -212,10 +219,29 @@ def test_camera_resolution_update(client: TestClient) -> None:
     payload = response.json()
     assert payload["resolution"]["selected"] == "640x480"
     assert payload["resolution"]["active"] == "640x480"
+    assert payload["lens"]["mode"] == DEFAULT_LENS_SETTINGS.mode
     config_path = getattr(client, "config_path", None)
     assert config_path is not None
     config_data = json.loads(Path(config_path).read_text())
     assert config_data["resolution"] == {"width": 640, "height": 480}
+
+
+def test_camera_lens_update(client: TestClient) -> None:
+    initial = client.get("/api/camera").json()
+    payload = {
+        "source": initial["selected"],
+        "resolution": initial["resolution"]["selected"],
+        "lens": {"mode": "manual", "manual_position": 2.5},
+    }
+    response = client.post("/api/camera", json=payload)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["lens"]["mode"] == "manual"
+    assert body["lens"].get("manual_position") == pytest.approx(2.5)
+    config_path = getattr(client, "config_path", None)
+    assert config_path is not None
+    stored = json.loads(Path(config_path).read_text())
+    assert stored["lens"] == {"mode": "manual", "manual_position": 2.5}
 
 
 def test_mjpeg_stream_endpoint(client: TestClient) -> None:

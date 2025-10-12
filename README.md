@@ -23,6 +23,16 @@ that future driver-assistance overlays can be injected on the server without maj
 - Automatic Wi-Fi selection on boot with hotspot fallback when no saved
   networks are reachable.
 
+## Camera compatibility
+
+RevCam selects the camera backend via the **Camera** menu in the settings
+panel. When a Raspberry Pi Camera Module 3 (standard or NoIR) or another
+Picamera2-compatible lens with controllable focus—such as the ZeroCam FishEye
+and ZeroCam NoIR modules—is connected, the application exposes lens controls
+alongside the resolution picker. Use the **Lens** menu to keep the driver
+defaults, enable single-shot or continuous autofocus, or set a manual focus
+position so supported modules can be tuned directly from RevCam.
+
 ## Project layout
 
 ```

@@ -10,7 +10,12 @@ from typing import Any, Dict, Iterable, Mapping, Sequence
 from typing import Literal
 
 try:
-    from .camera import CAMERA_SOURCES, DEFAULT_CAMERA_CHOICE
+    from .camera import (
+        CAMERA_SOURCES,
+        DEFAULT_CAMERA_CHOICE,
+        DEFAULT_LENS_SETTINGS,
+        LensSettings,
+    )
 except ImportError:  # pragma: no cover - fallback when optional dependencies missing
     CAMERA_SOURCES = {
         "auto": "Automatic (PiCamera2 with synthetic fallback)",
@@ -19,6 +24,19 @@ except ImportError:  # pragma: no cover - fallback when optional dependencies mi
         "synthetic": "Synthetic test pattern",
     }
     DEFAULT_CAMERA_CHOICE = "auto"
+
+    @dataclass(frozen=True, slots=True)
+    class LensSettings:  # type: ignore[redefinition]
+        mode: str = "driver"
+        manual_position: float | None = None
+
+        def to_dict(self) -> dict[str, float | str | None]:
+            return {"mode": self.mode, "manual_position": self.manual_position}
+
+        def requires_manual_position(self) -> bool:
+            return self.mode == "manual"
+
+    DEFAULT_LENS_SETTINGS = LensSettings()
 from .battery import BatteryLimits, DEFAULT_BATTERY_LIMITS
 from .trailer_leveling import (
     DEFAULT_LEVELING_SETTINGS,
@@ -500,6 +518,44 @@ def _parse_resolution(value: Any, *, default: Resolution) -> Resolution:
     raise ValueError("Unsupported resolution value")
 
 
+def _parse_lens_settings(value: Any, *, default: LensSettings) -> LensSettings:
+    if value is None:
+        return default
+
+    if isinstance(value, LensSettings):
+        return value
+
+    mode: str | None = None
+    manual_position: float | None = None
+
+    if isinstance(value, Mapping):
+        raw_mode = value.get("mode")
+        if isinstance(raw_mode, str):
+            mode = raw_mode
+        raw_manual = value.get("manual_position")
+        if raw_manual is None and "lens_position" in value:
+            raw_manual = value.get("lens_position")
+        if raw_manual not in (None, ""):
+            try:
+                manual_position = float(raw_manual)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("Lens position must be numeric") from exc
+    elif isinstance(value, str):
+        mode = value
+    else:
+        raise ValueError("Lens settings must be provided as an object or string")
+
+    if mode is None:
+        mode = default.mode
+    if manual_position is None:
+        manual_position = default.manual_position
+
+    try:
+        return LensSettings(mode=mode, manual_position=manual_position)
+    except ValueError as exc:
+        raise ValueError(f"Invalid lens settings: {exc}") from exc
+
+
 def _parse_stream_settings(value: Any, *, default: StreamSettings) -> StreamSettings:
     if value is None:
         return default
@@ -914,6 +970,7 @@ class ConfigManager:
             self._orientation,
             self._camera,
             self._resolution,
+            self._lens_settings,
             self._distance_zones,
             self._distance_calibration,
             self._distance_overlay_enabled,
@@ -941,6 +998,7 @@ class ConfigManager:
         Orientation,
         str,
         Resolution,
+        LensSettings,
         DistanceZones,
         DistanceCalibration,
         bool,
@@ -963,6 +1021,7 @@ class ConfigManager:
                 Orientation(),
                 DEFAULT_CAMERA_CHOICE,
                 DEFAULT_RESOLUTION,
+                DEFAULT_LENS_SETTINGS,
                 DEFAULT_DISTANCE_ZONES,
                 DEFAULT_DISTANCE_CALIBRATION,
                 DEFAULT_DISTANCE_OVERLAY_ENABLED,
@@ -998,6 +1057,10 @@ class ConfigManager:
                 camera = DEFAULT_CAMERA_CHOICE
             resolution_payload = payload.get("resolution")
             resolution = _parse_resolution(resolution_payload, default=DEFAULT_RESOLUTION)
+            lens_payload = payload.get("lens")
+            lens_settings = _parse_lens_settings(
+                lens_payload, default=DEFAULT_LENS_SETTINGS
+            )
 
             distance_payload = payload.get("distance")
             distance_zones = _parse_distance_zones(distance_payload, default=DEFAULT_DISTANCE_ZONES)
@@ -1075,6 +1138,7 @@ class ConfigManager:
                 orientation,
                 camera,
                 resolution,
+                lens_settings,
                 distance_zones,
                 distance_calibration,
                 distance_overlay_enabled,
@@ -1100,6 +1164,7 @@ class ConfigManager:
             "orientation": asdict(self._orientation),
             "camera": self._camera,
             "resolution": {"width": self._resolution.width, "height": self._resolution.height},
+            "lens": self._lens_settings.to_dict(),
             "distance": {
                 "zones": self._distance_zones.to_dict(),
                 "calibration": self._distance_calibration.to_dict(),
@@ -1151,6 +1216,23 @@ class ConfigManager:
             self._camera = normalised
             self._save()
         return normalised
+
+    def get_lens_settings(self) -> LensSettings:
+        with self._lock:
+            return self._lens_settings
+
+    def parse_lens_settings(
+        self, value: Any, *, default: LensSettings | None = None
+    ) -> LensSettings:
+        base = default or self._lens_settings
+        return _parse_lens_settings(value, default=base)
+
+    def set_lens_settings(self, value: Any) -> LensSettings:
+        settings = _parse_lens_settings(value, default=self._lens_settings)
+        with self._lock:
+            self._lens_settings = settings
+            self._save()
+        return settings
 
     def get_resolution(self) -> Resolution:
         with self._lock:

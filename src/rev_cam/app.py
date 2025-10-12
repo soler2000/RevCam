@@ -25,7 +25,22 @@ from .battery import (
     create_battery_overlay,
     create_wifi_overlay,
 )
-from .camera import CAMERA_SOURCES, BaseCamera, CameraError, create_camera, identify_camera
+from .camera import (
+    CAMERA_SOURCES,
+    BaseCamera,
+    CameraError,
+    LensSettings,
+    Picamera2Camera,
+    create_camera,
+    identify_camera,
+    LENS_MODE_AUTO,
+    LENS_MODE_CONTINUOUS,
+    LENS_MODE_DRIVER_DEFAULT,
+    LENS_MODE_MANUAL,
+    LENS_POSITION_MAX,
+    LENS_POSITION_MIN,
+    LENS_POSITION_STEP,
+)
 from .config import (
     ConfigManager,
     DistanceMounting,
@@ -115,9 +130,45 @@ class StreamMode(str, Enum):
     SURVEILLANCE = "surveillance"
 
 
+class CameraLensPayload(BaseModel):
+    mode: str | None = None
+    manual_position: float | None = Field(default=None, alias="manual_position")
+
+
 class CameraPayload(BaseModel):
     source: str
     resolution: str | None = None
+    lens: CameraLensPayload | None = None
+
+
+LENS_MODE_LABELS: Mapping[str, str] = {
+    LENS_MODE_DRIVER_DEFAULT: "Driver default",
+    LENS_MODE_AUTO: "Single-shot autofocus",
+    LENS_MODE_CONTINUOUS: "Continuous autofocus",
+    LENS_MODE_MANUAL: "Manual focus",
+}
+
+
+def _serialise_lens_settings(settings: LensSettings) -> dict[str, object]:
+    options = [
+        {"value": mode, "label": LENS_MODE_LABELS.get(mode, mode)}
+        for mode in (
+            LENS_MODE_DRIVER_DEFAULT,
+            LENS_MODE_AUTO,
+            LENS_MODE_CONTINUOUS,
+            LENS_MODE_MANUAL,
+        )
+    ]
+    return {
+        "mode": settings.mode,
+        "manual_position": settings.manual_position,
+        "options": options,
+        "manual_range": {
+            "min": LENS_POSITION_MIN,
+            "max": LENS_POSITION_MAX,
+            "step": LENS_POSITION_STEP,
+        },
+    }
 
 
 class WiFiConnectPayload(BaseModel):
@@ -989,12 +1040,17 @@ def create_app(
         resolution: Resolution,
         *,
         fallback_to_synthetic: bool,
+        lens_settings: LensSettings,
     ) -> tuple[BaseCamera, str]:
         normalised = selection.strip().lower()
         resolution_tuple = resolution.as_tuple()
         if normalised == "auto":
             try:
-                camera_instance = create_camera("picamera", resolution=resolution_tuple)
+                camera_instance = create_camera(
+                    "picamera",
+                    resolution=resolution_tuple,
+                    lens_settings=lens_settings,
+                )
             except CameraError as exc:
                 reason = str(exc)
                 logger.warning("Picamera unavailable, using synthetic camera: %s", reason)
@@ -1003,6 +1059,7 @@ def create_app(
                     "synthetic",
                     resolution,
                     fallback_to_synthetic=False,
+                    lens_settings=lens_settings,
                 )
                 return fallback_camera, fallback_active
             else:
@@ -1010,7 +1067,11 @@ def create_app(
                 return camera_instance, identify_camera(camera_instance)
 
         try:
-            camera_instance = create_camera(normalised, resolution=resolution_tuple)
+            camera_instance = create_camera(
+                normalised,
+                resolution=resolution_tuple,
+                lens_settings=lens_settings,
+            )
         except CameraError as exc:
             reason = str(exc)
             _record_camera_error(normalised, reason)
@@ -1022,6 +1083,7 @@ def create_app(
                     "synthetic",
                     resolution,
                     fallback_to_synthetic=False,
+                    lens_settings=lens_settings,
                 )
                 return fallback_camera, fallback_active
             raise
@@ -1060,10 +1122,12 @@ def create_app(
                 pass
         selection = config_manager.get_camera()
         resolution = config_manager.get_resolution()
+        lens_settings = config_manager.get_lens_settings()
         camera, active_camera_choice = _build_camera(
             selection,
             resolution,
             fallback_to_synthetic=True,
+            lens_settings=lens_settings,
         )
         active_resolution = resolution
         stream_settings = config_manager.get_stream_settings()
@@ -1440,6 +1504,7 @@ def create_app(
                 "active": active_resolution.key(),
                 "options": resolution_options,
             },
+            "lens": _serialise_lens_settings(config_manager.get_lens_settings()),
         }
 
     @app.get("/api/stream")
@@ -1834,10 +1899,25 @@ def create_app(
 
         current_selection = config_manager.get_camera()
         current_resolution = config_manager.get_resolution()
+        current_lens_settings = config_manager.get_lens_settings()
+        lens_payload = (
+            payload.lens.model_dump(by_alias=True, exclude_none=True)
+            if payload.lens is not None
+            else None
+        )
+        try:
+            requested_lens_settings = config_manager.parse_lens_settings(
+                lens_payload, default=current_lens_settings
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        lens_changed = requested_lens_settings != current_lens_settings
         if (
             camera is not None
             and selection == current_selection
             and requested_resolution == current_resolution
+            and not lens_changed
         ):
             stream_info = _build_stream_info()
             await _set_ready_pattern()
@@ -1850,6 +1930,33 @@ def create_app(
                     "selected": current_resolution.key(),
                     "active": active_resolution.key(),
                 },
+                "lens": _serialise_lens_settings(current_lens_settings),
+            }
+
+        if (
+            camera is not None
+            and selection == current_selection
+            and requested_resolution == current_resolution
+            and lens_changed
+        ):
+            if isinstance(camera, Picamera2Camera):
+                try:
+                    camera.apply_lens_settings(requested_lens_settings)
+                except CameraError as exc:
+                    raise HTTPException(status_code=400, detail=str(exc)) from exc
+            config_manager.set_lens_settings(requested_lens_settings)
+            stream_info = _build_stream_info()
+            await _set_ready_pattern()
+            return {
+                "selected": selection,
+                "active": active_camera_choice,
+                "version": APP_VERSION,
+                "stream": stream_info,
+                "resolution": {
+                    "selected": current_resolution.key(),
+                    "active": active_resolution.key(),
+                },
+                "lens": _serialise_lens_settings(requested_lens_settings),
             }
 
         await led_ring.set_pattern("boot")
@@ -1868,6 +1975,7 @@ def create_app(
                 selection,
                 requested_resolution,
                 fallback_to_synthetic=(selection == "auto"),
+                lens_settings=requested_lens_settings,
             )
         except CameraError as exc:
             # Attempt to restore the previous camera configuration on failure.
@@ -1876,6 +1984,7 @@ def create_app(
                     old_selection,
                     old_resolution,
                     fallback_to_synthetic=True,
+                    lens_settings=current_lens_settings,
                 )
             except Exception:  # pragma: no cover - best-effort recovery
                 camera = None
@@ -1895,6 +2004,7 @@ def create_app(
         active_resolution = requested_resolution
         config_manager.set_camera(selection)
         config_manager.set_resolution(requested_resolution)
+        config_manager.set_lens_settings(requested_lens_settings)
         try:
             await _refresh_video_services()
         except Exception as exc:
@@ -1911,6 +2021,7 @@ def create_app(
                 "selected": requested_resolution.key(),
                 "active": active_resolution.key(),
             },
+            "lens": _serialise_lens_settings(requested_lens_settings),
         }
 
     @app.get("/api/camera/snapshot")

@@ -1,9 +1,12 @@
 from pathlib import Path
 import math
 
+from pathlib import Path
+
 import pytest
 
 from rev_cam.battery import BatteryLimits
+from rev_cam.camera import DEFAULT_LENS_SETTINGS, LensSettings
 from rev_cam.config import (
     ConfigManager,
     DistanceZones,
@@ -69,6 +72,28 @@ def test_camera_requires_non_empty_string(tmp_path: Path):
         manager.set_camera("")
     with pytest.raises(ValueError):
         manager.set_camera("unknown")
+
+
+def test_default_lens_settings(tmp_path: Path) -> None:
+    manager = ConfigManager(tmp_path / "config.json")
+    assert manager.get_lens_settings() == DEFAULT_LENS_SETTINGS
+
+
+def test_lens_settings_persistence(tmp_path: Path) -> None:
+    config_file = tmp_path / "config.json"
+    manager = ConfigManager(config_file)
+    updated = manager.set_lens_settings({"mode": "manual", "manual_position": 2.5})
+    assert isinstance(updated, LensSettings)
+    assert updated.mode == "manual"
+    assert updated.manual_position == pytest.approx(2.5)
+    reloaded = ConfigManager(config_file)
+    assert reloaded.get_lens_settings() == updated
+
+
+def test_manual_lens_requires_position(tmp_path: Path) -> None:
+    manager = ConfigManager(tmp_path / "config.json")
+    with pytest.raises(ValueError):
+        manager.set_lens_settings({"mode": "manual"})
 
 
 def test_default_distance_zones(tmp_path: Path):

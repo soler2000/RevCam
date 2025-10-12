@@ -1865,6 +1865,7 @@ class WiFiManager:
             return
         stop_event = threading.Event()
         self._watchdog_stop_event = stop_event
+        started_event = threading.Event()
 
         def _run() -> None:
             deadline = time.monotonic() + self._watchdog_boot_delay
@@ -1880,11 +1881,15 @@ class WiFiManager:
                     self._watchdog_cycle(initial_boot_check=first_cycle)
                 except Exception:  # pragma: no cover - defensive logging
                     logging.getLogger(__name__).exception("Wi-Fi hotspot watchdog error")
+                finally:
+                    if first_cycle:
+                        started_event.set()
                 first_cycle = False
 
         thread = threading.Thread(target=_run, name="wifi-hotspot-watchdog", daemon=True)
         self._watchdog_thread = thread
         thread.start()
+        started_event.wait(timeout=min(self._watchdog_boot_delay + self._watchdog_interval, 0.5))
 
     def stop_hotspot_watchdog(self) -> None:
         """Stop the hotspot watchdog thread if running."""

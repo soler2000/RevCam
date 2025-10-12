@@ -711,6 +711,18 @@
       #orientation-form h3 {
         margin-top: 0;
       }
+      .lens-manual-controls {
+        display: none;
+        margin-top: var(--space-sm);
+      }
+      .lens-manual-controls:not([hidden]) {
+        display: flex;
+        flex-direction: column;
+        gap: 0.35rem;
+      }
+      .lens-manual-controls input[type="number"] {
+        max-width: 10rem;
+      }
       .form-actions {
         display: flex;
         align-items: center;
@@ -1875,6 +1887,28 @@
               Resolution
               <select name="resolution"></select>
             </label>
+            <h3>Lens</h3>
+            <p class="muted helper-text">
+              Configure lens behaviour for modules with focus controls such as the Raspberry Pi Camera Module 3
+              (standard or NoIR) and compatible ZeroCam FishEye/ZeroCam NOIR lenses. Manual focus is useful for
+              fixed mounting distances, while autofocus modes keep the image sharp dynamically.
+            </p>
+            <label>
+              Focus mode
+              <select name="lens_mode"></select>
+            </label>
+            <div id="lens-manual-controls" class="lens-manual-controls" hidden>
+              <label>
+                Manual lens position
+                <input
+                  type="number"
+                  name="lens_manual_position"
+                  step="0.05"
+                  inputmode="decimal"
+                />
+              </label>
+              <p id="lens-manual-helper" class="muted helper-text"></p>
+            </div>
             <h3>Orientation</h3>
             <label>
               Rotation
@@ -3751,6 +3785,16 @@
       const versionValue = document.getElementById("version-value");
       const cameraLabels = new Map();
       const resolutionLabels = new Map();
+      const lensModeSelect =
+        form && form.querySelector('select[name="lens_mode"]') instanceof HTMLSelectElement
+          ? form.querySelector('select[name="lens_mode"]')
+          : null;
+      const lensManualInput =
+        form && form.querySelector('input[name="lens_manual_position"]') instanceof HTMLInputElement
+          ? form.querySelector('input[name="lens_manual_position"]')
+          : null;
+      const lensManualControls = document.getElementById("lens-manual-controls");
+      const lensManualHelper = document.getElementById("lens-manual-helper");
       const streamSection = document.getElementById("stream-section");
       const streamSummary = document.getElementById("stream-summary");
       const streamUrlElement = document.getElementById("stream-url");
@@ -3824,6 +3868,12 @@
       }
 
       setHotspotPasswordVisibility(false);
+
+      if (lensModeSelect instanceof HTMLSelectElement) {
+        lensModeSelect.addEventListener("change", () => {
+          setLensManualVisibility(lensModeSelect.value);
+        });
+      }
 
       function formatLedPatternName(name) {
         if (typeof name !== "string" || !name) {
@@ -8518,6 +8568,98 @@
         }
       }
 
+      function setLensManualVisibility(mode) {
+        if (!lensManualControls) {
+          return;
+        }
+        lensManualControls.hidden = mode !== "manual";
+      }
+
+      function updateLensControls(lens) {
+        if (!(lensModeSelect instanceof HTMLSelectElement)) {
+          if (lensManualControls) {
+            lensManualControls.hidden = true;
+          }
+          return;
+        }
+        const options = lens && Array.isArray(lens.options) ? lens.options : [];
+        if (!options.length) {
+          setLensManualVisibility(lensModeSelect.value || "");
+          return;
+        }
+        const existingValues = Array.from(lensModeSelect.options, (option) => option.value);
+        const optionsChanged =
+          options.length !== existingValues.length ||
+          options.some((option, index) => option.value !== existingValues[index]);
+        if (optionsChanged) {
+          const fragment = document.createDocumentFragment();
+          for (const option of options) {
+            const opt = document.createElement("option");
+            opt.value = option.value;
+            opt.textContent = option.label;
+            fragment.appendChild(opt);
+          }
+          lensModeSelect.replaceChildren(fragment);
+        }
+
+        let desiredMode =
+          lens && typeof lens.mode === "string" && lens.mode ? lens.mode : "";
+        if (
+          desiredMode &&
+          !options.some((option) => option.value === desiredMode)
+        ) {
+          desiredMode = options.length > 0 ? options[0].value : "";
+        }
+        if (desiredMode) {
+          lensModeSelect.value = desiredMode;
+        } else if (lensModeSelect.options.length > 0) {
+          lensModeSelect.selectedIndex = 0;
+          desiredMode = lensModeSelect.value;
+        }
+
+        if (lensManualInput instanceof HTMLInputElement) {
+          const range =
+            lens && lens.manual_range && typeof lens.manual_range === "object"
+              ? lens.manual_range
+              : {};
+          const min =
+            typeof range.min === "number" && Number.isFinite(range.min)
+              ? range.min
+              : null;
+          const max =
+            typeof range.max === "number" && Number.isFinite(range.max)
+              ? range.max
+              : null;
+          const step =
+            typeof range.step === "number" && Number.isFinite(range.step)
+              ? range.step
+              : null;
+          lensManualInput.min = min !== null ? String(min) : "";
+          lensManualInput.max = max !== null ? String(max) : "";
+          lensManualInput.step = step !== null ? String(step) : lensManualInput.step || "0.05";
+          if (
+            lens &&
+            typeof lens.manual_position === "number" &&
+            Number.isFinite(lens.manual_position)
+          ) {
+            lensManualInput.value = String(lens.manual_position);
+          } else {
+            lensManualInput.value = "";
+          }
+          if (lensManualHelper) {
+            if (min !== null && max !== null) {
+              const stepText = step !== null ? ` (step ${step})` : "";
+              lensManualHelper.textContent = `Set a manual focus between ${min} and ${max}${stepText}.`;
+            } else {
+              lensManualHelper.textContent =
+                "Set the manual focus position when manual mode is selected.";
+            }
+          }
+        }
+
+        setLensManualVisibility(desiredMode || lensModeSelect.value || "");
+      }
+
       function resetCopyFeedback() {
         if (copyStreamButton) {
           copyStreamButton.textContent = copyButtonDefault;
@@ -8532,6 +8674,7 @@
 
         updateVersion(camera);
         updateStreamSection(camera);
+        updateLensControls(camera && camera.lens ? camera.lens : null);
 
         const cameraSelect = form.elements.namedItem("camera");
         if (!(cameraSelect instanceof HTMLSelectElement)) {
@@ -9138,13 +9281,52 @@
           statusLabel.textContent = "Error: resolution selector missing";
           return;
         }
+        const cameraPayload = {
+          source: cameraSelect.value,
+          resolution: resolutionSelect.value,
+        };
+        if (lensModeSelect instanceof HTMLSelectElement) {
+          const lensPayload = {};
+          const modeValue = lensModeSelect.value;
+          if (modeValue) {
+            lensPayload.mode = modeValue;
+          }
+          if (lensManualInput instanceof HTMLInputElement) {
+            const manualRaw = lensManualInput.value;
+            const min = Number.parseFloat(lensManualInput.min);
+            const max = Number.parseFloat(lensManualInput.max);
+            const hasMin = Number.isFinite(min);
+            const hasMax = Number.isFinite(max);
+            if (modeValue === "manual") {
+              const manualValue = Number.parseFloat(manualRaw);
+              if (!Number.isFinite(manualValue)) {
+                statusLabel.textContent = "Enter a manual lens position.";
+                return;
+              }
+              if (hasMin && manualValue < min) {
+                statusLabel.textContent = `Manual lens position must be ≥ ${min}.`;
+                return;
+              }
+              if (hasMax && manualValue > max) {
+                statusLabel.textContent = `Manual lens position must be ≤ ${max}.`;
+                return;
+              }
+              lensPayload.manual_position = manualValue;
+            } else if (manualRaw) {
+              const manualValue = Number.parseFloat(manualRaw);
+              if (Number.isFinite(manualValue)) {
+                lensPayload.manual_position = manualValue;
+              }
+            }
+          }
+          if (Object.keys(lensPayload).length > 0) {
+            cameraPayload.lens = lensPayload;
+          }
+        }
         const cameraResponse = await fetch("/api/camera", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            source: cameraSelect.value,
-            resolution: resolutionSelect.value,
-          }),
+          body: JSON.stringify(cameraPayload),
         });
         if (!cameraResponse.ok) {
           let errorDetail = "Unable to update camera";

@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import os
 import subprocess
 import time
 from abc import ABC, abstractmethod
-from typing import Iterable
+from dataclasses import dataclass
+from typing import Iterable, Literal
 
 import numpy as np
 
@@ -59,6 +61,71 @@ _CAMERA_ALIASES = {
     "picamera2": "picamera",
     "picamera2camera": "picamera",
 }
+
+
+LENS_MODE_DRIVER_DEFAULT = "driver"
+LENS_MODE_AUTO = "auto"
+LENS_MODE_CONTINUOUS = "continuous"
+LENS_MODE_MANUAL = "manual"
+
+LENS_POSITION_MIN = 0.0
+LENS_POSITION_MAX = 10.0
+LENS_POSITION_STEP = 0.05
+
+
+@dataclass(frozen=True, slots=True)
+class LensSettings:
+    """Describes how the Pi camera lens should be driven."""
+
+    mode: Literal[
+        LENS_MODE_DRIVER_DEFAULT,
+        LENS_MODE_AUTO,
+        LENS_MODE_CONTINUOUS,
+        LENS_MODE_MANUAL,
+    ] = LENS_MODE_DRIVER_DEFAULT
+    manual_position: float | None = None
+
+    def __post_init__(self) -> None:
+        mode = self.mode.strip().lower()
+        if mode not in {
+            LENS_MODE_DRIVER_DEFAULT,
+            LENS_MODE_AUTO,
+            LENS_MODE_CONTINUOUS,
+            LENS_MODE_MANUAL,
+        }:
+            raise ValueError(f"Unknown lens focus mode: {self.mode}")
+        object.__setattr__(self, "mode", mode)
+
+        if mode == LENS_MODE_MANUAL and self.manual_position is None:
+            raise ValueError("Manual focus mode requires a lens position")
+
+        if self.manual_position is None:
+            return
+
+        try:
+            position = float(self.manual_position)
+        except (TypeError, ValueError) as exc:  # pragma: no cover - defensive branch
+            raise ValueError("Lens position must be numeric") from exc
+
+        if not math.isfinite(position):
+            raise ValueError("Lens position must be a finite number")
+
+        if position < LENS_POSITION_MIN or position > LENS_POSITION_MAX:
+            raise ValueError(
+                "Lens position must be between "
+                f"{LENS_POSITION_MIN:g} and {LENS_POSITION_MAX:g}"
+            )
+
+        object.__setattr__(self, "manual_position", position)
+
+    def to_dict(self) -> dict[str, float | str | None]:
+        return {"mode": self.mode, "manual_position": self.manual_position}
+
+    def requires_manual_position(self) -> bool:
+        return self.mode == LENS_MODE_MANUAL
+
+
+DEFAULT_LENS_SETTINGS = LensSettings()
 
 
 class CameraError(RuntimeError):
@@ -306,7 +373,12 @@ def diagnose_camera_conflicts() -> list[str]:
 class Picamera2Camera(BaseCamera):
     """Camera implementation using the Picamera2 stack."""
 
-    def __init__(self, resolution: tuple[int, int] | None = None) -> None:
+    def __init__(
+        self,
+        resolution: tuple[int, int] | None = None,
+        *,
+        lens_settings: LensSettings | None = None,
+    ) -> None:
         try:
             from picamera2 import Picamera2
         except Exception as exc:  # pragma: no cover - hardware dependent
@@ -330,6 +402,7 @@ class Picamera2Camera(BaseCamera):
         _ensure_picamera_allocator(Picamera2)
 
         self._camera = None
+        self._lens_settings = lens_settings or DEFAULT_LENS_SETTINGS
         camera_instance = None
         started = False
         try:
@@ -344,6 +417,7 @@ class Picamera2Camera(BaseCamera):
             camera_instance.configure(config)
             camera_instance.start()
             started = True
+            self._apply_lens_settings(self._lens_settings)
         except Exception as exc:  # pragma: no cover - hardware dependent
             camera = camera_instance or self._camera
             if camera is not None:
@@ -409,6 +483,67 @@ class Picamera2Camera(BaseCamera):
     async def close(self) -> None:  # pragma: no cover - hardware dependent
         await asyncio.to_thread(self._camera.stop)
         await asyncio.to_thread(self._camera.close)
+
+    def apply_lens_settings(self, settings: LensSettings) -> None:
+        """Apply new lens settings to the active camera."""
+
+        if settings == self._lens_settings:
+            return
+        self._apply_lens_settings(settings)
+
+    def _apply_lens_settings(self, settings: LensSettings) -> None:
+        if settings.mode == LENS_MODE_DRIVER_DEFAULT:
+            self._lens_settings = settings
+            return
+
+        try:
+            from picamera2 import controls as picamera_controls
+        except Exception as exc:  # pragma: no cover - hardware dependent
+            detail = summarise_exception(exc)
+            message = "Lens controls are unavailable on this system"
+            if detail:
+                message = f"{message}: {detail}"
+            raise CameraError(message) from exc
+
+        af_mode_enum = getattr(picamera_controls, "AfModeEnum", None)
+        if af_mode_enum is None:  # pragma: no cover - defensive guard
+            raise CameraError("Picamera2 did not expose autofocus mode controls")
+
+        mode_mapping = {
+            LENS_MODE_AUTO: getattr(af_mode_enum, "Auto", None),
+            LENS_MODE_CONTINUOUS: getattr(af_mode_enum, "Continuous", None),
+            LENS_MODE_MANUAL: getattr(af_mode_enum, "Manual", None),
+        }
+
+        if settings.mode not in mode_mapping or mode_mapping[settings.mode] is None:
+            raise CameraError(f"Focus mode '{settings.mode}' is not supported by this lens")
+
+        controls: dict[str, object] = {"AfMode": mode_mapping[settings.mode]}
+
+        if settings.mode == LENS_MODE_MANUAL:
+            if settings.manual_position is None:
+                raise CameraError("Manual focus mode requires a lens position value")
+            controls["LensPosition"] = float(settings.manual_position)
+
+        try:
+            self._camera.set_controls(controls)
+        except Exception as exc:  # pragma: no cover - hardware dependent
+            detail = summarise_exception(exc)
+            message = "Failed to apply lens settings"
+            if detail:
+                message = f"{message}: {detail}"
+            raise CameraError(message) from exc
+
+        if settings.mode == LENS_MODE_AUTO:
+            trigger_enum = getattr(picamera_controls, "AfTriggerEnum", None)
+            trigger_value = getattr(trigger_enum, "Start", None) if trigger_enum else None
+            if trigger_value is not None:
+                try:
+                    self._camera.set_controls({"AfTrigger": trigger_value})
+                except Exception:  # pragma: no cover - autofocus trigger is best-effort
+                    logger.debug("Unable to trigger autofocus sweep", exc_info=True)
+
+        self._lens_settings = settings
 
 
 class OpenCVCamera(BaseCamera):
@@ -477,6 +612,7 @@ def create_camera(
     choice: str | None = None,
     *,
     resolution: tuple[int, int] | None = None,
+    lens_settings: LensSettings | None = None,
 ) -> BaseCamera:
     """Create the camera specified by *choice* or the environment.
 
@@ -493,10 +629,10 @@ def create_camera(
     if resolved_choice == "opencv":
         return OpenCVCamera(resolution=resolution)
     if resolved_choice == "picamera":
-        return Picamera2Camera(resolution=resolution)
+        return Picamera2Camera(resolution=resolution, lens_settings=lens_settings)
     if resolved_choice == "auto":
         try:
-            return Picamera2Camera(resolution=resolution)
+            return Picamera2Camera(resolution=resolution, lens_settings=lens_settings)
         except CameraError as exc:
             logger.error("Picamera2 unavailable during auto selection: %s", exc)
             return SyntheticCamera(resolution=resolution)
@@ -518,8 +654,17 @@ def identify_camera(camera: BaseCamera) -> str:
 __all__ = [
     "CAMERA_SOURCES",
     "DEFAULT_CAMERA_CHOICE",
+    "DEFAULT_LENS_SETTINGS",
     "BaseCamera",
     "CameraError",
+    "LensSettings",
+    "LENS_MODE_AUTO",
+    "LENS_MODE_CONTINUOUS",
+    "LENS_MODE_DRIVER_DEFAULT",
+    "LENS_MODE_MANUAL",
+    "LENS_POSITION_MIN",
+    "LENS_POSITION_MAX",
+    "LENS_POSITION_STEP",
     "identify_camera",
     "diagnose_camera_conflicts",
     "Picamera2Camera",
