@@ -1,5 +1,7 @@
 # WebRTC Raspberry Pi Throughput Review Task List
 
+> **Status dashboard:** Progress and findings for each task are captured in [`webrtc_rpi_throughput_review.md`](./webrtc_rpi_throughput_review.md). Update the checklist below as measurable milestones in that companion document are completed.
+
 ## 1. Baseline Assessment
 - [ ] Inventory the current Raspberry Pi model(s), firmware revision, and GPU/CPU capabilities.
 - [ ] Document existing WebRTC pipeline architecture (capture -> encode -> packetize -> transport -> decode).
