@@ -43,6 +43,7 @@ from .trailer_leveling import (
     LevelingSettings,
     parse_leveling_settings,
 )
+from .video_encoding import list_h264_backends, normalise_encoder_choice
 
 DEFAULT_BATTERY_CAPACITY_MAH = 1000
 from .distance import (
@@ -133,12 +134,18 @@ class Resolution:
         return f"{self.width}x{self.height}"
 
 
+_WEBRTC_ENCODER_BACKENDS = list_h264_backends()
+_WEBRTC_ENCODER_KEYS = {backend.key for backend in _WEBRTC_ENCODER_BACKENDS}
+_WEBRTC_ENCODER_CODECS = {backend.codec for backend in _WEBRTC_ENCODER_BACKENDS}
+
+
 @dataclass(frozen=True, slots=True)
 class StreamSettings:
     """Configuration values for the MJPEG stream."""
 
     fps: int = 20
     jpeg_quality: int = 85
+    webrtc_encoder: str = "auto"
 
     def __post_init__(self) -> None:
         if self.fps < 1 or self.fps > 60:
@@ -146,8 +153,31 @@ class StreamSettings:
         if self.jpeg_quality < 1 or self.jpeg_quality > 100:
             raise ValueError("Stream JPEG quality must be between 1 and 100")
 
-    def to_dict(self) -> Dict[str, int]:
-        return {"fps": int(self.fps), "jpeg_quality": int(self.jpeg_quality)}
+        encoder_choice = normalise_encoder_choice(self.webrtc_encoder)
+        normalised: str
+        if encoder_choice == "auto":
+            normalised = "auto"
+        elif encoder_choice in _WEBRTC_ENCODER_KEYS:
+            normalised = encoder_choice
+        elif encoder_choice in _WEBRTC_ENCODER_CODECS:
+            for backend in _WEBRTC_ENCODER_BACKENDS:
+                if backend.codec == encoder_choice:
+                    normalised = backend.key
+                    break
+            else:  # pragma: no cover - defensive guard
+                raise ValueError("Unknown WebRTC encoder selection")
+        else:
+            raise ValueError("Unknown WebRTC encoder selection")
+
+        object.__setattr__(self, "webrtc_encoder", normalised)
+
+    def to_dict(self) -> Dict[str, int | str]:
+        payload: Dict[str, int | str] = {
+            "fps": int(self.fps),
+            "jpeg_quality": int(self.jpeg_quality),
+        }
+        payload["webrtc_encoder"] = self.webrtc_encoder
+        return payload
 
 
 @dataclass(frozen=True, slots=True)
@@ -562,9 +592,11 @@ def _parse_stream_settings(value: Any, *, default: StreamSettings) -> StreamSett
     if isinstance(value, StreamSettings):
         fps_raw: Any = value.fps
         quality_raw: Any = value.jpeg_quality
+        encoder_raw: Any = value.webrtc_encoder
     elif isinstance(value, Mapping):
         fps_raw = value.get("fps", default.fps)
         quality_raw = value.get("jpeg_quality", value.get("quality", default.jpeg_quality))
+        encoder_raw = value.get("webrtc_encoder", default.webrtc_encoder)
     else:
         raise ValueError("Stream settings must be provided as a mapping")
 
@@ -582,7 +614,14 @@ def _parse_stream_settings(value: Any, *, default: StreamSettings) -> StreamSett
     if quality < 1 or quality > 100:
         raise ValueError("Stream JPEG quality must be between 1 and 100")
 
-    return StreamSettings(fps=fps, jpeg_quality=quality)
+    if encoder_raw is None:
+        encoder_value = default.webrtc_encoder
+    elif isinstance(encoder_raw, str):
+        encoder_value = encoder_raw
+    else:
+        raise ValueError("WebRTC encoder selection must be a string")
+
+    return StreamSettings(fps=fps, jpeg_quality=quality, webrtc_encoder=encoder_value)
 
 
 def _parse_surveillance_settings(

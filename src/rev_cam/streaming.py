@@ -5,10 +5,11 @@ import asyncio
 import inspect
 import logging
 import time
+from collections import deque
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from fractions import Fraction
-from typing import AsyncGenerator, Callable
+from typing import AsyncGenerator, Callable, Deque
 
 import numpy as np
 
@@ -45,12 +46,18 @@ else:  # pragma: no cover - dependency availability varies
     _AIORTC_IMPORT_ERROR = None
 
 try:  # pragma: no cover - dependency availability varies by platform
+    import av  # type: ignore
     from av import VideoFrame
+    from av.video.frame import PictureType
 except ImportError as exc:  # pragma: no cover - dependency availability varies
+    av = None  # type: ignore[assignment]
     VideoFrame = None  # type: ignore[assignment]
+    PictureType = None  # type: ignore[assignment]
     _AV_IMPORT_ERROR = exc
 else:  # pragma: no cover - dependency availability varies
     _AV_IMPORT_ERROR = None
+
+from .video_encoding import H264EncoderBackend, select_h264_backend
 
 
 def encode_frame_to_jpeg(
@@ -286,6 +293,164 @@ class MJPEGStreamer:
         return header + payload + b"\r\n"
 
 
+class WebRTCEncoder:
+    """Encode RGB frames into Annex B H.264 packets for WebRTC."""
+
+    def __init__(
+        self,
+        backend: H264EncoderBackend,
+        *,
+        fps: int,
+        disable_b_frames: bool = True,
+    ) -> None:
+        if av is None or VideoFrame is None or PictureType is None:  # pragma: no cover - dependency guard
+            raise RuntimeError("PyAV is required for WebRTC encoding")
+        if fps <= 0:
+            raise ValueError("fps must be positive")
+        self._backend = backend
+        self._fps = int(fps)
+        self._disable_b_frames = bool(disable_b_frames)
+        self._time_base = Fraction(1, self._fps)
+        self._frame_rate = Fraction(self._fps, 1)
+        self._codec: "av.CodecContext" | None = None
+        self._pending: Deque["av.Packet"] = deque()
+        self._pts: int = 0
+        self._force_keyframe: bool = True
+
+    def _codec_options(self) -> dict[str, str]:
+        if self._backend.key == "libx264":
+            return {
+                "preset": "ultrafast",
+                "tune": "zerolatency",
+                "profile": "baseline",
+                "bf": "0",
+            }
+        return {}
+
+    def _create_codec(self, width: int, height: int) -> "av.CodecContext":
+        assert av is not None  # for type checkers
+        codec = av.CodecContext.create(self._backend.codec, "w")
+        codec.width = width
+        codec.height = height
+        codec.time_base = self._time_base
+        codec.framerate = self._frame_rate
+        codec.pix_fmt = "yuv420p"
+        if self._disable_b_frames:
+            try:
+                codec.max_b_frames = 0
+            except Exception:  # pragma: no cover - property may be read-only
+                pass
+        options = self._codec_options()
+        if options:
+            try:
+                codec.options = options
+            except Exception:  # pragma: no cover - some codecs do not expose options
+                logger.debug(
+                    "WebRTC encoder %s did not accept configuration options", self._backend.codec
+                )
+        try:
+            codec.open()
+        except Exception as exc:  # pragma: no cover - codec initialisation failure
+            raise RuntimeError(f"Failed to open {self._backend.codec} encoder") from exc
+        self._pending.clear()
+        self._pts = 0
+        self._force_keyframe = True
+        return codec
+
+    def _ensure_codec(self, width: int, height: int) -> "av.CodecContext":
+        codec = self._codec
+        if codec is None or codec.width != width or codec.height != height:
+            codec = self._create_codec(width, height)
+            self._codec = codec
+        return codec
+
+    def encode(self, rgb_frame: np.ndarray) -> None:
+        codec = self._ensure_codec(int(rgb_frame.shape[1]), int(rgb_frame.shape[0]))
+        if VideoFrame is None or PictureType is None:  # pragma: no cover - dependency guard
+            raise RuntimeError("PyAV is required for WebRTC encoding")
+        video_frame = VideoFrame.from_ndarray(rgb_frame, format="rgb24")
+        yuv = video_frame.reformat(format="yuv420p")
+        yuv.pts = self._pts
+        yuv.time_base = self._time_base
+        try:
+            yuv.pict_type = PictureType.I if self._force_keyframe else PictureType.NONE
+        except Exception:  # pragma: no cover - pict_type may be immutable
+            pass
+        self._force_keyframe = False
+        self._pts += 1
+        try:
+            packets = codec.encode(yuv)
+        except av.FFmpegError as exc:  # pragma: no cover - codec failure
+            raise RuntimeError(f"WebRTC encoder {self._backend.codec} failed: {exc}") from exc
+        except Exception as exc:  # pragma: no cover - defensive guard
+            raise RuntimeError("WebRTC encoder failure") from exc
+        for packet in packets:
+            packet.time_base = codec.time_base
+            self._pending.append(packet)
+
+    def has_packets(self) -> bool:
+        return bool(self._pending)
+
+    def pop_packet(self):
+        if self._pending:
+            return self._pending.popleft()
+        return None
+
+    def request_keyframe(self) -> None:
+        self._force_keyframe = True
+
+    def update_fps(self, fps: int) -> None:
+        if fps <= 0:
+            raise ValueError("fps must be positive")
+        new_fps = int(fps)
+        if new_fps == self._fps:
+            return
+        self._fps = new_fps
+        self._time_base = Fraction(1, self._fps)
+        self._frame_rate = Fraction(self._fps, 1)
+        self._codec = None
+        self._pending.clear()
+        self._pts = 0
+        self._force_keyframe = True
+
+    def close(self) -> None:
+        self._pending.clear()
+        self._codec = None
+
+
+@dataclass(frozen=True)
+class _EncoderPreferences:
+    config: str | None
+    env: str | None
+    cli: str | None
+
+    def select(
+        self, session: str | None = None
+    ) -> tuple[H264EncoderBackend | None, tuple[str, ...], str]:
+        attempted: list[str] = []
+
+        def _extend(names: tuple[str, ...]) -> None:
+            for name in names:
+                if name not in attempted:
+                    attempted.append(name)
+
+        for source, choice in (
+            ("session", session),
+            ("cli", self.cli),
+            ("env", self.env),
+            ("config", self.config),
+        ):
+            if choice is None:
+                continue
+            backend, probed = select_h264_backend(choice)
+            _extend(probed)
+            if backend is not None:
+                return backend, tuple(attempted), source
+        backend, probed = select_h264_backend("auto")
+        _extend(probed)
+        return backend, tuple(attempted), "auto"
+
+
 if MediaStreamTrack is not None and VideoFrame is not None and MediaStreamError is not None:
 
     class PipelineVideoTrack(MediaStreamTrack):
@@ -293,32 +458,45 @@ if MediaStreamTrack is not None and VideoFrame is not None and MediaStreamError 
 
         kind = "video"
 
-        def __init__(self, manager: "WebRTCManager") -> None:
+        def __init__(self, manager: "WebRTCManager", backend: H264EncoderBackend) -> None:
             super().__init__()
             self._manager = manager
-            self._time_base = Fraction(1, 90_000)
-            self._timestamp = 0
             self._stopped = False
             self._frame_interval = 1.0 / float(manager.fps)
-            self._frame_increment = max(1, int(self._frame_interval * self._time_base.denominator))
+            self._encoder = WebRTCEncoder(backend, fps=manager.fps)
+            self._backend = backend
             self._manager._tracks.add(self)
 
         def update_fps(self, fps: int) -> None:
             if fps <= 0:
                 raise ValueError("fps must be positive")
             self._frame_interval = 1.0 / float(fps)
-            self._frame_increment = max(1, int(self._frame_interval * self._time_base.denominator))
+            try:
+                self._encoder.update_fps(fps)
+            except Exception:  # pragma: no cover - defensive logging
+                logger.debug(
+                    "Failed to update WebRTC encoder FPS for %s", self._backend.key, exc_info=True
+                )
 
         def stop(self) -> None:  # pragma: no cover - exercised indirectly
             if self._stopped:
                 return
             self._stopped = True
             self._manager._tracks.discard(self)
+            try:
+                self._encoder.close()
+            except Exception:  # pragma: no cover - defensive guard
+                logger.debug("Failed to close WebRTC encoder", exc_info=True)
             super().stop()
 
         async def recv(self):  # type: ignore[override]
             if self._stopped:
                 raise MediaStreamError("Track has been stopped")
+
+            if self._encoder.has_packets():
+                packet = self._encoder.pop_packet()
+                if packet is not None:
+                    return packet
 
             iteration_start = time.perf_counter()
 
@@ -339,10 +517,18 @@ if MediaStreamTrack is not None and VideoFrame is not None and MediaStreamError 
                 logger.exception("Failed to process frame for WebRTC stream")
                 raise MediaStreamError("Pipeline failure") from exc
 
-            video_frame = VideoFrame.from_ndarray(rgb, format="rgb24")
-            self._timestamp += self._frame_increment
-            video_frame.pts = self._timestamp
-            video_frame.time_base = self._time_base
+            try:
+                self._encoder.encode(rgb)
+            except RuntimeError as exc:  # pragma: no cover - codec failure
+                logger.error("WebRTC encoder %s failed: %s", self._backend.codec, exc)
+                raise MediaStreamError("Encoder failure") from exc
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.exception("Unexpected WebRTC encoder failure")
+                raise MediaStreamError("Encoder failure") from exc
+
+            packet = self._encoder.pop_packet()
+            if packet is None:  # pragma: no cover - defensive guard
+                raise MediaStreamError("Encoder produced no packets")
 
             elapsed = time.perf_counter() - iteration_start
             remaining = self._frame_interval - elapsed
@@ -351,7 +537,7 @@ if MediaStreamTrack is not None and VideoFrame is not None and MediaStreamError 
                     await asyncio.sleep(remaining)
                 except asyncio.CancelledError:  # pragma: no cover - cooperative exit
                     raise
-            return video_frame
+            return packet
 
 
 else:  # pragma: no cover - dependency availability varies
@@ -396,9 +582,14 @@ class WebRTCManager:
     pipeline: FramePipeline
     fps: int = 20
     peer_connection_factory: Callable[[], object] | None = None
+    encoder_config_choice: str | None = None
+    encoder_env_choice: str | None = None
+    encoder_cli_choice: str | None = None
     _sessions: set[_WebRTCSession] = field(init=False, default_factory=set)
     _tracks: set[PipelineVideoTrack] = field(init=False, default_factory=set)
     _lock: asyncio.Lock = field(init=False, default_factory=asyncio.Lock)
+    _encoder_preferences: _EncoderPreferences = field(init=False)
+    _default_backend: H264EncoderBackend | None = field(init=False, default=None)
 
     def __post_init__(self) -> None:
         if self.fps <= 0:
@@ -419,7 +610,24 @@ class WebRTCManager:
         if self.peer_connection_factory is None:
             self.peer_connection_factory = RTCPeerConnection  # type: ignore[assignment]
 
-    async def create_session(self, sdp: str, offer_type: str) -> RTCSessionDescription:
+        self._encoder_preferences = _EncoderPreferences(
+            config=self.encoder_config_choice,
+            env=self.encoder_env_choice,
+            cli=self.encoder_cli_choice,
+        )
+        backend, attempted, source = self._encoder_preferences.select()
+        if backend is None:
+            raise RuntimeError("No usable WebRTC H.264 encoder available")
+        self._default_backend = backend
+        logger.info(
+            "Selected WebRTC encoder backend %s via %s preference", backend.label, source
+        )
+        if attempted:
+            logger.debug("WebRTC encoder probe order: %s", ", ".join(attempted))
+
+    async def create_session(
+        self, sdp: str, offer_type: str, *, encoder: str | None = None
+    ) -> RTCSessionDescription:
         """Create a WebRTC session from a remote offer and return the answer."""
 
         if RTCSessionDescription is None or RTCPeerConnection is None:  # pragma: no cover
@@ -430,10 +638,28 @@ class WebRTCManager:
 
         if not isinstance(pc, RTCPeerConnection):
             raise TypeError("peer_connection_factory must return an RTCPeerConnection instance")
-
-        track = PipelineVideoTrack(self)
+        backend, attempted, source = self._encoder_preferences.select(encoder)
+        if backend is None:
+            raise RuntimeError("No usable WebRTC H.264 encoder available")
+        track = PipelineVideoTrack(self, backend)
         session = _WebRTCSession(self, pc, track)
         pc.addTrack(track)
+
+        if encoder is not None:
+            logger.info(
+                "WebRTC session requested %s encoder; using %s via %s preference",
+                encoder,
+                backend.label,
+                source,
+            )
+        elif backend != self._default_backend:
+            logger.info(
+                "WebRTC session switched to %s backend via %s preference",
+                backend.label,
+                source,
+            )
+        if attempted:
+            logger.debug("WebRTC session encoder probe: %s", ", ".join(attempted))
 
         @pc.on("connectionstatechange")
         async def _on_state_change() -> None:  # pragma: no cover - event driven
@@ -466,6 +692,7 @@ class WebRTCManager:
         *,
         fps: int | None = None,
         jpeg_quality: int | None = None,  # noqa: ARG002 - kept for API parity
+        encoder: str | None = None,
     ) -> None:
         """Update WebRTC streaming parameters."""
 
@@ -477,6 +704,28 @@ class WebRTCManager:
             if new_fps != self.fps:
                 self.fps = new_fps
                 update_tracks = True
+
+        if encoder is not None and encoder != self.encoder_config_choice:
+            self.encoder_config_choice = encoder
+            self._encoder_preferences = _EncoderPreferences(
+                config=self.encoder_config_choice,
+                env=self.encoder_env_choice,
+                cli=self.encoder_cli_choice,
+            )
+            backend, attempted, source = self._encoder_preferences.select()
+            if backend is None:
+                raise RuntimeError("No usable WebRTC H.264 encoder available")
+            self._default_backend = backend
+            logger.info(
+                "Updated WebRTC encoder preference to %s via %s preference",
+                backend.label,
+                source,
+            )
+            if attempted:
+                logger.debug(
+                    "WebRTC encoder probe order after update: %s",
+                    ", ".join(attempted),
+                )
 
         if update_tracks:
             for track in list(self._tracks):

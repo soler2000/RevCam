@@ -210,6 +210,7 @@ def test_default_stream_settings(tmp_path: Path) -> None:
     assert isinstance(settings, StreamSettings)
     assert settings.fps == 20
     assert settings.jpeg_quality == 85
+    assert settings.webrtc_encoder == "auto"
 
 
 def test_stream_settings_persistence(tmp_path: Path) -> None:
@@ -219,6 +220,7 @@ def test_stream_settings_persistence(tmp_path: Path) -> None:
     assert isinstance(updated, StreamSettings)
     assert updated.fps == 18
     assert updated.jpeg_quality == 70
+    assert updated.webrtc_encoder == "auto"
     reloaded = ConfigManager(config_file)
     assert reloaded.get_stream_settings() == updated
 
@@ -229,6 +231,17 @@ def test_stream_settings_validation(tmp_path: Path) -> None:
         manager.set_stream_settings({"fps": 0})
     with pytest.raises(ValueError):
         manager.set_stream_settings({"jpeg_quality": 120})
+
+
+def test_stream_settings_encoder_selection(tmp_path: Path) -> None:
+    manager = ConfigManager(tmp_path / "config.json")
+    updated = manager.set_stream_settings({"webrtc_encoder": "libx264"})
+    assert updated.webrtc_encoder == "libx264"
+    reloaded = ConfigManager(tmp_path / "config.json")
+    assert reloaded.get_stream_settings().webrtc_encoder == "libx264"
+
+    with pytest.raises(ValueError):
+        manager.set_stream_settings({"webrtc_encoder": "invalid"})
 
 
 def test_default_surveillance_settings(tmp_path: Path) -> None:

@@ -250,6 +250,7 @@ class BatteryCapacityPayload(BaseModel):
 class StreamSettingsPayload(BaseModel):
     fps: int | None = None
     jpeg_quality: int | None = None
+    webrtc_encoder: str | None = None
 
 
 class SurveillanceSettingsPayload(BaseModel):
@@ -273,6 +274,7 @@ class SurveillanceSettingsPayload(BaseModel):
 class WebRTCOfferPayload(BaseModel):
     sdp: str
     type: str
+    encoder: str | None = None
 
 
 class WebRTCErrorReportPayload(BaseModel):
@@ -354,6 +356,7 @@ def create_app(
     config_path: Path | str = Path("data/config.json"),
     *,
     wifi_manager: WiFiManager | None = None,
+    webrtc_encoder: str | None = None,
 ) -> FastAPI:
     app = FastAPI(title="RevCam", version=APP_VERSION)
 
@@ -361,6 +364,8 @@ def create_app(
 
     config_path = Path(config_path)
     config_manager = ConfigManager(config_path)
+    webrtc_encoder_cli_choice = webrtc_encoder
+    webrtc_encoder_env_choice = os.getenv("REVCAM_WEBRTC_ENCODER")
 
     level_filter = Gy85KalmanFilter()
     level_filter_lock = asyncio.Lock()
@@ -890,6 +895,9 @@ def create_app(
                 camera=camera,
                 pipeline=pipeline,
                 fps=stream_settings.fps,
+                encoder_config_choice=stream_settings.webrtc_encoder,
+                encoder_env_choice=webrtc_encoder_env_choice,
+                encoder_cli_choice=webrtc_encoder_cli_choice,
             )
         except RuntimeError as exc:
             logger.error("Failed to initialise WebRTC streamer: %s", exc)
@@ -1562,7 +1570,10 @@ def create_app(
                 raise HTTPException(status_code=500, detail="Unable to apply streaming settings") from exc
         if webrtc_manager is not None:
             try:
-                webrtc_manager.apply_settings(fps=settings.fps)
+                webrtc_manager.apply_settings(
+                    fps=settings.fps,
+                    encoder=settings.webrtc_encoder,
+                )
             except Exception as exc:  # pragma: no cover - defensive logging
                 logger.exception("Failed to apply WebRTC streaming settings")
                 raise HTTPException(status_code=500, detail="Unable to apply streaming settings") from exc
@@ -2091,7 +2102,11 @@ def create_app(
             detail = webrtc_error or stream_error or "WebRTC streaming unavailable"
             raise HTTPException(status_code=503, detail=detail)
         try:
-            description = await webrtc_manager.create_session(payload.sdp, payload.type)
+            description = await webrtc_manager.create_session(
+                payload.sdp,
+                payload.type,
+                encoder=payload.encoder,
+            )
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.exception("Failed to negotiate WebRTC session")
             raise HTTPException(status_code=500, detail="Failed to establish WebRTC session") from exc

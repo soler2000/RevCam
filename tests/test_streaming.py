@@ -12,6 +12,8 @@ from rev_cam import streaming
 from rev_cam.camera import BaseCamera
 from rev_cam.config import Orientation
 from rev_cam.pipeline import FramePipeline
+import rev_cam.video_encoding as video_encoding
+from rev_cam.video_encoding import select_h264_backend
 
 
 class _StubCamera(BaseCamera):
@@ -123,16 +125,18 @@ async def test_pipeline_video_track_returns_video_frame(
 
     camera = _Camera()
     pipeline = FramePipeline(lambda: Orientation())
+    backend, _ = select_h264_backend("libx264")
+    if backend is None:
+        pytest.skip("libx264 encoder unavailable")
     manager = SimpleNamespace(camera=camera, pipeline=pipeline, fps=30, _tracks=set())
 
-    track = streaming.PipelineVideoTrack(manager)
-    frame = await track.recv()
+    track = streaming.PipelineVideoTrack(manager, backend)
+    packet = await track.recv()
 
-    assert frame.pts is not None
-    assert frame.time_base.denominator == 90_000
-    array = frame.to_ndarray(format="rgb24")
-    assert array.shape == (2, 2, 3)
-    assert np.all(array == 128)
+    assert hasattr(packet, "time_base")
+    assert packet.time_base.denominator == 30
+    payload = bytes(packet)
+    assert payload.startswith(b"\x00\x00\x00\x01")
 
     track.stop()
 
@@ -146,3 +150,30 @@ async def test_webrtc_session_is_hashable(anyio_backend) -> None:
     sessions = {session}
 
     assert session in sessions
+
+
+def test_select_h264_backend_prefers_hardware(monkeypatch: pytest.MonkeyPatch) -> None:
+    order: list[str] = []
+
+    def _probe(backend):
+        order.append(backend.codec)
+        return backend.codec == "libx264"
+
+    monkeypatch.setattr(video_encoding, "_probe_backend", _probe, raising=False)
+
+    backend, attempted = video_encoding.select_h264_backend("auto")
+    assert backend is not None
+    assert backend.codec == "libx264"
+    assert attempted[0] == "h264_v4l2m2m"
+
+
+def test_select_h264_backend_handles_failures(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _probe(_backend):
+        return False
+
+    monkeypatch.setattr(video_encoding, "_probe_backend", _probe, raising=False)
+
+    backend, attempted = video_encoding.select_h264_backend("v4l2m2m")
+    assert backend is None
+    assert "h264_v4l2m2m" in attempted
+    assert "libx264" in attempted

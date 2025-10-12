@@ -38,6 +38,7 @@ except ImportError:  # pragma: no cover - optional dependency fallback
 
 from .camera import BaseCamera
 from .pipeline import FramePipeline
+from .video_encoding import H264_EVEN_DIMENSION_CODECS, list_h264_backends
 
 
 logger = logging.getLogger(__name__)
@@ -47,21 +48,16 @@ class RecordingProcessingError(RuntimeError):
     """Raised when a recording failed to produce usable media."""
 
 
-_VIDEO_CODEC_CANDIDATES: tuple[str, ...] = (
-    "libx264",
+_VIDEO_CODEC_CANDIDATES: tuple[str, ...] = tuple(
+    backend.codec for backend in list_h264_backends()
+) + (
     "h264",
-    "h264_v4l2m2m",
     "h264_omx",
 )
 
 
 _CODECS_REQUIRE_EVEN_DIMENSIONS: frozenset[str] = frozenset(
-    {
-        "h264",
-        "libx264",
-        "h264_v4l2m2m",
-        "h264_omx",
-    }
+    set(H264_EVEN_DIMENSION_CODECS) | {"h264", "h264_omx"}
 )
 
 

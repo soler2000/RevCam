@@ -109,17 +109,23 @@ class _StubWebRTCManager:
         camera: BaseCamera,
         pipeline,
         fps: int = 20,
+        encoder_config_choice: str | None = None,
+        encoder_env_choice: str | None = None,
+        encoder_cli_choice: str | None = None,
         **_: object,
     ) -> None:
         self.camera = camera
         self.pipeline = pipeline
         self.fps = fps
+        self.encoder_config_choice = encoder_config_choice
+        self.encoder_env_choice = encoder_env_choice
+        self.encoder_cli_choice = encoder_cli_choice
         self.apply_calls: list[dict[str, int | None]] = []
-        self.sessions: list[dict[str, str]] = []
+        self.sessions: list[dict[str, str | None]] = []
         _StubWebRTCManager.instances.append(self)
 
-    async def create_session(self, sdp: str, offer_type: str):
-        self.sessions.append({"sdp": sdp, "type": offer_type})
+    async def create_session(self, sdp: str, offer_type: str, *, encoder: str | None = None):
+        self.sessions.append({"sdp": sdp, "type": offer_type, "encoder": encoder})
         return SimpleNamespace(sdp="answer", type="answer")
 
     def apply_settings(
@@ -127,10 +133,13 @@ class _StubWebRTCManager:
         *,
         fps: int | None = None,
         jpeg_quality: int | None = None,
+        encoder: str | None = None,
     ) -> None:
         if fps is not None:
             self.fps = fps
-        self.apply_calls.append({"fps": fps, "jpeg_quality": jpeg_quality})
+        if encoder is not None:
+            self.encoder_config_choice = encoder
+        self.apply_calls.append({"fps": fps, "jpeg_quality": jpeg_quality, "encoder": encoder})
 
     async def aclose(self) -> None:  # pragma: no cover - not exercised in tests
         return None
@@ -356,7 +365,11 @@ def test_stream_settings_endpoint_updates_config_and_streamer(
         initial = test_client.get("/api/camera")
         assert initial.status_code == 200
         initial_payload = initial.json()
-        assert initial_payload["stream"]["settings"] == {"fps": 20, "jpeg_quality": 85}
+        assert initial_payload["stream"]["settings"] == {
+            "fps": 20,
+            "jpeg_quality": 85,
+            "webrtc_encoder": "auto",
+        }
         assert initial_payload["stream"]["active"] == {"fps": 20, "jpeg_quality": 85}
         assert _RecorderStreamer.instances
         streamer = _RecorderStreamer.instances[-1]
@@ -378,15 +391,24 @@ def test_stream_settings_endpoint_updates_config_and_streamer(
         assert streamer.jpeg_quality == 65
         assert webrtc_manager.apply_calls
         assert webrtc_manager.apply_calls[-1]["fps"] == 12
+        assert webrtc_manager.apply_calls[-1]["encoder"] == "auto"
         assert webrtc_manager.fps == 12
 
         config_data = json.loads(Path(config_path).read_text())
-        assert config_data["stream"] == {"fps": 12, "jpeg_quality": 65}
+        assert config_data["stream"] == {
+            "fps": 12,
+            "jpeg_quality": 65,
+            "webrtc_encoder": "auto",
+        }
 
         refreshed = test_client.get("/api/camera")
         assert refreshed.status_code == 200
         stream_info = refreshed.json()["stream"]
-        assert stream_info["settings"] == {"fps": 12, "jpeg_quality": 65}
+        assert stream_info["settings"] == {
+            "fps": 12,
+            "jpeg_quality": 65,
+            "webrtc_encoder": "auto",
+        }
         assert stream_info["active"] == {"fps": 12, "jpeg_quality": 65}
         assert stream_info["webrtc"]["fps"] == 12
 
@@ -403,7 +425,11 @@ def test_stream_settings_endpoint_validates_input(client: TestClient) -> None:
     assert "quality" in quality_detail.lower()
 
     camera = client.get("/api/camera").json()
-    assert camera["stream"]["settings"] == {"fps": 20, "jpeg_quality": 85}
+    assert camera["stream"]["settings"] == {
+        "fps": 20,
+        "jpeg_quality": 85,
+        "webrtc_encoder": "auto",
+    }
 
 
 def test_webrtc_endpoint_returns_answer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -415,9 +441,10 @@ def test_webrtc_endpoint_returns_answer(tmp_path: Path, monkeypatch: pytest.Monk
     with TestClient(app) as test_client:
         response = test_client.post(
             "/stream/webrtc",
-            json={"sdp": "offer", "type": "offer"},
+            json={"sdp": "offer", "type": "offer", "encoder": "libx264"},
         )
         assert response.status_code == 200
+        assert _StubWebRTCManager.instances[-1].sessions[-1]["encoder"] == "libx264"
         payload = response.json()
         assert payload == {"sdp": "answer", "type": "answer"}
         assert _StubWebRTCManager.instances
