@@ -49,6 +49,7 @@ try:  # pragma: no cover - dependency availability varies by platform
     import av  # type: ignore
     from av import VideoFrame
     from av.video.frame import PictureType
+    from av.packet import Packet as AvPacket
 except ImportError as exc:  # pragma: no cover - dependency availability varies
     av = None  # type: ignore[assignment]
     VideoFrame = None  # type: ignore[assignment]
@@ -317,6 +318,69 @@ class WebRTCEncoder:
         self._pts: int = 0
         self._force_keyframe: bool = True
 
+    @staticmethod
+    def _is_annex_b(data: bytes) -> bool:
+        return data.startswith(b"\x00\x00\x00\x01") or data.startswith(b"\x00\x00\x01")
+
+    def _emit_extradata(self, codec: "av.CodecContext") -> None:
+        extradata = getattr(codec, "extradata", None)
+        if not extradata:
+            return
+        if isinstance(extradata, memoryview):  # pragma: no cover - defensive
+            extradata = extradata.tobytes()
+        if not isinstance(extradata, (bytes, bytearray)):
+            return
+
+        annexb = self._extradata_to_annexb(bytes(extradata))
+        if not annexb:
+            return
+
+        packet = AvPacket(annexb)
+        packet.time_base = self._time_base
+        packet.pts = self._pts
+        packet.dts = self._pts
+        self._pending.append(packet)
+
+    def _extradata_to_annexb(self, data: bytes) -> bytes:
+        if not data:
+            return b""
+        if self._is_annex_b(data):
+            return data
+        if len(data) < 7 or data[0] != 1:
+            logger.debug("Unexpected H.264 extradata format for %s", self._backend.codec)
+            return b""
+
+        pos = 5
+        sps_count = data[pos] & 0x1F
+        pos += 1
+        output = bytearray()
+        for _ in range(sps_count):
+            if pos + 2 > len(data):
+                return b""
+            length = int.from_bytes(data[pos : pos + 2], "big")
+            pos += 2
+            if pos + length > len(data):
+                return b""
+            output += b"\x00\x00\x00\x01" + data[pos : pos + length]
+            pos += length
+
+        if pos >= len(data):
+            return bytes(output)
+
+        pps_count = data[pos]
+        pos += 1
+        for _ in range(pps_count):
+            if pos + 2 > len(data):
+                return b""
+            length = int.from_bytes(data[pos : pos + 2], "big")
+            pos += 2
+            if pos + length > len(data):
+                return b""
+            output += b"\x00\x00\x00\x01" + data[pos : pos + length]
+            pos += length
+
+        return bytes(output)
+
     def _codec_options(self) -> dict[str, str]:
         if self._backend.key == "libx264":
             return {
@@ -355,6 +419,7 @@ class WebRTCEncoder:
         self._pending.clear()
         self._pts = 0
         self._force_keyframe = True
+        self._emit_extradata(codec)
         return codec
 
     def _ensure_codec(self, width: int, height: int) -> "av.CodecContext":
@@ -386,6 +451,10 @@ class WebRTCEncoder:
             raise RuntimeError("WebRTC encoder failure") from exc
         for packet in packets:
             packet.time_base = codec.time_base
+            if packet.pts is None:
+                packet.pts = self._pts - 1
+            if packet.dts is None:
+                packet.dts = packet.pts
             self._pending.append(packet)
 
     def has_packets(self) -> bool:

@@ -143,6 +143,35 @@ async def test_pipeline_video_track_returns_video_frame(
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("anyio_backend", ["asyncio"], indirect=True)
+async def test_webrtc_encoder_emits_extradata(anyio_backend) -> None:
+    pytest.importorskip("aiortc")
+    pytest.importorskip("av")
+
+    backend, _ = select_h264_backend("libx264")
+    if backend is None:
+        pytest.skip("libx264 encoder unavailable")
+
+    encoder = streaming.WebRTCEncoder(backend, fps=30)
+    frame = np.full((2, 2, 3), 64, dtype=np.uint8)
+
+    encoder.encode(frame)
+
+    packets = []
+    while encoder.has_packets():
+        packets.append(encoder.pop_packet())
+
+    assert packets, "encoder did not output packets"
+    first = packets[0]
+    assert first is not None
+    assert first.pts is not None
+    assert first.dts == first.pts
+    assert first.time_base.denominator == 30
+    assert bytes(first).startswith(b"\x00\x00\x00\x01")
+
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("anyio_backend", ["asyncio"], indirect=True)
 async def test_webrtc_session_is_hashable(anyio_backend) -> None:
     manager = SimpleNamespace(_discard_session=lambda *_: None)
     session = streaming._WebRTCSession(manager, SimpleNamespace(), SimpleNamespace())
