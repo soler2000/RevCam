@@ -34,13 +34,21 @@ else:  # pragma: no cover - dependency availability varies
         _SIMPLEJPEG_ENCODE_KWARGS = set()
 
 try:  # pragma: no cover - dependency availability varies by platform
-    from aiortc import MediaStreamTrack, RTCPeerConnection, RTCSessionDescription
+    from aiortc import (
+        MediaStreamTrack,
+        RTCPeerConnection,
+        RTCSessionDescription,
+        sdp as aiortc_sdp,
+    )
     from aiortc.mediastreams import MediaStreamError
+    from aiortc.rtcrtpsender import RTCRtpSender
 except ImportError as exc:  # pragma: no cover - dependency availability varies
     MediaStreamTrack = None  # type: ignore[assignment]
     RTCPeerConnection = None  # type: ignore[assignment]
     RTCSessionDescription = None  # type: ignore[assignment]
     MediaStreamError = None  # type: ignore[assignment]
+    aiortc_sdp = None  # type: ignore[assignment]
+    RTCRtpSender = None  # type: ignore[assignment]
     _AIORTC_IMPORT_ERROR = exc
 else:  # pragma: no cover - dependency availability varies
     _AIORTC_IMPORT_ERROR = None
@@ -107,6 +115,44 @@ def _prepare_rgb_frame(frame: np.ndarray | list) -> np.ndarray:
         array = np.ascontiguousarray(array)
 
     return array
+
+
+def _video_codecs_from_sdp(sdp_text: str) -> tuple[str, ...]:
+    """Extract the declared video codec names from an SDP offer."""
+
+    if aiortc_sdp is None:  # pragma: no cover - dependency guard
+        raise RuntimeError("WebRTC SDP parsing is unavailable")
+
+    try:
+        session_description = aiortc_sdp.SessionDescription.parse(sdp_text)
+    except Exception as exc:  # pragma: no cover - malformed SDP
+        raise RuntimeError("Invalid WebRTC SDP offer") from exc
+
+    codecs: list[str] = []
+    video_sections = [media for media in session_description.media if media.kind == "video"]
+    if not video_sections:
+        raise RuntimeError("WebRTC offer is missing a video section")
+
+    for media in video_sections:
+        for codec in media.rtp.codecs:
+            codecs.append(codec.name.upper())
+
+    return tuple(codecs)
+
+
+def _h264_codec_preferences() -> tuple[object, ...]:
+    """Return the RTP codec capabilities corresponding to H.264."""
+
+    if RTCRtpSender is None:  # pragma: no cover - dependency guard
+        raise RuntimeError("aiortc RTP sender is unavailable")
+
+    capabilities = RTCRtpSender.getCapabilities("video")
+    codecs = tuple(
+        codec for codec in capabilities.codecs if codec.mimeType.lower() == "video/h264"
+    )
+    if not codecs:
+        raise RuntimeError("No H.264 codec support available")
+    return codecs
 
 
 @dataclass
@@ -669,6 +715,8 @@ class WebRTCManager:
             or RTCSessionDescription is None
             or MediaStreamError is None
             or VideoFrame is None
+            or RTCRtpSender is None
+            or aiortc_sdp is None
         ):  # pragma: no cover - dependency availability varies
             if _AIORTC_IMPORT_ERROR is not None:
                 raise RuntimeError("aiortc is required for WebRTC streaming") from _AIORTC_IMPORT_ERROR
@@ -702,6 +750,11 @@ class WebRTCManager:
         if RTCSessionDescription is None or RTCPeerConnection is None:  # pragma: no cover
             raise RuntimeError("aiortc is required for WebRTC streaming")
 
+        codecs_offered = _video_codecs_from_sdp(sdp)
+        if "H264" not in codecs_offered:
+            logger.debug("WebRTC offer advertised codecs: %s", ", ".join(codecs_offered))
+            raise RuntimeError("WebRTC offer does not include an H.264 video codec")
+
         offer = RTCSessionDescription(sdp=sdp, type=offer_type)
         pc = self.peer_connection_factory()  # type: ignore[operator]
 
@@ -713,6 +766,29 @@ class WebRTCManager:
         track = PipelineVideoTrack(self, backend)
         session = _WebRTCSession(self, pc, track)
         pc.addTrack(track)
+
+        try:
+            h264_preferences = _h264_codec_preferences()
+        except RuntimeError:
+            track.stop()
+            await pc.close()
+            raise
+
+        video_transceivers = [
+            transceiver for transceiver in pc.getTransceivers() if getattr(transceiver, "kind", None) == "video"
+        ]
+        if not video_transceivers:
+            track.stop()
+            await pc.close()
+            raise RuntimeError("WebRTC peer connection did not create a video transceiver")
+
+        for transceiver in video_transceivers:
+            try:
+                transceiver.setCodecPreferences(h264_preferences)
+            except Exception as exc:
+                track.stop()
+                await pc.close()
+                raise RuntimeError("Failed to configure H.264 codec for WebRTC session") from exc
 
         if encoder is not None:
             logger.info(

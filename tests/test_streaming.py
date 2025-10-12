@@ -170,6 +170,173 @@ async def test_webrtc_encoder_emits_extradata(anyio_backend) -> None:
 
 
 
+_H264_OFFER = "\r\n".join(
+    [
+        "v=0",
+        "o=- 0 0 IN IP4 127.0.0.1",
+        "s=-",
+        "t=0 0",
+        "a=group:BUNDLE 0",
+        "m=video 9 UDP/TLS/RTP/SAVPF 96 97",
+        "c=IN IP4 0.0.0.0",
+        "a=mid:0",
+        "a=sendrecv",
+        "a=rtpmap:96 H264/90000",
+        "a=fmtp:96 packetization-mode=1;profile-level-id=42e01f;level-asymmetry-allowed=1",
+        "a=rtpmap:97 VP8/90000",
+    ]
+)
+
+
+_VP8_ONLY_OFFER = "\r\n".join(
+    [
+        "v=0",
+        "o=- 0 0 IN IP4 127.0.0.1",
+        "s=-",
+        "t=0 0",
+        "a=group:BUNDLE 0",
+        "m=video 9 UDP/TLS/RTP/SAVPF 97",
+        "c=IN IP4 0.0.0.0",
+        "a=mid:0",
+        "a=sendrecv",
+        "a=rtpmap:97 VP8/90000",
+    ]
+)
+
+
+class _StubPipelineTrack:
+    kind = "video"
+
+    def __init__(self, manager, backend):
+        self._manager = manager
+        self.backend = backend
+        self.stopped = False
+        manager._tracks.add(self)
+
+    def stop(self) -> None:
+        if not self.stopped:
+            self.stopped = True
+            self._manager._tracks.discard(self)
+
+
+class _StubTransceiver:
+    def __init__(self) -> None:
+        self.kind = "video"
+        self.preferences: tuple[object, ...] | None = None
+
+    def setCodecPreferences(self, codecs) -> None:  # noqa: N802 - matching aiortc API
+        self.preferences = tuple(codecs)
+
+
+class _StubPeerConnection:
+    def __init__(self) -> None:
+        self.transceiver = _StubTransceiver()
+        self._local_description = None
+        self.connectionState = "new"
+        self._closed = False
+
+    def addTrack(self, track):  # noqa: N802 - matching aiortc API
+        self.track = track
+        return SimpleNamespace()
+
+    def getTransceivers(self):
+        return [self.transceiver]
+
+    async def setRemoteDescription(self, description):  # pragma: no cover - trivial
+        self.remote_description = description
+
+    async def createAnswer(self):  # noqa: N802 - matching aiortc API
+        return SimpleNamespace(sdp="answer", type="answer")
+
+    async def setLocalDescription(self, description):  # noqa: N802 - matching aiortc API
+        self._local_description = description
+
+    @property
+    def localDescription(self):  # noqa: N802 - matching aiortc API
+        return self._local_description
+
+    async def close(self) -> None:
+        self._closed = True
+
+    def on(self, _event):  # pragma: no cover - behaviour trivial
+        def _wrapper(callback):
+            return callback
+
+        return _wrapper
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("anyio_backend", ["asyncio"], indirect=True)
+async def test_webrtc_session_enforces_h264_codec(monkeypatch: pytest.MonkeyPatch, anyio_backend) -> None:
+    pytest.importorskip("aiortc")
+    pytest.importorskip("av")
+
+    backend = video_encoding.H264EncoderBackend(
+        key="libx264", codec="libx264", label="libx264", hardware=False
+    )
+    monkeypatch.setattr(video_encoding, "select_h264_backend", lambda _choice: (backend, (backend.codec,)))
+    monkeypatch.setattr(streaming, "select_h264_backend", lambda _choice: (backend, (backend.codec,)))
+    monkeypatch.setattr(streaming, "PipelineVideoTrack", _StubPipelineTrack)
+    monkeypatch.setattr(streaming, "RTCPeerConnection", _StubPeerConnection)
+
+    codecs = [
+        SimpleNamespace(mimeType="video/VP8"),
+        SimpleNamespace(mimeType="video/H264"),
+        SimpleNamespace(mimeType="video/H264"),
+    ]
+
+    calls: list[str] = []
+
+    class _StubSender:
+        @staticmethod
+        def getCapabilities(kind):  # noqa: N802 - matching aiortc API
+            calls.append(kind)
+            return SimpleNamespace(codecs=codecs)
+
+    monkeypatch.setattr(streaming, "RTCRtpSender", _StubSender)
+
+    manager = streaming.WebRTCManager(
+        camera=_StubCamera(),
+        pipeline=FramePipeline(lambda: Orientation()),
+        fps=30,
+        peer_connection_factory=_StubPeerConnection,
+    )
+
+    answer = await manager.create_session(sdp=_H264_OFFER, offer_type="offer")
+
+    assert answer.sdp == "answer"
+    assert calls == ["video"]
+    session = next(iter(manager._sessions))
+    transceiver = session.pc.transceiver  # type: ignore[attr-defined]
+    assert transceiver.preferences == (codecs[1], codecs[2])
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("anyio_backend", ["asyncio"], indirect=True)
+async def test_webrtc_session_rejects_non_h264_offer(monkeypatch: pytest.MonkeyPatch, anyio_backend) -> None:
+    pytest.importorskip("aiortc")
+    pytest.importorskip("av")
+
+    backend = video_encoding.H264EncoderBackend(
+        key="libx264", codec="libx264", label="libx264", hardware=False
+    )
+    monkeypatch.setattr(video_encoding, "select_h264_backend", lambda _choice: (backend, (backend.codec,)))
+    monkeypatch.setattr(streaming, "select_h264_backend", lambda _choice: (backend, (backend.codec,)))
+    monkeypatch.setattr(streaming, "PipelineVideoTrack", _StubPipelineTrack)
+    monkeypatch.setattr(streaming, "RTCRtpSender", SimpleNamespace(getCapabilities=lambda *_: SimpleNamespace(codecs=[])))
+    monkeypatch.setattr(streaming, "RTCPeerConnection", _StubPeerConnection)
+
+    manager = streaming.WebRTCManager(
+        camera=_StubCamera(),
+        pipeline=FramePipeline(lambda: Orientation()),
+        fps=30,
+        peer_connection_factory=_StubPeerConnection,
+    )
+
+    with pytest.raises(RuntimeError, match="does not include an H\\.264"):
+        await manager.create_session(sdp=_VP8_ONLY_OFFER, offer_type="offer")
+
+
 @pytest.mark.anyio
 @pytest.mark.parametrize("anyio_backend", ["asyncio"], indirect=True)
 async def test_webrtc_session_is_hashable(anyio_backend) -> None:
