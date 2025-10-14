@@ -363,6 +363,7 @@ class WebRTCEncoder:
         self._pending: Deque["av.Packet"] = deque()
         self._pts: int = 0
         self._force_keyframe: bool = True
+        self._nal_length_size: int = 4
 
     @staticmethod
     def _is_annex_b(data: bytes) -> bool:
@@ -396,6 +397,7 @@ class WebRTCEncoder:
             logger.debug("Unexpected H.264 extradata format for %s", self._backend.codec)
             return b""
 
+        self._nal_length_size = (data[4] & 0x03) + 1
         pos = 5
         sps_count = data[pos] & 0x1F
         pos += 1
@@ -426,6 +428,58 @@ class WebRTCEncoder:
             pos += length
 
         return bytes(output)
+
+    def _avcc_to_annexb(self, data: bytes) -> bytes:
+        if not data:
+            return b""
+
+        length_size = max(1, min(self._nal_length_size, 4))
+        pos = 0
+        total = len(data)
+        output = bytearray()
+
+        while pos + length_size <= total:
+            nal_length = int.from_bytes(data[pos : pos + length_size], "big")
+            pos += length_size
+            if nal_length <= 0 or pos + nal_length > total:
+                logger.debug(
+                    "Invalid NAL length while converting %s packet to Annex B", self._backend.codec
+                )
+                return b""
+            output += b"\x00\x00\x00\x01" + data[pos : pos + nal_length]
+            pos += nal_length
+
+        if pos != total:
+            logger.debug(
+                "Discarding %s packet due to trailing bytes during Annex B conversion",
+                self._backend.codec,
+            )
+            return b""
+
+        return bytes(output)
+
+    def _ensure_annexb(self, packet: "av.Packet") -> "av.Packet":
+        payload = bytes(packet)
+        if self._is_annex_b(payload):
+            return packet
+
+        converted = self._avcc_to_annexb(payload)
+        if not converted:
+            return packet
+
+        clone = AvPacket(converted)
+        clone.time_base = packet.time_base
+        clone.pts = packet.pts
+        clone.dts = packet.dts
+        try:
+            clone.duration = packet.duration
+        except Exception:  # pragma: no cover - duration may be read-only
+            pass
+        try:
+            clone.is_keyframe = packet.is_keyframe
+        except Exception:  # pragma: no cover - attribute may be read-only
+            pass
+        return clone
 
     def _codec_options(self) -> dict[str, str]:
         if self._backend.key == "libx264":
@@ -501,7 +555,7 @@ class WebRTCEncoder:
                 packet.pts = self._pts - 1
             if packet.dts is None:
                 packet.dts = packet.pts
-            self._pending.append(packet)
+            self._pending.append(self._ensure_annexb(packet))
 
     def has_packets(self) -> bool:
         return bool(self._pending)

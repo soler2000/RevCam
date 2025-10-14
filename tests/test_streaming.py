@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 from types import SimpleNamespace
+from fractions import Fraction
 
 pytest.importorskip("numpy")
 import numpy as np
@@ -13,7 +14,12 @@ from rev_cam.camera import BaseCamera
 from rev_cam.config import Orientation
 from rev_cam.pipeline import FramePipeline
 import rev_cam.video_encoding as video_encoding
-from rev_cam.video_encoding import select_h264_backend
+from rev_cam.video_encoding import H264EncoderBackend, select_h264_backend
+
+try:  # pragma: no cover - optional dependency
+    from av.packet import Packet as AvPacket
+except ImportError:  # pragma: no cover - handled by importorskip in tests
+    AvPacket = None  # type: ignore[assignment]
 
 
 class _StubCamera(BaseCamera):
@@ -168,6 +174,53 @@ async def test_webrtc_encoder_emits_extradata(anyio_backend) -> None:
     assert first.time_base.denominator == 30
     assert bytes(first).startswith(b"\x00\x00\x00\x01")
 
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("anyio_backend", ["asyncio"], indirect=True)
+async def test_webrtc_encoder_converts_length_prefixed_packets(anyio_backend) -> None:
+    pytest.importorskip("aiortc")
+    pytest.importorskip("av")
+    assert AvPacket is not None
+
+    backend, _ = select_h264_backend("libx264")
+    if backend is None:
+        pytest.skip("libx264 encoder unavailable")
+
+    encoder = streaming.WebRTCEncoder(backend, fps=30)
+    frame = np.full((2, 2, 3), 90, dtype=np.uint8)
+
+    encoder.encode(frame)
+
+    packets: list[object] = []
+    while encoder.has_packets():
+        packets.append(encoder.pop_packet())
+
+    assert packets
+    for packet in packets:
+        assert packet is not None
+        payload = bytes(packet)
+        assert payload.startswith(b"\x00\x00\x00\x01")
+
+
+def test_webrtc_encoder_ensure_annexb_converts_avcc_packets() -> None:
+    pytest.importorskip("av")
+    assert AvPacket is not None
+    backend = H264EncoderBackend(key="libx264", codec="libx264", label="libx264")
+    encoder = streaming.WebRTCEncoder(backend, fps=30)
+
+    nal_units = [b"\x65\x88\x84", b"\x41\x9a\x22"]
+    payload = b"".join(len(nal).to_bytes(4, "big") + nal for nal in nal_units)
+    packet = AvPacket(payload)
+    packet.pts = 0
+    packet.dts = 0
+    packet.time_base = Fraction(1, 30)
+
+    converted = encoder._ensure_annexb(packet)
+    converted_bytes = bytes(converted)
+
+    assert converted_bytes.count(b"\x00\x00\x00\x01") == len(nal_units)
+    for nal in nal_units:
+        assert b"\x00\x00\x00\x01" + nal in converted_bytes
 
 
 _H264_OFFER = "\r\n".join(
