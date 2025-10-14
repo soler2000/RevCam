@@ -429,11 +429,11 @@ class WebRTCEncoder:
 
         return bytes(output)
 
-    def _avcc_to_annexb(self, data: bytes) -> bytes:
+    def _convert_length_prefixed(self, data: bytes, length_size: int) -> bytes | None:
         if not data:
             return b""
 
-        length_size = max(1, min(self._nal_length_size, 4))
+        length_size = max(1, min(length_size, 4))
         pos = 0
         total = len(data)
         output = bytearray()
@@ -442,30 +442,49 @@ class WebRTCEncoder:
             nal_length = int.from_bytes(data[pos : pos + length_size], "big")
             pos += length_size
             if nal_length <= 0 or pos + nal_length > total:
-                logger.debug(
-                    "Invalid NAL length while converting %s packet to Annex B", self._backend.codec
-                )
-                return b""
+                return None
             output += b"\x00\x00\x00\x01" + data[pos : pos + nal_length]
             pos += nal_length
 
         if pos != total:
-            logger.debug(
-                "Discarding %s packet due to trailing bytes during Annex B conversion",
-                self._backend.codec,
-            )
-            return b""
+            return None
 
         return bytes(output)
 
-    def _ensure_annexb(self, packet: "av.Packet") -> "av.Packet":
+    def _avcc_to_annexb(self, data: bytes) -> bytes:
+        if not data:
+            return b""
+
+        candidates = []
+        if self._nal_length_size:
+            candidates.append(self._nal_length_size)
+        candidates.extend(size for size in (4, 3, 2, 1) if size not in candidates)
+
+        for length_size in candidates:
+            converted = self._convert_length_prefixed(data, length_size)
+            if converted is not None:
+                if length_size != self._nal_length_size and length_size in {1, 2, 3, 4}:
+                    self._nal_length_size = length_size
+                return converted
+
+        logger.debug(
+            "Failed to convert %s packet from AVCC to Annex B using candidate lengths %s",
+            self._backend.codec,
+            ", ".join(str(size) for size in candidates),
+        )
+        return b""
+
+    def _ensure_annexb(self, packet: "av.Packet") -> "av.Packet" | None:
         payload = bytes(packet)
         if self._is_annex_b(payload):
             return packet
 
         converted = self._avcc_to_annexb(payload)
-        if not converted:
-            return packet
+        if converted == b"":
+            logger.debug(
+                "Discarding %s packet after failing Annex B conversion", self._backend.codec
+            )
+            return None
 
         clone = AvPacket(converted)
         clone.time_base = packet.time_base
@@ -555,7 +574,10 @@ class WebRTCEncoder:
                 packet.pts = self._pts - 1
             if packet.dts is None:
                 packet.dts = packet.pts
-            self._pending.append(self._ensure_annexb(packet))
+            converted = self._ensure_annexb(packet)
+            if converted is None:
+                continue
+            self._pending.append(converted)
 
     def has_packets(self) -> bool:
         return bool(self._pending)

@@ -198,7 +198,9 @@ async def test_webrtc_encoder_converts_length_prefixed_packets(anyio_backend) ->
     assert packets
     for packet in packets:
         assert packet is not None
-        payload = bytes(packet)
+        converted = encoder._ensure_annexb(packet)
+        assert isinstance(converted, AvPacket)
+        payload = bytes(converted)
         assert payload.startswith(b"\x00\x00\x00\x01")
 
 
@@ -216,11 +218,52 @@ def test_webrtc_encoder_ensure_annexb_converts_avcc_packets() -> None:
     packet.time_base = Fraction(1, 30)
 
     converted = encoder._ensure_annexb(packet)
+    assert isinstance(converted, AvPacket)
     converted_bytes = bytes(converted)
 
     assert converted_bytes.count(b"\x00\x00\x00\x01") == len(nal_units)
     for nal in nal_units:
         assert b"\x00\x00\x00\x01" + nal in converted_bytes
+
+
+def test_webrtc_encoder_detects_nal_length_size() -> None:
+    pytest.importorskip("av")
+    assert AvPacket is not None
+
+    backend = H264EncoderBackend(key="libx264", codec="libx264", label="libx264")
+    encoder = streaming.WebRTCEncoder(backend, fps=30)
+
+    nal_units = [b"\x65\x01\x02\x03", b"\x61\x04\x05\x06"]
+    payload = b"".join(len(nal).to_bytes(2, "big") + nal for nal in nal_units)
+    packet = AvPacket(payload)
+    packet.pts = 0
+    packet.dts = 0
+    packet.time_base = Fraction(1, 30)
+
+    encoder._nal_length_size = 4
+    converted = encoder._ensure_annexb(packet)
+
+    assert isinstance(converted, AvPacket)
+    assert encoder._nal_length_size == 2
+    converted_bytes = bytes(converted)
+    assert converted_bytes.count(b"\x00\x00\x00\x01") == len(nal_units)
+
+
+def test_webrtc_encoder_drops_invalid_packets() -> None:
+    pytest.importorskip("av")
+    assert AvPacket is not None
+
+    backend = H264EncoderBackend(key="libx264", codec="libx264", label="libx264")
+    encoder = streaming.WebRTCEncoder(backend, fps=30)
+
+    payload = b"\x00\x00\x00\x05abc"
+    packet = AvPacket(payload)
+    packet.pts = 0
+    packet.dts = 0
+    packet.time_base = Fraction(1, 30)
+
+    encoder._nal_length_size = 4
+    assert encoder._ensure_annexb(packet) is None
 
 
 _H264_OFFER = "\r\n".join(
