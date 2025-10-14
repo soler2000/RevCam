@@ -249,6 +249,28 @@ def test_webrtc_encoder_detects_nal_length_size() -> None:
     assert converted_bytes.count(b"\x00\x00\x00\x01") == len(nal_units)
 
 
+def test_webrtc_encoder_accepts_avcc_trailing_padding() -> None:
+    pytest.importorskip("av")
+    assert AvPacket is not None
+
+    backend = H264EncoderBackend(key="libx264", codec="libx264", label="libx264")
+    encoder = streaming.WebRTCEncoder(backend, fps=30)
+
+    nal_units = [b"\x65\x88\x84", b"\x41\x9a\x22"]
+    payload = b"".join(len(nal).to_bytes(4, "big") + nal for nal in nal_units)
+    payload += b"\x00\x00\x00"  # hardware padding bytes
+
+    packet = AvPacket(payload)
+    packet.pts = 0
+    packet.dts = 0
+    packet.time_base = Fraction(1, 30)
+
+    converted = encoder._ensure_annexb(packet)
+    assert isinstance(converted, AvPacket)
+    converted_bytes = bytes(converted)
+    assert converted_bytes.count(b"\x00\x00\x00\x01") == len(nal_units)
+
+
 def test_webrtc_encoder_drops_invalid_packets() -> None:
     pytest.importorskip("av")
     assert AvPacket is not None

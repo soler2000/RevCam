@@ -447,7 +447,12 @@ class WebRTCEncoder:
             pos += nal_length
 
         if pos != total:
-            return None
+            # Some hardware encoders pad AVCC payloads with alignment bytes
+            # which are all zero. Treat these as harmless rather than
+            # flagging the packet as invalid so the Annex B conversion can
+            # succeed.
+            if any(byte != 0 for byte in data[pos:]):
+                return None
 
         return bytes(output)
 
