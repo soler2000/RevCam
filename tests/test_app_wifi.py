@@ -21,6 +21,7 @@ from rev_cam.wifi import (
 class FakeWiFiBackend:
     def __init__(self) -> None:
         self.connect_attempts: list[tuple[str, str | None]] = []
+        self.events: list[tuple[str, str | None]] = []
         self.status = WiFiStatus(
             connected=True,
             ssid="Home",
@@ -65,6 +66,7 @@ class FakeWiFiBackend:
 
     def connect(self, ssid: str, password: str | None) -> WiFiStatus:
         self.connect_attempts.append((ssid, password))
+        self.events.append(("connect", ssid))
         if ssid == "Guest":
             # Simulate an authentication issue that leaves us disconnected.
             self.status = WiFiStatus(
@@ -134,6 +136,7 @@ class FakeWiFiBackend:
         return self.status
 
     def stop_hotspot(self, profile: str | None) -> WiFiStatus:
+        self.events.append(("stop_hotspot", profile))
         self.status = WiFiStatus(
             connected=False,
             ssid=None,
@@ -343,6 +346,25 @@ def test_wifi_connect_same_network_omits_switch_notice(client: TestClient) -> No
     payload = response.json()
     detail = (payload.get("detail") or "").lower()
     assert "reconnect" not in detail
+
+
+def test_wifi_connect_disables_hotspot_before_join(client: TestClient) -> None:
+    backend = getattr(client, "backend", None)
+    assert backend is not None
+
+    enable = client.post(
+        "/api/wifi/hotspot",
+        json={"enabled": True, "ssid": "RevCam-AP", "password": "secret123"},
+    )
+    assert enable.status_code == 200
+    payload = enable.json()
+    assert payload["hotspot_active"] is True
+
+    backend.events.clear()
+
+    response = client.post("/api/wifi/connect", json={"ssid": "Home"})
+    assert response.status_code == 200
+    assert backend.events[:2] == [("stop_hotspot", "rev-hotspot"), ("connect", "Home")]
 
 
 def test_wifi_hotspot_toggle(client: TestClient) -> None:

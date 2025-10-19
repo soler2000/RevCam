@@ -1513,6 +1513,27 @@ class WiFiManager:
             prior_value = previous_status.ssid or previous_status.profile
             if isinstance(prior_value, str) and prior_value.strip():
                 previous_identifier = prior_value.strip()
+        if previous_status.hotspot_active:
+            attempt_metadata["hotspot_initially_active"] = True
+            try:
+                self.disable_hotspot()
+            except WiFiError as exc:
+                message = str(exc).strip() or "Unable to disable hotspot"
+                self._record_log(
+                    "connect_hotspot_disable_error",
+                    (
+                        "Unable to disable hotspot before connecting to "
+                        f"{cleaned_ssid}: {message}."
+                    ),
+                    metadata=attempt_metadata,
+                )
+                raise
+            else:
+                self._record_log(
+                    "connect_hotspot_disabled",
+                    f"Disabled hotspot before connecting to {cleaned_ssid}.",
+                    metadata=attempt_metadata,
+                )
         try:
             status = self._backend.connect(cleaned_ssid, cleaned_password)
         except WiFiError as exc:
