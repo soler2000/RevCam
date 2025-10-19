@@ -50,7 +50,6 @@ packages=(
     python3-pip
     python3-picamera2
     python3-prctl
-    libatlas-base-dev
     libjpeg-dev
     zlib1g-dev
     pkg-config
@@ -67,6 +66,16 @@ packages=(
     libffi-dev
     libssl-dev
 )
+
+atlas_package="libatlas-base-dev"
+alt_atlas_packages=(libopenblas-dev liblapack-dev)
+
+if apt-cache show "$atlas_package" >/dev/null 2>&1; then
+    packages+=("$atlas_package")
+else
+    echo "Package $atlas_package is not available; installing ${alt_atlas_packages[*]} instead."
+    packages+=("${alt_atlas_packages[@]}")
+fi
 
 if [[ "$RUN_UPDATE" == true ]]; then
     echo "Updating package lists..."
