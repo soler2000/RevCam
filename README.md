@@ -419,6 +419,11 @@ automatically when you run `pip install -e .`), but also falls back to Avahi's
 `zeroconf` is installed or add `avahi-utils` via `sudo apt install avahi-utils`
 so `motion.local` resolves while the hotspot is active.
 
+By default RevCam brings up the hotspot with the SSID `RevCam` and the
+password `RevCamRocks`. You can change these values from the settings panel or
+through the `/api/wifi/hotspot` endpoint. The password must remain at least
+eight characters for most clients to accept the connection.
+
 ### Copy-paste bootstrap script (development machines)
 
 Need a single snippet you can drop into a terminal? The commands below clone (or
