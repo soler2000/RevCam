@@ -23,8 +23,8 @@ Options:
 USAGE
 }
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd -P)"
 PYTHON="${PYTHON:-python3}"
 VENV_DIR="$PROJECT_ROOT/.venv"
 USE_PI=false
