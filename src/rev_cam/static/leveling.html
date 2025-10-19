@@ -536,6 +536,7 @@
         try {
           const geometry = await loader.loadAsync("/models/CARVAN_KEYRING.stl");
           geometry.computeVertexNormals();
+          geometry.rotateX(-Math.PI / 2);
           geometry.computeBoundingBox();
 
           const material = new THREE.MeshStandardMaterial({
@@ -729,9 +730,9 @@
         if (trailer) {
           const rollRad = THREE.MathUtils.degToRad(latestOrientation.roll);
           const pitchRad = THREE.MathUtils.degToRad(latestOrientation.pitch);
-          trailer.rotation.x = rollRad;
+          trailer.rotation.x = pitchRad;
           trailer.rotation.y = 0;
-          trailer.rotation.z = pitchRad;
+          trailer.rotation.z = rollRad;
         }
       }
 
