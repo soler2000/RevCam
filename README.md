@@ -619,6 +619,47 @@ Another RevCam instance is already bound to the requested port. Stop the
 existing process (`Ctrl+C` in the other terminal or `pkill -f uvicorn`) or use a
 different port with `--port`.
 
+#### Wi-Fi profile fails with `802-11-wireless-security.key-mgmt: property is missing`
+
+NetworkManager emits this error when a saved Wi-Fi connection lacks a
+`key-mgmt` value, so it does not know whether to use WPA2/WPA3 personal,
+enterprise (802.1X), or another scheme. Inspect the profile and set the
+appropriate key-management mode before reconnecting:
+
+1. Show the connection details to confirm `key-mgmt` is absent:
+
+   ```bash
+   nmcli connection show "<connection-name>"
+   ```
+
+2. Apply the correct key-management method—`wpa-psk` for WPA2/WPA3 personal,
+   `sae` for WPA3 SAE-only networks, `wpa-eap` for enterprise, or `wep` for
+   legacy access points:
+
+   ```bash
+   nmcli connection modify "<connection-name>" \
+     802-11-wireless-security.key-mgmt wpa-psk
+   ```
+
+3. Provide credentials that the security mode requires, such as the PSK for
+   personal networks:
+
+   ```bash
+   nmcli connection modify "<connection-name>" \
+     802-11-wireless-security.psk "<wifi-password>"
+   ```
+
+4. Reactivate the profile once it is complete:
+
+   ```bash
+   nmcli connection up "<connection-name>"
+   ```
+
+If you still cannot connect, delete the profile and recreate it with
+`nmcli dev wifi connect "<SSID>" password "<wifi-password>"`, or edit the
+configuration file under `/etc/NetworkManager/system-connections/` to ensure it
+contains a `[wifi-security]` section with the desired `key-mgmt` entry.
+
 #### Video stream shows high latency, lossy images, or dropped frames
 
 Several factors influence the stream quality:
