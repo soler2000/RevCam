@@ -1425,6 +1425,14 @@ class WiFiManager:
                 metadata=metadata,
             )
 
+        if last_status and last_status.connected and not last_status.hotspot_active:
+            self._record_log(
+                "auto_connect_skip_hotspot",
+                "Active network connection detected; skipping hotspot fallback.",
+                status=last_status,
+            )
+            return last_status
+
         if not start_hotspot:
             return last_status or self._fetch_status(update_mdns=update_mdns)
 
