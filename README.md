@@ -91,8 +91,17 @@ RevCam targets Python 3.11+.
 
 ### Cloning the repository
 
-If you have not already pulled the sources, clone the repository and enter the
-project directory:
+If you have not already pulled the sources, make sure the Git tooling is
+available on your system. RevCam ships a helper script that installs Git using
+common package managers:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/soler2000/RevCam/main/scripts/install_git_tools.sh | bash
+```
+
+Review the script before running it. On Debian-based distributions you can also
+install Git directly with `sudo apt install git`. Then clone the repository and
+enter the project directory:
 
 ```bash
 git clone https://github.com/soler2000/RevCam.git
