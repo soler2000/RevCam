@@ -95,6 +95,25 @@ Follow these steps on a Raspberry Pi running Raspberry Pi OS. They appear in
 the order you should run them so the packaged Picamera2 stack is available
 before you install the Python dependencies.
 
+Need a single copy-paste command? The following one-liner performs the
+end-to-end setup using the bundled helper scripts. Review the remote scripts
+before executing them and replace the repository URL with your fork when
+contributing changes:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/soler2000/RevCam/main/scripts/install_git_tools.sh | bash && \
+  git clone https://github.com/soler2000/RevCam.git && \
+  cd RevCam && \
+  ./scripts/install_prereqs.sh && \
+  python3 -m venv --system-site-packages .venv && \
+  source .venv/bin/activate && \
+  python -m pip install --upgrade pip && \
+  ./scripts/install.sh --pi
+```
+
+The step-by-step breakdown below includes additional context and alternatives
+for environments that need manual tweaking.
+
 1. **Install Git and clone the repository.** If Git is missing, run the helper
    script that bootstraps common package managers:
 
