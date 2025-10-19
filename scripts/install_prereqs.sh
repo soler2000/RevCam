@@ -50,7 +50,6 @@ packages=(
     python3-pip
     python3-picamera2
     python3-prctl
-    libatlas-base-dev
     libjpeg-dev
     zlib1g-dev
     pkg-config
@@ -68,9 +67,28 @@ packages=(
     libssl-dev
 )
 
+has_install_candidate() {
+    local package="$1"
+    local candidate
+
+    candidate=$(apt-cache policy "$package" | awk '/Candidate:/ {print $2; exit}') || return 1
+
+    [[ -n "$candidate" && "$candidate" != "(none)" ]]
+}
+
+atlas_package="libatlas-base-dev"
+alt_atlas_packages=(libopenblas-dev liblapack-dev)
+
 if [[ "$RUN_UPDATE" == true ]]; then
     echo "Updating package lists..."
     $SUDO apt update
+fi
+
+if has_install_candidate "$atlas_package"; then
+    packages+=("$atlas_package")
+else
+    echo "Package $atlas_package is not available; installing ${alt_atlas_packages[*]} instead."
+    packages+=("${alt_atlas_packages[@]}")
 fi
 
 echo "Installing prerequisites: ${packages[*]}"
