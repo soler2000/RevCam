@@ -3,909 +3,747 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>RevCam Surveillance</title>
-    <link rel="icon" type="image/svg+xml" href="images/favicon.svg" />
+    <title>Surveillance dashboard · RevCam</title>
     <style>
       :root {
-        color-scheme: dark;
-        --font-family: "Inter", "Manrope", "Segoe UI", system-ui, -apple-system,
-          BlinkMacSystemFont, sans-serif;
-        --line-height: 1.6;
-        --transition: 200ms ease;
-        --surface-0: rgba(14, 16, 22, 0.9);
-        --surface-1: rgba(26, 28, 36, 0.85);
-        --surface-soft: rgba(255, 255, 255, 0.06);
-        --border-subtle: rgba(255, 255, 255, 0.08);
-        --border-muted: rgba(255, 255, 255, 0.14);
-        --text-primary: #f5f7fb;
-        --text-muted: rgba(245, 247, 250, 0.7);
-        --accent: #0a84ff;
-        --accent-hover: #2f95ff;
-        --accent-active: #55adff;
-        --accent-soft: rgba(10, 132, 255, 0.15);
-        --accent-ring: rgba(10, 132, 255, 0.45);
-        --accent-shadow: rgba(10, 132, 255, 0.35);
-        --success: #34c759;
-        --danger: #ff453a;
-        --warning: #ffd60a;
-        --radius-md: 0.85rem;
-        --radius-lg: 1.2rem;
-        --radius-pill: 999px;
-        --space-sm: 0.5rem;
-        --space-md: 0.9rem;
-        --space-lg: 1.4rem;
-        --space-xl: 2.1rem;
-        --shadow-sm: 0 12px 24px rgba(0, 0, 0, 0.28);
-        --shadow-md: 0 26px 46px rgba(0, 0, 0, 0.4);
-        --page-gradient: radial-gradient(115% 140% at top, #1b1e26 0%, #0b0d13 60%, #050609 100%);
+        color-scheme: dark light;
+        --background: #0f111a;
+        --foreground: #f5f7ff;
+        --muted: #a2acc8;
+        --card-bg: rgba(18, 22, 33, 0.9);
+        --card-border: rgba(255, 255, 255, 0.08);
+        --accent: #4aa8ff;
+        --accent-strong: #1d7ef0;
+        --danger: #ff4d61;
+        --success: #38d996;
+        --warning: #f3c95c;
+        --font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
       }
-      *,
-      *::before,
-      *::after {
-        box-sizing: border-box;
-      }
+
+      html,
       body {
         margin: 0;
+        padding: 0;
         font-family: var(--font-family);
-        line-height: var(--line-height);
-        background: var(--page-gradient);
-        color: var(--text-primary);
+        background: radial-gradient(circle at 20% 20%, rgba(74, 168, 255, 0.16), transparent 55%),
+          radial-gradient(circle at 80% 10%, rgba(56, 217, 150, 0.15), transparent 60%),
+          var(--background);
         min-height: 100vh;
-        display: flex;
-        flex-direction: column;
+        color: var(--foreground);
       }
-      header,
-      footer {
-        padding: var(--space-md) var(--space-xl);
+
+      a {
+        color: var(--accent);
+      }
+
+      .page-header {
+        padding: 1.25rem clamp(1rem, 3vw, 2.5rem);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        backdrop-filter: blur(14px);
+        background-color: rgba(15, 17, 26, 0.72);
+        position: sticky;
+        top: 0;
+        z-index: 10;
+      }
+
+      .page-header__inner {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: var(--space-lg);
-        background: var(--surface-0);
-        border-bottom: 1px solid var(--border-subtle);
-        backdrop-filter: blur(18px) saturate(130%);
-        -webkit-backdrop-filter: blur(18px) saturate(130%);
-        box-shadow: var(--shadow-md);
+        gap: 1rem;
+        max-width: 1200px;
+        margin: 0 auto;
       }
-      footer {
-        border-top: 1px solid var(--border-subtle);
-        border-bottom: none;
-        margin-top: auto;
-        justify-content: center;
+
+      .page-title {
+        margin: 0;
+        font-size: clamp(1.8rem, 3vw, 2.5rem);
+        letter-spacing: -0.03em;
       }
-      .brand-area {
+
+      .page-nav {
         display: flex;
+        gap: 0.75rem;
         align-items: center;
-        gap: var(--space-lg);
         flex-wrap: wrap;
       }
-      strong.brand {
-        font-size: 1.3rem;
-        letter-spacing: 0.05em;
-        color: var(--success);
-      }
-      .mode-toggle {
-        display: inline-flex;
-        align-items: center;
-        gap: var(--space-sm);
-        padding: calc(var(--space-sm) * 0.8);
-        border-radius: var(--radius-pill);
-        background: var(--surface-1);
-        border: 1px solid var(--border-muted);
-        box-shadow: var(--shadow-sm);
-      }
-      .mode-toggle-button {
-        appearance: none;
-        border: none;
-        background: transparent;
-        color: var(--text-muted);
-        font-weight: 600;
-        padding: 0.4rem var(--space-lg);
-        border-radius: var(--radius-pill);
+
+      .page-nav a,
+      .page-nav button {
+        border: 0;
+        background: none;
+        color: var(--foreground);
+        font: inherit;
+        padding: 0.5rem 0.9rem;
+        border-radius: 999px;
         cursor: pointer;
-        transition: background var(--transition), color var(--transition), box-shadow var(--transition);
+        text-decoration: none;
+        transition: background 0.2s ease, color 0.2s ease;
       }
-      .mode-toggle-button[aria-pressed="true"] {
-        background: var(--accent);
-        color: #fff;
-        box-shadow: 0 0 0 1px var(--accent-ring) inset, 0 10px 24px var(--accent-shadow);
+
+      .page-nav a:hover,
+      .page-nav button:hover {
+        background: rgba(255, 255, 255, 0.12);
       }
-      .mode-toggle-button:not([aria-pressed="true"]):hover,
-      .mode-toggle-button:not([aria-pressed="true"]):focus-visible {
-        background: var(--surface-soft);
-        color: var(--text-primary);
-      }
-      .mode-toggle-button:focus-visible {
-        outline: 2px solid var(--accent);
-        outline-offset: 2px;
-      }
-      .mode-toggle-button:disabled {
-        opacity: 0.6;
-        cursor: not-allowed;
-      }
-      .status-message {
-        font-weight: 600;
-        color: var(--text-muted);
-        min-width: 0;
-      }
-      .status-message[data-tone="busy"] {
-        color: var(--accent);
-      }
-      .status-message[data-tone="error"] {
-        color: var(--danger);
-      }
-      .status-message[data-tone="monitor"] {
-        color: var(--warning);
-        text-shadow: 0 0 12px rgba(255, 214, 10, 0.35);
-      }
-      .status-message[data-tone="alert"] {
-        color: var(--danger);
-        text-shadow: 0 0 16px rgba(255, 69, 58, 0.45);
-      }
-      main {
-        padding: var(--space-xl);
+
+      .page-main {
+        max-width: 1200px;
+        margin: 2rem auto 4rem;
+        padding: 0 clamp(1rem, 3vw, 2.5rem);
         display: grid;
-        grid-template-columns: minmax(280px, 1fr) minmax(260px, 320px);
-        gap: var(--space-xl);
+        gap: 1.5rem;
       }
-      .preview-card {
-        background: var(--surface-1);
-        border-radius: var(--radius-lg);
-        border: 1px solid var(--border-subtle);
-        padding: var(--space-lg);
-        box-shadow: var(--shadow-md);
+
+      .dashboard-grid {
+        display: grid;
+        gap: 1.5rem;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        align-items: stretch;
+      }
+
+      .card {
+        background: var(--card-bg);
+        border: 1px solid var(--card-border);
+        border-radius: 18px;
+        padding: 1.5rem;
+        box-shadow: 0 25px 60px rgba(0, 0, 0, 0.35);
         display: flex;
         flex-direction: column;
-        gap: var(--space-md);
-        transition: border-color var(--transition), box-shadow var(--transition);
+        gap: 1rem;
       }
-      .preview-card.motion-monitoring {
-        border-color: rgba(255, 214, 10, 0.5);
-        box-shadow: 0 20px 40px rgba(255, 214, 10, 0.16);
-      }
-      .preview-card.motion-alert,
-      .preview-card.recording-active {
-        border-color: rgba(255, 69, 58, 0.6);
-        box-shadow: 0 22px 46px rgba(255, 69, 58, 0.25);
-      }
-      .preview-card img {
-        width: 100%;
-        border-radius: var(--radius-md);
-        border: 1px solid var(--border-subtle);
-        background: #000;
-        display: block;
-      }
-      .controls {
-        display: flex;
-        align-items: center;
-        gap: var(--space-sm);
-        flex-wrap: wrap;
-      }
-      .recording-timer {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.45rem;
-        padding: 0.4rem 1rem;
-        border-radius: var(--radius-pill);
-        background: rgba(10, 132, 255, 0.12);
-        border: 1px solid rgba(10, 132, 255, 0.35);
-        font-weight: 600;
-        font-variant-numeric: tabular-nums;
-        color: var(--accent);
-        box-shadow: 0 10px 28px rgba(10, 132, 255, 0.18);
-      }
-      .recording-timer .recording-timer-icon {
-        font-size: 0.95rem;
-      }
-      .recording-timer .recording-timer-label {
-        text-transform: uppercase;
-        font-size: 0.7rem;
-        letter-spacing: 0.08em;
-        color: var(--text-muted);
-      }
-      .recording-timer .recording-timer-value {
-        color: var(--text-primary);
-        font-size: 0.95rem;
-        min-width: 3.5ch;
-        text-align: right;
-      }
-      button.action {
-        background: linear-gradient(135deg, var(--accent), var(--accent-hover));
-        color: #fff;
-        border: none;
-        padding: 0.65rem 1.5rem;
-        border-radius: var(--radius-pill);
-        font-weight: 600;
-        cursor: pointer;
-        transition: background var(--transition), box-shadow var(--transition), transform var(--transition);
-      }
-      button.action:not(:disabled):hover {
-        background: linear-gradient(135deg, var(--accent-hover), var(--accent-active));
-        transform: translateY(-1px);
-        box-shadow: 0 12px 24px var(--accent-shadow);
-      }
-      @keyframes motionAlertPulse {
-        0% {
-          box-shadow: 0 0 0 0 rgba(255, 69, 58, 0.35);
-        }
-        50% {
-          box-shadow: 0 0 0 12px rgba(255, 69, 58, 0);
-        }
-        100% {
-          box-shadow: 0 0 0 0 rgba(255, 69, 58, 0.35);
-        }
-      }
-      button.action.motion-monitoring {
-        background: linear-gradient(135deg, rgba(255, 214, 10, 0.1), rgba(255, 214, 10, 0.45));
-        color: var(--warning);
-        box-shadow: 0 0 0 1px rgba(255, 214, 10, 0.35) inset, 0 10px 26px rgba(255, 214, 10, 0.25);
-      }
-      button.action.motion-alert,
-      button.action.recording-active,
-      #record-button[aria-pressed="true"] {
-        background: linear-gradient(135deg, rgba(255, 69, 58, 0.9), rgba(255, 105, 97, 0.95));
-        color: #fff;
-        box-shadow: 0 0 0 1px rgba(255, 69, 58, 0.45) inset, 0 12px 28px rgba(255, 69, 58, 0.45);
-        animation: motionAlertPulse 1.4s ease-in-out infinite;
-      }
-      button.action.recording-active:hover,
-      button.action.recording-active:focus-visible,
-      #record-button[aria-pressed="true"]:hover,
-      #record-button[aria-pressed="true"]:focus-visible {
-        background: linear-gradient(135deg, rgba(255, 69, 58, 0.9), rgba(255, 105, 97, 0.95));
-        color: #fff;
-        box-shadow: 0 0 0 1px rgba(255, 69, 58, 0.45) inset, 0 12px 28px rgba(255, 69, 58, 0.45);
-      }
-      button.action:disabled {
-        opacity: 0.6;
-        cursor: not-allowed;
-      }
-      .recordings-card {
-        background: var(--surface-1);
-        border-radius: var(--radius-lg);
-        border: 1px solid var(--border-subtle);
-        padding: var(--space-lg);
-        box-shadow: var(--shadow-md);
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-md);
-        max-height: 70vh;
-        overflow: hidden;
-      }
-      .recordings-header {
+
+      .card header {
         display: flex;
         align-items: baseline;
         justify-content: space-between;
-        gap: var(--space-sm);
+        gap: 1rem;
       }
-      .recordings-actions {
-        display: inline-flex;
-        align-items: center;
-        gap: var(--space-sm);
-        flex-wrap: wrap;
-      }
-      .recordings-list {
-        list-style: none;
+
+      .card-title {
+        font-size: 1.2rem;
         margin: 0;
-        padding: 0;
-        overflow-y: auto;
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-sm);
+        letter-spacing: -0.01em;
       }
-      .recording-item {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: var(--space-sm);
-        background: var(--surface-soft);
-        border-radius: var(--radius-md);
-        padding: var(--space-sm) var(--space-md);
-        border: 1px solid var(--border-subtle);
-      }
-      .recording-meta {
-        display: flex;
-        flex-direction: column;
-        gap: 0.2rem;
-      }
-      .recording-name {
-        font-weight: 600;
-      }
-      .recording-details {
-        color: var(--text-muted);
-        font-size: 0.85rem;
-      }
-      .recording-chunks {
-        font-size: 0.78rem;
-        color: var(--text-muted);
-        margin-top: 0.2rem;
-      }
-      .recording-actions {
-        display: flex;
-        align-items: center;
-        gap: var(--space-sm);
-      }
-      .open-recording {
-        background: transparent;
-        border: 1px solid var(--border-muted);
-        color: var(--text-primary);
-        border-radius: var(--radius-pill);
-        padding: 0.35rem 1rem;
-        cursor: pointer;
-        transition: border-color var(--transition), color var(--transition);
+
+      .badge {
         display: inline-flex;
         align-items: center;
         gap: 0.35rem;
+        padding: 0.25rem 0.6rem;
+        border-radius: 999px;
+        font-size: 0.85rem;
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--muted);
+      }
+
+      .badge.is-active {
+        background: rgba(56, 217, 150, 0.2);
+        color: var(--success);
+      }
+
+      .badge.is-idle {
+        background: rgba(255, 77, 97, 0.16);
+        color: var(--danger);
+      }
+
+      .preview-frame {
+        position: relative;
+        background: rgba(255, 255, 255, 0.04);
+        border-radius: 16px;
+        overflow: hidden;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        min-height: 220px;
+        display: grid;
+        place-items: center;
+      }
+
+      .preview-frame img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+      }
+
+      .preview-overlay {
+        position: absolute;
+        inset: 0.75rem;
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        pointer-events: none;
+        font-size: 0.85rem;
+        color: rgba(255, 255, 255, 0.85);
+      }
+
+      .preview-message {
+        margin: 0;
+        font-size: 0.95rem;
+        color: var(--muted);
+      }
+
+      .actions {
+        display: grid;
+        gap: 0.75rem;
+      }
+
+      .actions button {
+        border: 0;
+        border-radius: 12px;
+        padding: 0.75rem 1rem;
+        font: inherit;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
+        transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+      }
+
+      .actions button:disabled {
+        opacity: 0.55;
+        cursor: not-allowed;
+      }
+
+      .actions .primary {
+        background: linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%);
+        color: #fff;
+        box-shadow: 0 12px 30px rgba(29, 126, 240, 0.35);
+      }
+
+      .actions .primary:hover:not(:disabled) {
+        transform: translateY(-1px);
+      }
+
+      .actions .danger {
+        background: rgba(255, 77, 97, 0.14);
+        color: var(--danger);
+      }
+
+      .actions .secondary {
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--foreground);
+      }
+
+      .status-grid {
+        display: grid;
+        gap: 0.5rem;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      }
+
+      .status-item {
+        display: flex;
+        flex-direction: column;
+        gap: 0.1rem;
+        font-size: 0.9rem;
+        color: var(--muted);
+      }
+
+      .status-item strong {
+        font-size: 1.1rem;
+        color: var(--foreground);
+      }
+
+      .recordings-table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+
+      .recordings-table thead {
+        font-size: 0.8rem;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        color: var(--muted);
+      }
+
+      .recordings-table th,
+      .recordings-table td {
+        padding: 0.65rem 0.4rem;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+        text-align: left;
+        vertical-align: middle;
+      }
+
+      .recordings-table tbody tr:hover {
+        background: rgba(255, 255, 255, 0.06);
+      }
+
+      .recording-actions {
+        display: flex;
+        gap: 0.4rem;
+        flex-wrap: wrap;
+      }
+
+      .recording-actions a,
+      .recording-actions button {
+        border: 0;
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--foreground);
+        padding: 0.4rem 0.6rem;
+        border-radius: 8px;
+        font-size: 0.8rem;
+        cursor: pointer;
         text-decoration: none;
       }
-      .open-recording:hover,
-      .open-recording:focus-visible {
-        border-color: var(--accent);
-        color: var(--accent);
-        outline: none;
+
+      .recording-actions button:hover,
+      .recording-actions a:hover {
+        background: rgba(255, 255, 255, 0.18);
       }
-      .delete-recording {
-        background: transparent;
-        border: 1px solid rgba(255, 69, 58, 0.5);
-        color: var(--danger);
-        border-radius: var(--radius-pill);
-        padding: 0.35rem 0.9rem;
-        cursor: pointer;
-        transition: border-color var(--transition), color var(--transition);
+
+      .muted {
+        color: var(--muted);
       }
-      .delete-recording:hover,
-      .delete-recording:focus-visible {
-        border-color: var(--danger);
-        color: #ff6b61;
-        outline: none;
-      }
-      .storage-status {
-        margin: 0;
+
+      .status-banner {
+        border-radius: 12px;
+        padding: 0.75rem 1rem;
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--muted);
         font-size: 0.9rem;
       }
-      .storage-status.is-low {
+
+      .status-banner.is-error {
         color: var(--danger);
-        font-weight: 600;
+        background: rgba(255, 77, 97, 0.1);
       }
-      .muted {
-        color: var(--text-muted);
+
+      .status-banner.is-success {
+        color: var(--success);
+        background: rgba(56, 217, 150, 0.12);
       }
-      a.link {
-        color: var(--accent);
+
+      .timeline-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.45rem;
+        font-size: 0.9rem;
         text-decoration: none;
-        font-weight: 600;
+        color: var(--accent);
       }
-      a.link:hover,
-      a.link:focus-visible {
-        text-decoration: underline;
+
+      footer {
+        margin: 2rem auto 3rem;
+        max-width: 1200px;
+        padding: 0 clamp(1rem, 3vw, 2.5rem);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        color: var(--muted);
+        font-size: 0.85rem;
       }
-      @media (max-width: 960px) {
-        main {
-          grid-template-columns: 1fr;
-        }
-        .recordings-card {
-          max-height: none;
-        }
-      }
-      @media (max-width: 640px) {
-        header,
-        footer {
+
+      @media (max-width: 720px) {
+        .page-header__inner {
           flex-direction: column;
-          align-items: stretch;
-          text-align: center;
+          align-items: flex-start;
         }
-        .brand-area {
-          justify-content: center;
+
+        .preview-frame {
+          min-height: 180px;
         }
-        main {
-          padding: var(--space-lg);
-        }
-        .controls {
-          justify-content: center;
-        }
-        .recording-timer {
-          width: 100%;
-          justify-content: center;
+
+        .card header {
+          flex-direction: column;
+          align-items: flex-start;
         }
       }
     </style>
   </head>
   <body>
-    <header>
-      <div class="brand-area">
-        <strong class="brand">RevCam</strong>
-        <div class="mode-toggle" data-mode-toggle role="group" aria-label="Viewing mode">
-          <button class="mode-toggle-button" type="button" data-mode="revcam" aria-pressed="false">
-            RevCam
-          </button>
-          <button class="mode-toggle-button" type="button" data-mode="surveillance" aria-pressed="true">
-            Surveillance
-          </button>
-        </div>
+    <header class="page-header">
+      <div class="page-header__inner">
+        <h1 class="page-title">Surveillance</h1>
+        <nav class="page-nav">
+          <a href="/">Live view</a>
+          <a href="/surveillance/settings">Settings</a>
+          <a href="/surveillance/timeline">Timeline</a>
+          <button id="switch-mode" type="button">Switch to live camera</button>
+        </nav>
       </div>
-      <div class="status-message" id="status-message" data-tone="busy">Initialising…</div>
     </header>
-    <main>
-      <section class="preview-card">
-        <h1>Surveillance preview</h1>
-        <img id="surveillance-preview" alt="Surveillance preview" hidden />
-        <p class="muted" id="preview-message">Preparing surveillance stream…</p>
-        <div class="controls">
-          <button class="action" type="button" id="record-button" aria-pressed="false">
-            Start manual recording
-          </button>
-          <button class="action" type="button" id="motion-record-button" aria-pressed="false">
-            Start motion detection
-          </button>
-          <div class="recording-timer" id="recording-timer" aria-live="polite" hidden>
-            <span class="recording-timer-icon" aria-hidden="true">⏱</span>
-            <span class="recording-timer-label">Elapsed</span>
-            <span class="recording-timer-value" data-timer-value>00:00</span>
+    <main class="page-main">
+      <section class="dashboard-grid">
+        <article class="card" id="preview-card">
+          <header>
+            <h2 class="card-title">Live preview</h2>
+            <span class="badge" id="mode-indicator">Loading…</span>
+          </header>
+          <div class="preview-frame">
+            <img id="surveillance-preview" alt="Surveillance preview" hidden />
+            <div class="preview-overlay">
+              <p class="preview-message" id="preview-message">Preparing surveillance stream…</p>
+            </div>
           </div>
-        </div>
-        <p class="muted storage-status" id="storage-status">Storage: —</p>
-      </section>
-      <section class="recordings-card">
-        <div class="recordings-header">
-          <h2>Recordings</h2>
-          <div class="recordings-actions">
-            <a class="open-recording" href="/surveillance/timeline" role="button"
-              >Timeline view</a
-            >
-            <button class="open-recording" type="button" id="refresh-recordings">
-              Refresh
-            </button>
+          <div class="status-grid">
+            <div class="status-item">
+              <span class="muted">Recording mode</span>
+              <strong id="recording-mode">—</strong>
+            </div>
+            <div class="status-item">
+              <span class="muted">Clip length</span>
+              <strong id="clip-length">Unlimited</strong>
+            </div>
+            <div class="status-item">
+              <span class="muted">Max clip size</span>
+              <strong id="clip-size">—</strong>
+            </div>
+            <div class="status-item">
+              <span class="muted">Frame rate</span>
+              <strong id="frame-rate">—</strong>
+            </div>
           </div>
-        </div>
-        <p class="muted" id="recordings-empty">No recordings available yet.</p>
-        <ul class="recordings-list" id="recordings-list" aria-live="polite"></ul>
+          <div class="actions">
+            <button class="primary" type="button" id="start-continuous">Start continuous recording</button>
+            <button class="secondary" type="button" id="start-motion">Start motion recording</button>
+            <button class="danger" type="button" id="stop-recording">Stop recording</button>
+          </div>
+          <div class="status-banner" id="status-banner" hidden></div>
+        </article>
+        <article class="card">
+          <header>
+            <h2 class="card-title">Storage</h2>
+            <span class="badge" id="storage-label">—</span>
+          </header>
+          <div class="status-grid">
+            <div class="status-item">
+              <span class="muted">Free space</span>
+              <strong id="storage-free">—</strong>
+            </div>
+            <div class="status-item">
+              <span class="muted">Used space</span>
+              <strong id="storage-used">—</strong>
+            </div>
+            <div class="status-item">
+              <span class="muted">Capacity</span>
+              <strong id="storage-total">—</strong>
+            </div>
+            <div class="status-item">
+              <span class="muted">Auto threshold</span>
+              <strong id="storage-threshold">—</strong>
+            </div>
+          </div>
+          <p class="muted">
+            Storage health is monitored automatically. Recordings pause when free space
+            falls beneath the configured threshold.
+          </p>
+          <a class="timeline-link" href="/surveillance/timeline">Open full recording timeline →</a>
+        </article>
       </section>
+
+      <article class="card">
+        <header>
+          <h2 class="card-title">Recent recordings</h2>
+          <span class="badge" id="recording-count">—</span>
+        </header>
+        <div class="status-banner" id="processing-banner" hidden></div>
+        <div id="recordings-empty" class="muted">No recordings yet. They will appear here as soon as they finish processing.</div>
+        <div class="table-wrapper">
+          <table class="recordings-table" id="recordings-table" hidden>
+            <thead>
+              <tr>
+                <th scope="col">Name</th>
+                <th scope="col">Started</th>
+                <th scope="col">Duration</th>
+                <th scope="col">Size</th>
+                <th scope="col">Mode</th>
+                <th scope="col">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="recordings-body"></tbody>
+          </table>
+        </div>
+      </article>
     </main>
     <footer>
-      <a class="link" href="/surveillance/settings">Surveillance settings</a>
-      <a class="link" href="/">Back to live view</a>
+      <span>RevCam surveillance module</span>
+      <span id="last-updated">Updated —</span>
     </footer>
+
     <script>
-      const statusMessage = document.getElementById("status-message");
-      const previewCard = document.querySelector(".preview-card");
       const previewImage = document.getElementById("surveillance-preview");
       const previewMessage = document.getElementById("preview-message");
-      const recordButton = document.getElementById("record-button");
-      const motionRecordButton = document.getElementById("motion-record-button");
-      const recordingTimer = document.getElementById("recording-timer");
-      const recordingTimerValue = recordingTimer
-        ? recordingTimer.querySelector("[data-timer-value]")
-        : null;
-      const recordingsList = document.getElementById("recordings-list");
+      const modeIndicator = document.getElementById("mode-indicator");
+      const recordingMode = document.getElementById("recording-mode");
+      const clipLength = document.getElementById("clip-length");
+      const clipSize = document.getElementById("clip-size");
+      const frameRate = document.getElementById("frame-rate");
+      const statusBanner = document.getElementById("status-banner");
+      const startContinuousButton = document.getElementById("start-continuous");
+      const startMotionButton = document.getElementById("start-motion");
+      const stopButton = document.getElementById("stop-recording");
+      const switchModeButton = document.getElementById("switch-mode");
+      const storageLabel = document.getElementById("storage-label");
+      const storageFree = document.getElementById("storage-free");
+      const storageUsed = document.getElementById("storage-used");
+      const storageTotal = document.getElementById("storage-total");
+      const storageThreshold = document.getElementById("storage-threshold");
+      const recordingCount = document.getElementById("recording-count");
       const recordingsEmpty = document.getElementById("recordings-empty");
-      const refreshButton = document.getElementById("refresh-recordings");
-      const storageStatus = document.getElementById("storage-status");
-      const modeToggle = document.querySelector("[data-mode-toggle]");
-      const modeButtons = modeToggle
-        ? Array.from(modeToggle.querySelectorAll(".mode-toggle-button"))
-        : [];
-      let currentMode = "surveillance";
-      let sessionState = "idle";
-      let pendingManualResume = null;
-      let previewUrl = null;
-      let recordingTimerStartMs = null;
-      let recordingTimerInterval = null;
-      let recordingTimerSource = null;
-      let manualSessionPending = false;
-      let manualSessionGraceDeadline = 0;
+      const recordingsTable = document.getElementById("recordings-table");
+      const recordingsBody = document.getElementById("recordings-body");
+      const processingBanner = document.getElementById("processing-banner");
+      const lastUpdated = document.getElementById("last-updated");
+
+      let refreshTimer = null;
       let lastStatusSnapshot = null;
-      const STATUS_REFRESH_ACTIVE_MS = 2000;
-      const STATUS_REFRESH_IDLE_MS = 5000;
-      const MANUAL_CONFIRMATION_GRACE_MS = 20000;
-      let statusRefreshHandle = null;
-      let statusRequestSequence = 0;
-      let latestRequestedStatusSequence = 0;
-      let latestAppliedStatusSequence = 0;
-      let pageVisible = true;
 
-      function setStatus(message, tone = "info") {
-        if (!statusMessage) {
-          return;
+      function formatBytes(value) {
+        if (!Number.isFinite(value) || value < 0) {
+          return "—";
         }
-        statusMessage.textContent = message;
-        statusMessage.dataset.tone = tone;
-      }
-
-      function clearScheduledStatusRefresh() {
-        if (statusRefreshHandle !== null) {
-          window.clearTimeout(statusRefreshHandle);
-          statusRefreshHandle = null;
-        }
-      }
-
-      function scheduleStatusRefresh() {
-        if (!pageVisible) {
-          return;
-        }
-        const activeSession =
-          sessionState === "manual" ||
-          sessionState === "motion-monitoring" ||
-          sessionState === "motion-recording";
-        const interval = activeSession ? STATUS_REFRESH_ACTIVE_MS : STATUS_REFRESH_IDLE_MS;
-        clearScheduledStatusRefresh();
-        statusRefreshHandle = window.setTimeout(() => {
-          statusRefreshHandle = null;
-          loadStatus({ showLoading: false, suppressError: true }).catch((error) => {
-            console.error("Scheduled surveillance status refresh failed", error);
-          });
-        }, interval);
-      }
-
-      function renderRecordingTimer() {
-        if (!recordingTimer || !recordingTimerValue) {
-          return;
-        }
-        if (recordingTimerStartMs === null) {
-          recordingTimerValue.textContent = "00:00";
-          recordingTimer.hidden = true;
-          return;
-        }
-        const elapsedSeconds = Math.max(0, Math.floor((Date.now() - recordingTimerStartMs) / 1000));
-        const hours = Math.floor(elapsedSeconds / 3600);
-        const minutes = Math.floor((elapsedSeconds % 3600) / 60);
-        const seconds = elapsedSeconds % 60;
-        const minutesPart = hours > 0 ? String(minutes).padStart(2, "0") : String(minutes);
-        const secondsPart = String(seconds).padStart(2, "0");
-        const prefix = hours > 0 ? `${hours}:${minutesPart}` : minutesPart.padStart(2, "0");
-        const display = `${prefix}:${secondsPart}`;
-        recordingTimerValue.textContent = display;
-        recordingTimer.hidden = false;
-      }
-
-      function stopRecordingTimer() {
-        if (recordingTimerInterval !== null) {
-          window.clearInterval(recordingTimerInterval);
-          recordingTimerInterval = null;
-        }
-        recordingTimerStartMs = null;
-        recordingTimerSource = null;
-        if (recordingTimerValue) {
-          recordingTimerValue.textContent = "00:00";
-        }
-        if (recordingTimer) {
-          recordingTimer.hidden = true;
-        }
-      }
-
-      function startRecordingTimer(startIso) {
-        if (!recordingTimer || !recordingTimerValue) {
-          return;
-        }
-        if (typeof startIso !== "string" || startIso.length === 0) {
-          return;
-        }
-        const parsed = Date.parse(startIso);
-        if (Number.isNaN(parsed)) {
-          return;
-        }
-        if (recordingTimerInterval !== null) {
-          window.clearInterval(recordingTimerInterval);
-          recordingTimerInterval = null;
-        }
-        recordingTimerStartMs = parsed;
-        recordingTimerSource = startIso;
-        renderRecordingTimer();
-        recordingTimerInterval = window.setInterval(renderRecordingTimer, 1000);
-      }
-
-      function syncRecordingTimer(startIso, currentSession) {
-        if (!recordingTimer) {
-          return;
-        }
-        const hasStart = typeof startIso === "string" && startIso.length > 0;
-        const shouldRun =
-          hasStart && (currentSession === "manual" || currentSession === "motion-recording");
-        if (!shouldRun) {
-          const localManualActive =
-            currentSession === "manual" && recordingTimerStartMs !== null;
-          if (localManualActive) {
-            renderRecordingTimer();
-            return;
-          }
-          stopRecordingTimer();
-          return;
-        }
-        if (recordingTimerSource === startIso && recordingTimerStartMs !== null) {
-          renderRecordingTimer();
-          return;
-        }
-        startRecordingTimer(startIso);
-      }
-
-      function updateModeButtons(mode) {
-        modeButtons.forEach((button) => {
-          const target = button.dataset.mode || "";
-          button.setAttribute("aria-pressed", String(target === mode));
-        });
-      }
-
-      async function changeMode(target) {
-        const desired = target === "revcam" ? "revcam" : "surveillance";
-        if (desired === currentMode) {
-          if (desired === "revcam") {
-            window.location.href = "/";
-          }
-          return;
-        }
-        modeButtons.forEach((button) => {
-          button.disabled = true;
-        });
-        updateModeButtons(desired);
-        try {
-          const response = await fetch("/api/surveillance/mode", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ mode: desired }),
-          });
-          if (!response.ok) {
-            throw new Error(`Mode update failed with ${response.status}`);
-          }
-          if (desired === "revcam") {
-            window.location.href = "/";
-            return;
-          }
-          currentMode = desired;
-          setStatus("Surveillance mode ready", "busy");
-          await loadStatus({ showLoading: true });
-        } catch (error) {
-          console.error("Viewing mode toggle error", error);
-          updateModeButtons(currentMode);
-          setStatus("Unable to update viewing mode", "error");
-        } finally {
-          modeButtons.forEach((button) => {
-            button.disabled = false;
-          });
-        }
-      }
-
-      function updatePreview(preview) {
-        if (!preview || !preview.endpoint) {
-          if (previewImage) {
-            previewImage.hidden = true;
-            previewImage.removeAttribute("src");
-          }
-          previewUrl = null;
-          previewMessage.textContent = "Preview unavailable.";
-          return;
-        }
-        const nextUrl = `${preview.endpoint}?v=${Date.now()}`;
-        if (previewUrl !== nextUrl && previewImage) {
-          previewUrl = nextUrl;
-          previewImage.src = nextUrl;
-          previewImage.hidden = false;
-        }
-        previewMessage.textContent = "Live surveillance preview.";
-      }
-
-      function isMotionRecordingActive(snapshot) {
-        if (!snapshot || typeof snapshot !== "object") {
-          return false;
-        }
-        const sessionState = snapshot.session_state;
-        if (sessionState === "recording") {
-          return true;
-        }
-        const sessionRecording = snapshot.session_recording === true;
-        const eventActive = snapshot.event_active === true;
-        return sessionRecording || eventActive;
-      }
-
-      function isManualOverrideActive(serverRecording, serverMode, motionSnapshot) {
-        if (!serverRecording) {
-          return false;
-        }
-        if (serverMode === "continuous") {
-          return true;
-        }
-        if (!motionSnapshot || typeof motionSnapshot !== "object") {
-          return serverMode !== "motion";
-        }
-        if (motionSnapshot.session_override === true && motionSnapshot.enabled !== true) {
-          return true;
-        }
-        if (motionSnapshot.enabled === false) {
-          return true;
-        }
-        const sessionActive = motionSnapshot.session_active === true;
-        const sessionState = motionSnapshot.session_state;
-        if (!sessionActive && (sessionState === null || sessionState === undefined)) {
-          return true;
-        }
-        return false;
-      }
-
-      function determineSessionState(serverRecording, serverMode, motionSnapshot) {
-        if (isManualOverrideActive(serverRecording, serverMode, motionSnapshot)) {
-          return "manual";
-        }
-        if (serverRecording && serverMode === "motion") {
-          return isMotionRecordingActive(motionSnapshot)
-            ? "motion-recording"
-            : "motion-monitoring";
-        }
-        return "idle";
-      }
-
-      function updateStatusForSession(currentSession, options = {}) {
-        const { processingActive = false, processingRecord = null } = options;
-        const manualProcessing = processingActive && isManualProcessingRecord(processingRecord);
-        if (currentSession === "manual") {
-          setStatus("Manual recording in progress…", "alert");
-          return;
-        }
-        if (currentSession === "motion-recording") {
-          setStatus("Motion detected — recording…", "alert");
-          return;
-        }
-        if (currentSession === "motion-monitoring") {
-          setStatus("Motion detection active.", "monitor");
-          return;
-        }
-        if (manualProcessing) {
-          setStatus("Finalising manual recording…", "busy");
-          return;
-        }
-        if (processingActive) {
-          setStatus("Finalising motion recording…", "busy");
-          return;
-        }
-        setStatus("Idle. Ready to record.", "info");
-      }
-
-      function snapshotIndicatesManualRecording(snapshot) {
-        if (!snapshot || typeof snapshot !== "object") {
-          return false;
-        }
-        if (snapshot.recording !== true) {
-          return false;
-        }
-        const mode =
-          typeof snapshot.recording_mode === "string" ? snapshot.recording_mode.toLowerCase() : null;
-        if (mode === "continuous") {
-          return true;
-        }
-        const motionInfo = snapshot.motion;
-        if (!motionInfo || typeof motionInfo !== "object") {
-          return mode !== null && mode !== "motion";
-        }
-        const overrideActive = motionInfo.session_override === true;
-        const motionEnabled = motionInfo.enabled === true;
-        if (overrideActive) {
-          if (!motionEnabled) {
-            return true;
-          }
-          return mode !== "motion";
-        }
-        if (motionInfo.enabled === false) {
-          return true;
-        }
-        return mode === "continuous";
-      }
-
-      function applySessionVisuals(currentSession, options = {}) {
-        const { processingActive = false, processingRecord = null } = options;
-        sessionState = currentSession;
-        if (recordButton) {
-          const manualActive =
-            currentSession === "manual" ||
-            manualSessionPending ||
-            snapshotIndicatesManualRecording(lastStatusSnapshot);
-          recordButton.textContent = manualActive ? "Stop recording" : "Start manual recording";
-          recordButton.setAttribute("aria-pressed", String(manualActive));
-          const disableManualButton =
-            !manualActive &&
-            (currentSession === "motion-monitoring" || currentSession === "motion-recording");
-          recordButton.disabled = disableManualButton;
-          recordButton.classList.toggle("recording-active", manualActive);
-          recordButton.dataset.state = manualActive ? "stop" : "start";
-        }
-        if (motionRecordButton) {
-          const motionSession =
-            currentSession === "motion-monitoring" || currentSession === "motion-recording";
-          const motionRecording = currentSession === "motion-recording";
-          motionRecordButton.textContent = motionSession
-            ? "Stop motion detection"
-            : "Start motion detection";
-          motionRecordButton.setAttribute("aria-pressed", String(motionSession));
-          motionRecordButton.disabled = currentSession === "manual";
-          motionRecordButton.classList.remove("motion-monitoring", "motion-alert", "recording-active");
-          if (motionRecording) {
-            motionRecordButton.classList.add("motion-alert", "recording-active");
-          } else if (motionSession) {
-            motionRecordButton.classList.add("motion-monitoring");
-          }
-        }
-        if (previewCard) {
-          previewCard.classList.remove("motion-monitoring", "motion-alert", "recording-active");
-          if (currentSession === "manual") {
-            previewCard.classList.add("recording-active");
-          } else if (currentSession === "motion-recording") {
-            previewCard.classList.add("motion-alert", "recording-active");
-          } else if (currentSession === "motion-monitoring") {
-            previewCard.classList.add("motion-monitoring");
-          }
-        }
-        updateStatusForSession(currentSession, { processingActive, processingRecord });
-      }
-
-      function isManualSessionActive() {
-        if (sessionState === "manual" || manualSessionPending) {
-          return true;
-        }
-        return snapshotIndicatesManualRecording(lastStatusSnapshot);
-      }
-
-      function formatBytes(bytes) {
-        if (typeof bytes !== "number" || !Number.isFinite(bytes) || bytes < 0) {
-          return null;
-        }
-        if (bytes === 0) {
+        if (value === 0) {
           return "0 B";
         }
         const units = ["B", "KB", "MB", "GB", "TB"];
         const exponent = Math.min(
           units.length - 1,
-          Math.floor(Math.log(bytes) / Math.log(1024)),
+          Math.floor(Math.log(value) / Math.log(1024))
         );
-        const value = bytes / 1024 ** exponent;
-        return `${value.toFixed(value >= 10 ? 1 : 2)} ${units[exponent]}`;
+        const num = value / Math.pow(1024, exponent);
+        return `${num.toFixed(num >= 10 || exponent === 0 ? 0 : 1)} ${units[exponent]}`;
       }
 
-      function updateStorage(storage) {
-        if (!storageStatus) {
+      function formatDuration(seconds) {
+        if (!Number.isFinite(seconds) || seconds <= 0) {
+          return "—";
+        }
+        if (seconds < 60) {
+          return `${seconds.toFixed(seconds < 10 ? 1 : 0)}s`;
+        }
+        const mins = Math.floor(seconds / 60);
+        const secs = Math.round(seconds % 60);
+        if (mins < 60) {
+          return `${mins}m ${secs.toString().padStart(2, "0")}s`;
+        }
+        const hours = Math.floor(mins / 60);
+        const remMins = mins % 60;
+        return `${hours}h ${remMins}m`;
+      }
+
+      function formatDateTime(value) {
+        if (!value) {
+          return "—";
+        }
+        const date = typeof value === "string" ? new Date(value) : value;
+        if (Number.isNaN(date.getTime())) {
+          return "—";
+        }
+        return date.toLocaleString();
+      }
+
+      function setStatusBanner(text, tone = "info") {
+        if (!text) {
+          statusBanner.hidden = true;
+          statusBanner.textContent = "";
+          statusBanner.classList.remove("is-error", "is-success");
           return;
         }
-        storageStatus.classList.remove("is-low");
-        if (!storage || typeof storage.free_percent !== "number") {
-          storageStatus.textContent = "Storage: —";
-          return;
-        }
-        const freePercent = Number(storage.free_percent) || 0;
-        const freeText = formatBytes(storage.free_bytes);
-        const totalText = formatBytes(storage.total_bytes);
-        const parts = [];
-        if (freeText) {
-          parts.push(`${freeText} free`);
-        }
-        parts.push(`(${freePercent.toFixed(1)}%)`);
-        if (totalText) {
-          parts.push(`of ${totalText}`);
-        }
-        storageStatus.textContent = `Storage: ${parts.join(" ")}`;
-        const threshold = Number(storage.threshold_percent ?? 0);
-        if (Number.isFinite(threshold) && threshold > 0 && freePercent <= threshold) {
-          storageStatus.classList.add("is-low");
+        statusBanner.hidden = false;
+        statusBanner.textContent = text;
+        statusBanner.classList.toggle("is-error", tone === "error");
+        statusBanner.classList.toggle("is-success", tone === "success");
+      }
+
+      function renderPreview(status) {
+        const preview = status?.preview;
+        const inSurveillance = status?.mode === "surveillance";
+        if (preview && preview.endpoint && inSurveillance) {
+          const url = `${preview.endpoint}?v=${Date.now()}`;
+          if (previewImage.src !== url) {
+            previewImage.src = url;
+          }
+          previewImage.hidden = false;
+          previewMessage.textContent = status.recording
+            ? "Recording in progress"
+            : "Live surveillance preview";
+        } else {
+          previewImage.hidden = true;
+          previewMessage.textContent = inSurveillance
+            ? "Preview stream unavailable"
+            : "Enable surveillance mode to view the preview.";
         }
       }
 
-      function isManualProcessingRecord(record) {
-        if (!record || typeof record !== "object") {
-          return false;
+      function renderStatus(status) {
+        lastStatusSnapshot = status;
+        const inSurveillance = status.mode === "surveillance";
+        modeIndicator.textContent = inSurveillance ? "Surveillance active" : "Surveillance disabled";
+        modeIndicator.classList.toggle("is-active", inSurveillance);
+        modeIndicator.classList.toggle("is-idle", !inSurveillance);
+
+        recordingMode.textContent = status.recording
+          ? status.recording_mode === "motion"
+            ? "Motion triggered"
+            : "Continuous"
+          : "Idle";
+
+        const durationSeconds = status.settings?.chunk_duration_seconds;
+        clipLength.textContent = durationSeconds ? formatDuration(durationSeconds) : "Unlimited";
+
+        const clipLimitBytes = status.settings?.max_clip_bytes ?? status.storage?.max_clip_bytes;
+        clipSize.textContent = clipLimitBytes ? formatBytes(clipLimitBytes) : "Unlimited";
+
+        frameRate.textContent = status.settings ? `${status.settings.fps} fps @ ${status.settings.jpeg_quality}` : "—";
+
+        const storage = status.storage ?? {};
+        storageFree.textContent = formatBytes(storage.free_bytes);
+        storageUsed.textContent = formatBytes(storage.used_bytes);
+        storageTotal.textContent = formatBytes(storage.total_bytes);
+        const freePercent = Number(storage.free_percent ?? NaN);
+        const threshold = Number(storage.threshold_percent ?? NaN);
+        storageLabel.textContent = Number.isFinite(freePercent) ? `${freePercent.toFixed(1)}% free` : "—";
+        storageLabel.classList.toggle("badge", true);
+        if (Number.isFinite(threshold) && Number.isFinite(freePercent) && freePercent <= threshold) {
+          storageLabel.classList.add("is-idle");
+        } else {
+          storageLabel.classList.remove("is-idle");
         }
-        const motionInfo = record.motion_detection;
-        if (!motionInfo || typeof motionInfo !== "object") {
-          return false;
-        }
-        if (motionInfo.enabled === false) {
-          return true;
-        }
-        return motionInfo.session_override === true && motionInfo.enabled !== true;
+        storageThreshold.textContent = Number.isFinite(threshold) ? `${threshold.toFixed(1)}%` : "—";
+
+        renderPreview(status);
+        renderRecordings(status.recordings || [], status.processing_recording, status.processing);
+
+        const now = new Date();
+        lastUpdated.textContent = `Updated ${now.toLocaleTimeString()}`;
+
+        const allowRecordingActions = inSurveillance;
+        startContinuousButton.disabled = !allowRecordingActions || status.recording;
+        startMotionButton.disabled = !allowRecordingActions || status.recording;
+        stopButton.disabled = !allowRecordingActions || !status.recording;
+        switchModeButton.disabled = status.mode === "revcam";
       }
 
-      function createActionButton(label, className) {
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = className;
-        button.textContent = label;
-        return button;
+      function renderRecordings(records, processingRecord, processingActive) {
+        const visibleRecords = [];
+        if (processingRecord && processingRecord.name) {
+          visibleRecords.push({ ...processingRecord, processing: true });
+        }
+        if (Array.isArray(records)) {
+          for (const item of records.slice(0, 8)) {
+            visibleRecords.push(item);
+          }
+        }
+        if (visibleRecords.length === 0) {
+          recordingsEmpty.hidden = false;
+          recordingsTable.hidden = true;
+        } else {
+          recordingsEmpty.hidden = true;
+          recordingsTable.hidden = false;
+        }
+        recordingCount.textContent = `${Array.isArray(records) ? records.length : 0} items`;
+        recordingsBody.innerHTML = "";
+        visibleRecords.forEach((record) => {
+          const row = document.createElement("tr");
+          const started = formatDateTime(record.started_at || record.startedAt);
+          const duration = formatDuration(record.duration_seconds ?? record.durationSeconds);
+          const size = formatBytes(record.size_bytes ?? record.sizeBytes);
+          const mode = record.motion_detection?.session_override
+            ? record.motion_detection.session_override
+            : record.motion_detection?.enabled
+            ? "Motion"
+            : record.mode || "Continuous";
+          const statusCell = record.processing
+            ? "Processing…"
+            : record.processing_error
+            ? "Error"
+            : mode;
+
+          row.innerHTML = `
+            <td>${record.name || "Recording"}</td>
+            <td>${started}</td>
+            <td>${duration}</td>
+            <td>${size}</td>
+            <td>${statusCell}</td>
+            <td></td>
+          `;
+          const actionsCell = row.lastElementChild;
+          actionsCell.className = "recording-actions";
+          if (!record.processing) {
+            const playLink = document.createElement("a");
+            playLink.href = `/surveillance/player?name=${encodeURIComponent(record.name)}`;
+            playLink.textContent = "Play";
+            actionsCell.appendChild(playLink);
+
+            const downloadLink = document.createElement("a");
+            downloadLink.href = `/api/surveillance/recordings/${encodeURIComponent(record.name)}/download`;
+            downloadLink.textContent = "Download";
+            downloadLink.setAttribute("download", "");
+            actionsCell.appendChild(downloadLink);
+
+            const deleteButton = document.createElement("button");
+            deleteButton.type = "button";
+            deleteButton.textContent = "Delete";
+            deleteButton.addEventListener("click", () => confirmDelete(record.name));
+            actionsCell.appendChild(deleteButton);
+          } else {
+            actionsCell.textContent = "Processing clip…";
+          }
+          recordingsBody.appendChild(row);
+        });
+
+        if (processingActive) {
+          processingBanner.hidden = false;
+          processingBanner.textContent = "Processing recent recording…";
+        } else if (processingRecord && processingRecord.processing_error) {
+          processingBanner.hidden = false;
+          processingBanner.classList.add("is-error");
+          processingBanner.textContent = processingRecord.processing_error;
+        } else {
+          processingBanner.hidden = true;
+          processingBanner.classList.remove("is-error");
+          processingBanner.textContent = "";
+        }
       }
 
-      async function deleteRecording(name) {
+      async function postJSON(url, payload) {
+        const response = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: payload ? JSON.stringify(payload) : "{}",
+        });
+        if (!response.ok) {
+          let detail = "";
+          try {
+            const message = await response.json();
+            detail = message?.detail || message?.error || "";
+          } catch (error) {
+            detail = "";
+          }
+          const error = new Error(detail || `Request failed (${response.status})`);
+          error.status = response.status;
+          throw error;
+        }
+        return response.json().catch(() => ({}));
+      }
+
+      async function handleStartRecording(motion = false) {
+        try {
+          setStatusBanner(motion ? "Starting motion recording…" : "Starting recording…");
+          const endpoint = motion
+            ? "/api/surveillance/recordings/start-motion"
+            : "/api/surveillance/recordings/start";
+          await postJSON(endpoint);
+          setStatusBanner("Recording started", "success");
+          await loadStatus();
+        } catch (error) {
+          console.error("Failed to start recording", error);
+          setStatusBanner(error.message || "Unable to start recording", "error");
+        }
+      }
+
+      async function handleStopRecording() {
+        try {
+          setStatusBanner("Stopping recording…");
+          await postJSON("/api/surveillance/recordings/stop");
+          setStatusBanner("Recording stopped", "success");
+          await loadStatus();
+        } catch (error) {
+          console.error("Failed to stop recording", error);
+          setStatusBanner(error.message || "Unable to stop recording", "error");
+        }
+      }
+
+      async function confirmDelete(name) {
         if (!name) {
           return;
         }
@@ -914,486 +752,69 @@
           return;
         }
         try {
-          const response = await fetch(`/api/surveillance/recordings/${encodeURIComponent(name)}`, {
+          await fetch(`/api/surveillance/recordings/${encodeURIComponent(name)}`, {
             method: "DELETE",
-            headers: { "Content-Type": "application/json" },
           });
-          if (!response.ok) {
-            throw new Error(`Delete failed with ${response.status}`);
-          }
-          await loadStatus({ showLoading: true });
-          setStatus(`Deleted recording ${name}.`, "info");
+          await loadStatus();
         } catch (error) {
           console.error("Failed to delete recording", error);
-          setStatus("Unable to delete recording", "error");
+          setStatusBanner("Unable to delete recording", "error");
         }
       }
 
-      function renderRecordings(records) {
-        recordingsList.innerHTML = "";
-        if (!Array.isArray(records) || records.length === 0) {
-          recordingsEmpty.hidden = false;
-          return;
+      async function handleSwitchMode() {
+        try {
+          switchModeButton.disabled = true;
+          await postJSON("/api/surveillance/mode", { mode: "revcam" });
+          setStatusBanner("Returning to live camera", "success");
+          window.location.href = "/";
+        } catch (error) {
+          console.error("Failed to switch mode", error);
+          setStatusBanner(error.message || "Unable to switch mode", "error");
+        } finally {
+          switchModeButton.disabled = false;
         }
-        recordingsEmpty.hidden = true;
-        records.forEach((record) => {
-          const item = document.createElement("li");
-          item.className = "recording-item";
-          const meta = document.createElement("div");
-          meta.className = "recording-meta";
-          const name = document.createElement("span");
-          name.className = "recording-name";
-          name.textContent = record.name || "Recording";
-          const details = document.createElement("span");
-          details.className = "recording-details";
-          const started = record.started_at ? new Date(record.started_at) : null;
-          const durationSeconds =
-            typeof record.duration_seconds === "number" ? record.duration_seconds : null;
-          const sizeBytes = typeof record.size_bytes === "number" ? record.size_bytes : null;
-          const chunkCount = typeof record.chunk_count === "number" ? record.chunk_count : null;
-          const isProcessingRecord = Boolean(record.processing);
-          const processingError =
-            typeof record.processing_error === "string" && record.processing_error.length > 0;
-          let summaryText;
-          if (isProcessingRecord) {
-            summaryText = "Processing clip…";
-          } else if (processingError) {
-            summaryText = "Processing failed";
-            details.title = record.processing_error;
-          } else {
-            const formatted = [
-              started ? started.toLocaleString() : null,
-              durationSeconds != null ? `${durationSeconds.toFixed(1)}s` : null,
-              sizeBytes != null ? formatBytes(sizeBytes) : null,
-              chunkCount && chunkCount > 1 ? `${chunkCount} chunks` : null,
-              record.stop_reason === "storage_low"
-                ? "Stopped due to low storage"
-                : typeof record.stop_reason === "string"
-                ? `Stopped: ${record.stop_reason}`
-                : null,
-            ].filter(Boolean);
-            summaryText = formatted.join(" • ") || "Pending metadata";
-          }
-          details.textContent = summaryText;
-          meta.appendChild(name);
-          meta.appendChild(details);
-          if (Array.isArray(record.chunks) && record.chunks.length > 0) {
-            const chunkSummaries = record.chunks
-              .map((chunk, idx) => {
-                if (!chunk || typeof chunk !== "object") {
-                  return null;
-                }
-                const label = idx + 1;
-                const chunkSize =
-                  typeof chunk.size_bytes === "number" && Number.isFinite(chunk.size_bytes)
-                    ? formatBytes(chunk.size_bytes)
-                    : null;
-                if (!chunkSize) {
-                  return null;
-                }
-                return `Chunk ${label} (${chunkSize})`;
-              })
-              .filter(Boolean);
-            if (chunkSummaries.length) {
-              const chunkLine = document.createElement("div");
-              chunkLine.className = "recording-chunks";
-              chunkLine.textContent = chunkSummaries.join(", ");
-              meta.appendChild(chunkLine);
-            }
-          }
-          const actions = document.createElement("div");
-          actions.className = "recording-actions";
-          const open = createActionButton("Open", "open-recording");
-          if (isProcessingRecord) {
-            open.disabled = true;
-            open.title = "Processing clip…";
-          }
-          open.addEventListener("click", () => {
-            const href = `/surveillance/player?name=${encodeURIComponent(record.name)}`;
-            window.location.href = href;
-          });
-          actions.appendChild(open);
-          const removeButton = createActionButton("Delete", "delete-recording");
-          if (isProcessingRecord) {
-            removeButton.disabled = true;
-            removeButton.title = "Processing clip…";
-          }
-          removeButton.addEventListener("click", () => {
-            deleteRecording(record.name).catch((error) => {
-              console.error("Delete recording error", error);
-            });
-          });
-          actions.appendChild(removeButton);
-          item.appendChild(meta);
-          item.appendChild(actions);
-          recordingsList.appendChild(item);
-        });
       }
 
-      async function loadStatus(options = {}) {
-        const { showLoading = false, suppressError = false } = options;
-        const requestSequence = ++statusRequestSequence;
-        latestRequestedStatusSequence = requestSequence;
-        if (showLoading) {
-          setStatus("Loading surveillance status…", "busy");
-        }
-        clearScheduledStatusRefresh();
+      async function loadStatus() {
         try {
           const response = await fetch("/api/surveillance/status", { cache: "no-store" });
           if (!response.ok) {
-            throw new Error(`Status request failed with ${response.status}`);
-          }
-          if (requestSequence < latestRequestedStatusSequence) {
-            scheduleStatusRefresh();
-            return;
+            throw new Error(`Request failed (${response.status})`);
           }
           const payload = await response.json();
-          if (requestSequence < latestAppliedStatusSequence) {
-            scheduleStatusRefresh();
-            return;
-          }
-          latestAppliedStatusSequence = requestSequence;
-          if (payload && typeof payload.mode === "string") {
-            currentMode = payload.mode === "surveillance" ? "surveillance" : "revcam";
-            updateModeButtons(currentMode);
-            if (currentMode !== "surveillance") {
-              window.location.replace("/");
-              return;
-            }
-          }
-          const processingRecord = payload ? payload.processing_recording : null;
-          const isProcessing = Boolean(payload && payload.processing);
-          const motionSnapshot = payload ? payload.motion : null;
-          const serverRecording = Boolean(payload && payload.recording);
-          lastStatusSnapshot = payload && typeof payload === "object" ? payload : null;
-          let serverModeHint = "idle";
-          if (payload && typeof payload.recording_mode === "string") {
-            const candidate = payload.recording_mode;
-            if (candidate === "motion" || candidate === "continuous") {
-              serverModeHint = candidate;
-            }
-          }
-          const derivedSession = determineSessionState(
-            serverRecording,
-            serverModeHint,
-            motionSnapshot,
-          );
-          const previousSession = sessionState;
-          let effectiveSession = derivedSession;
-          if (manualSessionPending) {
-            const now = Date.now();
-            if (derivedSession === "manual") {
-              manualSessionPending = false;
-              manualSessionGraceDeadline = 0;
-            } else if (serverRecording || now < manualSessionGraceDeadline) {
-              effectiveSession = "manual";
-            } else {
-              manualSessionPending = false;
-              manualSessionGraceDeadline = 0;
-            }
-          }
-          applySessionVisuals(effectiveSession, {
-            processingActive: isProcessing,
-            processingRecord,
-          });
-          updatePreview(payload ? payload.preview : null);
-          renderRecordings(payload && Array.isArray(payload.recordings) ? payload.recordings : []);
-          const storage = payload ? payload.storage : null;
-          updateStorage(storage);
-          const startedAtIso =
-            payload && typeof payload.recording_started_at === "string"
-              ? payload.recording_started_at
-              : null;
-          syncRecordingTimer(startedAtIso, sessionState);
-          const processingError =
-            processingRecord &&
-            typeof processingRecord.processing_error === "string" &&
-            processingRecord.processing_error.length > 0;
-          if (processingError) {
-            setStatus("Recording processing failed", "error");
-          }
-          if (
-            storage &&
-            typeof storage.free_percent === "number" &&
-            typeof storage.threshold_percent === "number" &&
-            storage.threshold_percent > 0 &&
-            storage.free_percent <= storage.threshold_percent
-          ) {
-            setStatus("Low storage — recordings will pause automatically", "error");
-          }
-          const manualSessionConcluded =
-            previousSession === "manual" &&
-            sessionState !== "manual" &&
-            !manualSessionPending &&
-            !serverRecording;
-          if (manualSessionConcluded) {
-            const resumeTarget = pendingManualResume;
-            pendingManualResume = null;
-            const canResumeMotion = resumeTarget === "motion" && !serverRecording;
-            if (canResumeMotion) {
-              window.setTimeout(() => {
-                resumeMotionAfterManual().catch((error) => {
-                  console.error("Failed to resume motion detection", error);
-                  setStatus("Unable to restart motion detection", "error");
-                  loadStatus({ showLoading: false, suppressError: true }).catch((loadError) => {
-                    console.error("Follow-up status refresh after resume failure failed", loadError);
-                  });
-                });
-              }, 0);
-            }
-          } else if (sessionState !== "manual" && !manualSessionPending) {
-            pendingManualResume = null;
-          }
-          scheduleStatusRefresh();
+          renderStatus(payload);
+          setStatusBanner("", "info");
         } catch (error) {
-          if (error && error.name === "AbortError") {
-            return;
-          }
           console.error("Failed to load surveillance status", error);
-          if (requestSequence >= latestAppliedStatusSequence) {
-            setStatus("Unable to load surveillance status", "error");
-            scheduleStatusRefresh();
-          }
-          if (!suppressError) {
-            throw error;
-          }
+          setStatusBanner(error.message || "Unable to load surveillance status", "error");
         }
       }
 
-      async function postRecordingCommand(endpoint, options = {}) {
-        const { allowConflict = false } = options;
-        const response = await fetch(endpoint, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-        });
-        if (!response.ok) {
-          if (allowConflict && response.status === 409) {
-            return null;
-          }
-          let detail = null;
-          try {
-            const payload = await response.json();
-            if (payload && typeof payload.detail === "string") {
-              detail = payload.detail;
-            }
-          } catch (parseError) {
-            // Ignore parse errors and fall back to status text.
-          }
-          const error = new Error(detail || `Request failed with ${response.status}`);
-          error.status = response.status;
-          throw error;
+      function scheduleRefresh() {
+        if (refreshTimer) {
+          clearInterval(refreshTimer);
         }
-        return response;
-      }
-
-      async function executeManualToggle(options = {}) {
-        const { resumePreviousMotion = true } = options;
-        const currentSession = sessionState;
-        const manualActive = isManualSessionActive();
-        const stoppingManual = manualActive;
-        try {
-          if (stoppingManual) {
-            await postRecordingCommand("/api/surveillance/recordings/stop", {
-              allowConflict: true,
-            });
-            manualSessionPending = false;
-            manualSessionGraceDeadline = 0;
-            if (!resumePreviousMotion) {
-              pendingManualResume = null;
-            }
-          } else {
-            const wasMotionSession =
-              currentSession === "motion-monitoring" || currentSession === "motion-recording";
-            const shouldResumeMotion = resumePreviousMotion && wasMotionSession;
-            pendingManualResume = shouldResumeMotion ? "motion" : null;
-            if (wasMotionSession) {
-              await postRecordingCommand("/api/surveillance/recordings/stop", {
-                allowConflict: true,
-              });
-            }
-            try {
-              const response = await postRecordingCommand("/api/surveillance/recordings/start");
-              let startIso = null;
-              if (response) {
-                try {
-                  const payload = await response.json();
-                  if (
-                    payload &&
-                    typeof payload === "object" &&
-                    payload.recording &&
-                    typeof payload.recording === "object" &&
-                    typeof payload.recording.started_at === "string"
-                  ) {
-                    startIso = payload.recording.started_at;
-                  }
-                } catch (parseError) {
-                  console.warn("Failed to parse manual start response", parseError);
-                }
-              }
-              const fallbackIso = new Date().toISOString();
-              manualSessionPending = true;
-              manualSessionGraceDeadline = Date.now() + MANUAL_CONFIRMATION_GRACE_MS;
-              applySessionVisuals("manual");
-              startRecordingTimer(startIso || fallbackIso);
-            } catch (startError) {
-              if (pendingManualResume === "motion") {
-                pendingManualResume = null;
-                try {
-                  await postRecordingCommand("/api/surveillance/recordings/start-motion");
-                } catch (resumeError) {
-                  console.error(
-                    "Failed to restore motion detection after manual start failure",
-                    resumeError,
-                  );
-                }
-              }
-              throw startError;
-            }
+        refreshTimer = setInterval(() => {
+          if (document.visibilityState === "visible") {
+            loadStatus();
           }
-          return { stoppingManual };
-        } catch (error) {
-          if (!stoppingManual) {
-            pendingManualResume = null;
-            manualSessionPending = false;
-            manualSessionGraceDeadline = 0;
-          }
-          const failure =
-            error instanceof Error ? error : new Error("Recording request failed");
-          failure.stoppingManual = stoppingManual;
-          throw failure;
-        }
+        }, 5000);
       }
 
-      async function resumeMotionAfterManual() {
-        await postRecordingCommand("/api/surveillance/recordings/start-motion");
-        await loadStatus({ showLoading: true, suppressError: true });
-      }
-
-      if (recordButton) {
-        recordButton.addEventListener("click", async () => {
-          const buttons = [recordButton, motionRecordButton].filter(Boolean);
-          buttons.forEach((button) => {
-            button.disabled = true;
-          });
-          let stoppingManual = false;
-          try {
-            const result = await executeManualToggle({ resumePreviousMotion: true });
-            stoppingManual = Boolean(result && result.stoppingManual);
-          } catch (error) {
-            console.error("Manual recording control error", error);
-            const message =
-              error && typeof error.message === "string"
-                ? error.message
-                : "Recording request failed";
-            setStatus(message, "error");
-            buttons.forEach((button) => {
-              button.disabled = false;
-            });
-            return;
-          }
-          buttons.forEach((button) => {
-            button.disabled = false;
-          });
-          const expectedSession = stoppingManual ? "idle" : "manual";
-          applySessionVisuals(expectedSession);
-          const statusPromise = loadStatus({ showLoading: true });
-          statusPromise.catch((error) => {
-            console.error("Recording status refresh error", error);
-            applySessionVisuals(sessionState);
-            scheduleStatusRefresh();
-          });
-        });
-      }
-
-      if (motionRecordButton) {
-        motionRecordButton.addEventListener("click", async () => {
-          const buttons = [recordButton, motionRecordButton].filter(Boolean);
-          buttons.forEach((button) => {
-            button.disabled = true;
-          });
-          const motionActive =
-            sessionState === "motion-monitoring" || sessionState === "motion-recording";
-          try {
-            if (motionActive) {
-              await postRecordingCommand("/api/surveillance/recordings/stop", {
-                allowConflict: true,
-              });
-            } else {
-              pendingManualResume = null;
-              await postRecordingCommand("/api/surveillance/recordings/start-motion");
-            }
-          } catch (error) {
-            console.error("Motion detection control error", error);
-            const message =
-              error && typeof error.message === "string"
-                ? error.message
-                : "Recording request failed";
-            setStatus(message, "error");
-            buttons.forEach((button) => {
-              button.disabled = false;
-            });
-            return;
-          }
-          buttons.forEach((button) => {
-            button.disabled = false;
-          });
-          const nextSession = motionActive ? "idle" : "motion-monitoring";
-          applySessionVisuals(nextSession);
-          const statusPromise = loadStatus({ showLoading: true });
-          statusPromise.catch((error) => {
-            console.error("Motion detection status refresh error", error);
-            applySessionVisuals(sessionState);
-            scheduleStatusRefresh();
-          });
-        });
-      }
-
-      if (refreshButton) {
-        refreshButton.addEventListener("click", () => {
-          loadStatus({ showLoading: true, suppressError: true });
-        });
-      }
-
-      modeButtons.forEach((button) => {
-        button.addEventListener("click", () => {
-          const target = button.dataset.mode || "revcam";
-          changeMode(target).catch((error) =>
-            console.error("Viewing mode change failure", error),
-          );
-        });
-      });
-
-      window.addEventListener("pagehide", () => {
-        pageVisible = false;
-        clearScheduledStatusRefresh();
-        stopRecordingTimer();
-      });
-
-      window.addEventListener("pageshow", () => {
-        const wasHidden = !pageVisible;
-        pageVisible = true;
-        if (wasHidden) {
-          loadStatus({ showLoading: false, suppressError: true }).catch((error) => {
-            console.error("Surveillance status refresh on pageshow failed", error);
-          });
-        }
-      });
+      startContinuousButton.addEventListener("click", () => handleStartRecording(false));
+      startMotionButton.addEventListener("click", () => handleStartRecording(true));
+      stopButton.addEventListener("click", handleStopRecording);
+      switchModeButton.addEventListener("click", handleSwitchMode);
 
       document.addEventListener("visibilitychange", () => {
-        if (document.visibilityState === "hidden") {
-          pageVisible = false;
-          clearScheduledStatusRefresh();
-        } else if (document.visibilityState === "visible") {
-          pageVisible = true;
-          loadStatus({ showLoading: false, suppressError: true }).catch((error) => {
-            console.error("Surveillance status refresh on visibility change failed", error);
-          });
+        if (document.visibilityState === "visible") {
+          loadStatus();
         }
       });
 
-      loadStatus({ showLoading: true }).catch((error) => {
-        console.error("Initial surveillance status load failed", error);
-      });
+      loadStatus();
+      scheduleRefresh();
     </script>
   </body>
 </html>

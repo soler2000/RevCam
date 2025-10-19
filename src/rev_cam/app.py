@@ -260,6 +260,7 @@ class SurveillanceSettingsPayload(BaseModel):
     expert_fps: int | None = None
     expert_jpeg_quality: int | None = None
     chunk_duration_seconds: int | None = None
+    max_clip_megabytes: int | None = None
     overlays_enabled: bool | None = None
     remember_recording_state: bool | None = None
     motion_detection_enabled: bool | None = None
@@ -571,6 +572,9 @@ def create_app(
                 settings = None
         if settings is not None:
             status.setdefault("threshold_percent", float(settings.storage_threshold_percent))
+            clip_limit = getattr(settings, "resolved_chunk_byte_limit", None)
+            if clip_limit:
+                status.setdefault("max_clip_bytes", int(clip_limit))
         return status
 
     def _distance_payload(
@@ -781,6 +785,7 @@ def create_app(
                 jpeg_quality=jpeg_quality,
                 directory=RECORDINGS_DIR,
                 chunk_duration_seconds=surveillance_settings.chunk_duration_seconds,
+                chunk_data_limit_bytes=surveillance_settings.resolved_chunk_byte_limit,
                 storage_threshold_percent=surveillance_settings.storage_threshold_percent,
                 motion_detection_enabled=surveillance_settings.motion_detection_enabled,
                 motion_sensitivity=surveillance_settings.motion_sensitivity,
@@ -794,6 +799,7 @@ def create_app(
                 fps=fps,
                 jpeg_quality=jpeg_quality,
                 chunk_duration_seconds=surveillance_settings.chunk_duration_seconds,
+                chunk_data_limit_bytes=surveillance_settings.resolved_chunk_byte_limit,
                 storage_threshold_percent=surveillance_settings.storage_threshold_percent,
                 motion_detection_enabled=surveillance_settings.motion_detection_enabled,
                 motion_sensitivity=surveillance_settings.motion_sensitivity,
@@ -2123,15 +2129,20 @@ def create_app(
         ]
         return {"settings": settings.serialise(), "presets": presets}
 
-    @app.post("/api/surveillance/settings")
-    async def update_surveillance_settings(
-        payload: SurveillanceSettingsPayload,
+    def _prepare_surveillance_settings_payload(
+        payload: SurveillanceSettingsPayload | Mapping[str, object]
     ) -> dict[str, object]:
-        raw = payload.model_dump(exclude_none=True)
+        if isinstance(payload, SurveillanceSettingsPayload):
+            raw = payload.model_dump(exclude_none=True)
+        else:
+            raw = {key: value for key, value in payload.items() if value is not None}
         if "fps" in raw and "expert_fps" not in raw:
             raw["expert_fps"] = raw.pop("fps")
         if "jpeg_quality" in raw and "expert_jpeg_quality" not in raw:
             raw["expert_jpeg_quality"] = raw.pop("jpeg_quality")
+        return raw
+
+    async def _persist_surveillance_settings(raw: Mapping[str, object]) -> SurveillanceSettings:
         try:
             settings = config_manager.set_surveillance_settings(raw)
         except ValueError as exc:
@@ -2142,6 +2153,7 @@ def create_app(
                     fps=settings.resolved_fps,
                     jpeg_quality=settings.resolved_jpeg_quality,
                     chunk_duration_seconds=settings.chunk_duration_seconds,
+                    chunk_data_limit_bytes=settings.resolved_chunk_byte_limit,
                     storage_threshold_percent=settings.storage_threshold_percent,
                     motion_detection_enabled=settings.motion_detection_enabled,
                     motion_sensitivity=settings.motion_sensitivity,
@@ -2154,6 +2166,22 @@ def create_app(
                     status_code=500,
                     detail="Unable to apply surveillance settings",
                 ) from exc
+        return settings
+
+    @app.post("/api/surveillance/settings")
+    async def update_surveillance_settings(
+        payload: SurveillanceSettingsPayload,
+    ) -> dict[str, object]:
+        raw = _prepare_surveillance_settings_payload(payload)
+        settings = await _persist_surveillance_settings(raw)
+        return {"settings": settings.serialise()}
+
+    @app.put("/api/surveillance/settings")
+    async def replace_surveillance_settings(
+        payload: SurveillanceSettingsPayload,
+    ) -> dict[str, object]:
+        raw = _prepare_surveillance_settings_payload(payload)
+        settings = await _persist_surveillance_settings(raw)
         return {"settings": settings.serialise()}
 
     @app.post("/api/surveillance/mode")

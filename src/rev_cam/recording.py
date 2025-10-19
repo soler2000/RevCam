@@ -2193,6 +2193,9 @@ class RecordingManager:
         self.preview_directory.mkdir(parents=True, exist_ok=True)
         self._frame_interval = 1.0 / float(self.fps)
         self.chunk_duration_seconds = self._normalise_chunk_duration(self.chunk_duration_seconds)
+        self.chunk_data_limit_bytes = self._normalise_chunk_byte_limit(
+            self.chunk_data_limit_bytes
+        )
         self.storage_threshold_percent = self._normalise_storage_threshold(self.storage_threshold_percent)
         self.motion_detection_enabled = bool(self.motion_detection_enabled)
         self.motion_sensitivity = MotionDetector._normalise_sensitivity(self.motion_sensitivity)
@@ -2212,8 +2215,7 @@ class RecordingManager:
             frame_decimation=self.motion_frame_decimation,
         )
         # Single-file recordings do not rotate, so disable chunk byte/frame limits
-        self.chunk_data_limit_bytes = None
-        self._chunk_byte_limit = 0
+        self._chunk_byte_limit = int(self.chunk_data_limit_bytes or 0)
         self._chunk_frame_limit = 0
         self._codec_state_path = self.directory / ".codec_state.json"
         self._load_codec_state()
@@ -2557,6 +2559,7 @@ class RecordingManager:
         fps: int | None = None,
         jpeg_quality: int | None = None,
         chunk_duration_seconds: int | None = None,
+        chunk_data_limit_bytes: int | None = None,
         storage_threshold_percent: float | int | None = None,
         motion_detection_enabled: bool | None = None,
         motion_sensitivity: int | float | None = None,
@@ -2582,6 +2585,12 @@ class RecordingManager:
                 new_duration = self._normalise_chunk_duration(chunk_duration_seconds)
                 if new_duration != self.chunk_duration_seconds:
                     self.chunk_duration_seconds = new_duration
+                    chunk_limit_needs_update = True
+            if chunk_data_limit_bytes is not None:
+                new_limit = self._normalise_chunk_byte_limit(chunk_data_limit_bytes)
+                if new_limit != self.chunk_data_limit_bytes:
+                    self.chunk_data_limit_bytes = new_limit
+                    self._chunk_byte_limit = int(new_limit or 0)
                     chunk_limit_needs_update = True
             if storage_threshold_percent is not None:
                 self.storage_threshold_percent = self._normalise_storage_threshold(storage_threshold_percent)
@@ -3645,13 +3654,18 @@ class RecordingManager:
             "used_bytes": used,
             "free_percent": round(free_percent, 3),
         }
+        if self._chunk_byte_limit:
+            status["max_clip_bytes"] = int(self._chunk_byte_limit)
         self._last_storage_status = status
         return status
 
     def get_storage_status(self) -> dict[str, float | int]:
         if self._last_storage_status is None:
             return self._compute_storage_status()
-        return dict(self._last_storage_status)
+        status = dict(self._last_storage_status)
+        if self._chunk_byte_limit:
+            status.setdefault("max_clip_bytes", int(self._chunk_byte_limit))
+        return status
 
     def _schedule_auto_stop(self, reason: str) -> None:
         if self._next_stop_reason is None:
