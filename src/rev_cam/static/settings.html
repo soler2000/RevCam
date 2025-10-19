@@ -8290,7 +8290,11 @@
           await scanWifiNetworks();
         } catch (err) {
           console.error(err);
-          setWifiFeedback("Connection attempt failed.", true);
+          const reconnectMessage =
+            `Connection request sent. RevCam may temporarily disconnect this page while joining "${ssid}". ` +
+            "Reconnect your controlling device to the same network to continue.";
+          setWifiFeedback(reconnectMessage, false);
+          hideWifiConnectForm();
         }
       }
 
