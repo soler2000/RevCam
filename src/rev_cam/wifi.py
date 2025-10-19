@@ -28,6 +28,7 @@ class WiFiCredentialStore:
         self._lock = threading.Lock()
         self._hotspot_password: str | None = None
         self._network_passwords: dict[str, str] = {}
+        self._known_networks: set[str] = set()
         self._ensure_parent()
         self._load()
 
@@ -62,11 +63,22 @@ class WiFiCredentialStore:
             self._network_passwords = cleaned
         else:
             self._network_passwords = {}
+        known_entries = payload.get("known_networks")
+        known: set[str] = set()
+        if isinstance(known_entries, (list, tuple, set)):
+            for raw_ssid in known_entries:
+                if not isinstance(raw_ssid, str):
+                    continue
+                identifier = raw_ssid.strip()
+                if identifier:
+                    known.add(identifier)
+        self._known_networks = known | set(self._network_passwords)
 
     def _save_locked(self) -> None:
         payload = {
             "hotspot_password": self._hotspot_password,
             "networks": dict(self._network_passwords),
+            "known_networks": sorted(self._known_networks | set(self._network_passwords)),
         }
         try:
             self._path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -96,7 +108,7 @@ class WiFiCredentialStore:
         """Return the SSIDs with stored credentials."""
 
         with self._lock:
-            return sorted(self._network_passwords)
+            return sorted(self._known_networks | set(self._network_passwords))
 
     def set_network_password(self, ssid: str, password: str | None) -> None:
         if not isinstance(ssid, str) or not ssid.strip():
@@ -104,10 +116,32 @@ class WiFiCredentialStore:
         identifier = ssid.strip()
         cleaned_password = password.strip() if isinstance(password, str) and password.strip() else None
         with self._lock:
+            changed = False
             if cleaned_password is None:
-                self._network_passwords.pop(identifier, None)
+                if identifier in self._network_passwords:
+                    self._network_passwords.pop(identifier, None)
+                    changed = True
+                if identifier in self._known_networks:
+                    self._known_networks.discard(identifier)
+                    changed = True
             else:
-                self._network_passwords[identifier] = cleaned_password
+                if self._network_passwords.get(identifier) != cleaned_password:
+                    self._network_passwords[identifier] = cleaned_password
+                    changed = True
+                if identifier not in self._known_networks:
+                    self._known_networks.add(identifier)
+                    changed = True
+            if changed:
+                self._save_locked()
+
+    def mark_known_network(self, ssid: str) -> None:
+        if not isinstance(ssid, str) or not ssid.strip():
+            raise ValueError("SSID must be a non-empty string")
+        identifier = ssid.strip()
+        with self._lock:
+            if identifier in self._known_networks:
+                return
+            self._known_networks.add(identifier)
             self._save_locked()
 
     def forget_network(self, ssid: str) -> None:
@@ -115,8 +149,14 @@ class WiFiCredentialStore:
             return
         identifier = ssid.strip()
         with self._lock:
+            changed = False
             if identifier in self._network_passwords:
                 self._network_passwords.pop(identifier, None)
+                changed = True
+            if identifier in self._known_networks:
+                self._known_networks.discard(identifier)
+                changed = True
+            if changed:
                 self._save_locked()
 
 
@@ -1425,6 +1465,14 @@ class WiFiManager:
                 metadata=metadata,
             )
 
+        if last_status and last_status.connected and not last_status.hotspot_active:
+            self._record_log(
+                "auto_connect_skip_hotspot",
+                "Active network connection detected; skipping hotspot fallback.",
+                status=last_status,
+            )
+            return last_status
+
         if not start_hotspot:
             return last_status or self._fetch_status(update_mdns=update_mdns)
 
@@ -1578,6 +1626,15 @@ class WiFiManager:
             current_identifier = status.ssid or status.profile or cleaned_ssid
             if isinstance(current_identifier, str):
                 current_identifier = current_identifier.strip() or cleaned_ssid
+            identifiers_to_remember = {cleaned_ssid}
+            for value in (status.ssid, status.profile):
+                if isinstance(value, str) and value.strip():
+                    identifiers_to_remember.add(value.strip())
+            for identifier in identifiers_to_remember:
+                try:
+                    self._credentials.mark_known_network(identifier)
+                except ValueError:
+                    continue
             if (
                 isinstance(current_identifier, str)
                 and current_identifier
@@ -2219,6 +2276,21 @@ class WiFiManager:
         update_mdns: bool = True,
     ) -> WiFiStatus:
         result = self._apply_hotspot_password(status)
+        if (
+            isinstance(result, WiFiStatus)
+            and result.connected
+            and not result.hotspot_active
+        ):
+            identifiers = {
+                value.strip()
+                for value in (result.ssid, result.profile)
+                if isinstance(value, str) and value.strip()
+            }
+            for identifier in identifiers:
+                try:
+                    self._credentials.mark_known_network(identifier)
+                except ValueError:
+                    continue
         if update_mdns:
             self._update_mdns(result)
         self._notify_status(result)

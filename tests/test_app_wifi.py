@@ -266,6 +266,28 @@ def test_wifi_scan_marks_stored_credentials(tmp_path: Path) -> None:
     assert any(network.ssid == "Home" and network.stored_credentials for network in networks)
 
 
+def test_connect_marks_new_network_as_known(
+    tmp_path: Path,
+    wifi_backend: FakeWiFiBackend,
+    mdns_advertiser: FakeMDNSAdvertiser,
+) -> None:
+    credentials_path = tmp_path / "wifi_credentials.json"
+    store = WiFiCredentialStore(credentials_path)
+    manager = WiFiManager(
+        backend=wifi_backend,
+        rollback_timeout=0.05,
+        poll_interval=0.005,
+        hotspot_rollback_timeout=0.05,
+        mdns_advertiser=mdns_advertiser,
+        credential_store=store,
+    )
+
+    status = manager.connect("Office")
+
+    assert status.connected is True
+    assert "Office" in store.list_networks()
+
+
 def test_system_log_endpoint_includes_startup(client: TestClient) -> None:
     response = client.get("/api/logs")
     assert response.status_code == 200
@@ -523,6 +545,30 @@ def test_wifi_forget_endpoint_removes_network(client: TestClient) -> None:
     assert refreshed.status_code == 200
     networks = refreshed.json().get("networks", [])
     assert all(network.get("ssid") != "Home" for network in networks)
+
+
+def test_forget_network_clears_known_entry(
+    tmp_path: Path,
+    wifi_backend: FakeWiFiBackend,
+    mdns_advertiser: FakeMDNSAdvertiser,
+) -> None:
+    credentials_path = tmp_path / "wifi_credentials.json"
+    store = WiFiCredentialStore(credentials_path)
+    manager = WiFiManager(
+        backend=wifi_backend,
+        rollback_timeout=0.05,
+        poll_interval=0.005,
+        hotspot_rollback_timeout=0.05,
+        mdns_advertiser=mdns_advertiser,
+        credential_store=store,
+    )
+
+    manager.connect("Office")
+    assert "Office" in store.list_networks()
+
+    manager.forget_network("Office")
+
+    assert "Office" not in store.list_networks()
 
 
 def test_wifi_forget_inactive_network_does_not_disconnect(client: TestClient) -> None:
