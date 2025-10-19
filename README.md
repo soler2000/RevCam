@@ -89,6 +89,18 @@ src/
 
 RevCam targets Python 3.11+.
 
+### Cloning the repository
+
+If you have not already pulled the sources, clone the repository and enter the
+project directory:
+
+```bash
+git clone https://github.com/soler2000/RevCam.git
+cd RevCam
+```
+
+Replace the repository URL with your own fork when contributing changes.
+
 ### Raspberry Pi installation
 
 The Raspberry Pi wheels for Picamera2 and its native dependencies are shipped
