@@ -70,7 +70,9 @@ packages=(
 atlas_package="libatlas-base-dev"
 alt_atlas_packages=(libopenblas-dev liblapack-dev)
 
-if apt-cache show "$atlas_package" >/dev/null 2>&1; then
+atlas_candidate=$(apt-cache policy "$atlas_package" 2>/dev/null | awk '/Candidate:/ {print $2; exit}')
+
+if [[ -n "$atlas_candidate" && "$atlas_candidate" != "(none)" ]]; then
     packages+=("$atlas_package")
 else
     echo "Package $atlas_package is not available; installing ${alt_atlas_packages[*]} instead."

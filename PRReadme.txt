@@ -21,6 +21,10 @@ sudo apt install -y \
   python3-picamera2 python3-prctl python3-simplejpeg \
   libatlas-base-dev \
   libjpeg-dev zlib1g-dev pkg-config
+
+# If apt reports that libatlas-base-dev has no installation candidate, install
+# these linear algebra alternatives instead:
+#   sudo apt install -y libopenblas-dev liblapack-dev
 ```
 These packages provide the official Picamera2 stack alongside the JPEG encoder
 used by the streaming pipeline. The same set is available through
