@@ -262,20 +262,14 @@ class BatteryMonitor:
         bus_number = self._i2c_bus
         if bus_number is not None:
             try:
-                from adafruit_extended_bus import ExtendedI2C  # type: ignore
-            except ModuleNotFoundError:
-                attempts.append(
-                    "install adafruit-circuitpython-extended-bus for custom I2C buses"
-                )
-                return None
-            except Exception as exc:  # pragma: no cover - optional dependency
-                attempts.append(f"ExtendedI2C unavailable: {exc}")
-                return None
+                from .i2c_bus import I2CBusDependencyError, I2CBusRuntimeError, create_i2c_bus
 
-            try:
-                i2c = ExtendedI2C(bus_number)  # type: ignore[call-arg]
-            except Exception as exc:  # pragma: no cover - hardware specific
-                attempts.append(f"Unable to access I2C bus {bus_number}: {exc}")
+                i2c = create_i2c_bus(bus_number)
+            except I2CBusDependencyError as exc:
+                attempts.append(exc.message)
+                return None
+            except I2CBusRuntimeError as exc:
+                attempts.append(exc.message)
                 return None
             self._owned_i2c_bus = i2c
             self._owns_i2c_bus = True

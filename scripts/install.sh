@@ -332,15 +332,11 @@ for module in "${!I2C_MODULES[@]}"; do
 done
 
 if ! python_module_present "adafruit_extended_bus"; then
-    echo "Installing optional Extended I2C helper: adafruit-circuitpython-extended-bus"
-    if ! pip_install_package "adafruit-circuitpython-extended-bus" true; then
-        if ! python_module_present "adafruit_extended_bus"; then
-            cat >&2 <<'WARN'
-Warning: unable to install adafruit-circuitpython-extended-bus automatically.
-Extended I2C bus overrides (REVCAM_I2C_BUS) will remain unavailable until the package is installed manually.
-WARN
-        fi
-    fi
+    cat <<'INFO'
+Note: adafruit-circuitpython-extended-bus is no longer published on PyPI.
+RevCam now ships with a compatible fallback so REVCAM_I2C_BUS overrides work
+without installing the optional helper package.
+INFO
 fi
 
 trap - EXIT

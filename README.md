@@ -277,9 +277,12 @@ manually run:
 
 ```bash
 pip install adafruit-blinka adafruit-circuitpython-ina219
-# Optional: required when overriding REVCAM_I2C_BUS
-pip install adafruit-circuitpython-extended-bus
 ```
+
+RevCam bundles a lightweight replacement for the deprecated
+``adafruit-circuitpython-extended-bus`` helper. When you override the
+``REVCAM_I2C_BUS`` environment variable the bundled helper automatically
+provides the required I²C access so no additional pip packages are needed.
 
 Once available the live view automatically polls the sensor and displays the
 pack percentage, voltage, and current draw in the header.
@@ -293,13 +296,11 @@ export REVCAM_I2C_BUS=29
 ./scripts/run_with_sudo.sh
 ```
 
-When overriding the bus number ensure the optional
-`adafruit-circuitpython-extended-bus` package is installed so RevCam can open
-the desired adapter. The installation helper installs it automatically when it
-is available on PyPI; if the package is missing for your interpreter, the
-script prints a warning so you can install it manually (for example from
-Adafruit's `Adafruit_CircuitPython_Extended_Bus` repository) before overriding
-`REVCAM_I2C_BUS`.
+RevCam automatically handles the I²C bus override using its built-in helper so
+there is no longer a separate package to install. Earlier releases relied on
+``adafruit-circuitpython-extended-bus`` which is no longer available on PyPI;
+the local implementation removes that external dependency while keeping support
+for custom bus numbers.
 
 RevCam expects the INA219 to respond at address `0x43`. If the sensor has been
 configured differently adjust the jumper configuration accordingly.
@@ -313,20 +314,20 @@ environment manually run:
 
 ```bash
 pip install adafruit-blinka adafruit-circuitpython-vl53l1x
-# Optional: required when overriding REVCAM_I2C_BUS
-pip install adafruit-circuitpython-extended-bus
 ```
+
+As with the battery sensor, custom bus numbers no longer require installing the
+``adafruit-circuitpython-extended-bus`` package because RevCam ships with a
+compatible fallback implementation.
 
 With those packages missing the distance panel reports **driver unavailable**
 when it cannot import the VL53L1X driver or supporting `board` module.
 
 Just like the INA219, the VL53L1X defaults to the Pi's primary I²C controller at
 address `0x29`. When connecting the sensor to a different bus export
-`REVCAM_I2C_BUS` before launching the server and ensure the optional
-`adafruit-circuitpython-extended-bus` helper is available so RevCam can open the
-alternate adapter. The installation helper installs it automatically when
-possible and otherwise reports a warning so you can install it manually prior to
-changing the bus number.
+`REVCAM_I2C_BUS` before launching the server. The bundled helper opens the
+alternate adapter automatically so the installation script no longer needs to
+install extra packages.
 
 #### Configuring mounting geometry
 
