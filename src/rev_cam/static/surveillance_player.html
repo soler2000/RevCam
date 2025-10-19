@@ -3,630 +3,508 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Surveillance Recording Playback</title>
-    <link rel="icon" type="image/svg+xml" href="images/favicon.svg" />
+    <title>Surveillance recording · RevCam</title>
     <style>
       :root {
-        color-scheme: dark;
-        --font-family: "Inter", "Manrope", "Segoe UI", system-ui, -apple-system,
-          BlinkMacSystemFont, sans-serif;
-        --surface-0: rgba(14, 16, 22, 0.9);
-        --surface-1: rgba(26, 28, 36, 0.85);
-        --border-subtle: rgba(255, 255, 255, 0.12);
-        --text-primary: #f5f7fb;
-        --text-muted: rgba(245, 247, 250, 0.7);
-        --accent: #0a84ff;
-        --accent-soft: rgba(10, 132, 255, 0.18);
-        --danger: #ff453a;
-        --radius-lg: 1.2rem;
-        --radius-sm: 0.75rem;
-        --space-md: 1rem;
-        --space-lg: 1.6rem;
-        --page-gradient: radial-gradient(
-          120% 140% at top,
-          #1b1e26 0%,
-          #0b0d13 60%,
-          #050609 100%
-        );
+        color-scheme: dark light;
+        --background: #0f111a;
+        --foreground: #f5f7ff;
+        --muted: #a2acc8;
+        --accent: #4aa8ff;
+        --accent-strong: #1d7ef0;
+        --card-bg: rgba(18, 22, 33, 0.92);
+        --card-border: rgba(255, 255, 255, 0.08);
+        --danger: #ff4d61;
+        --success: #38d996;
+        --font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
       }
+
       body {
         margin: 0;
-        background: var(--page-gradient);
+        background: radial-gradient(circle at 10% 10%, rgba(74, 168, 255, 0.18), transparent 60%),
+          radial-gradient(circle at 90% 0%, rgba(56, 217, 150, 0.14), transparent 60%),
+          var(--background);
+        color: var(--foreground);
         font-family: var(--font-family);
-        color: var(--text-primary);
         min-height: 100vh;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        padding: var(--space-lg);
       }
-      .player-card {
-        width: min(960px, 100%);
-        background: var(--surface-1);
-        border-radius: var(--radius-lg);
-        border: 1px solid var(--border-subtle);
-        box-shadow: 0 24px 48px rgba(0, 0, 0, 0.45);
-        padding: var(--space-lg);
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-md);
+
+      a {
+        color: var(--accent);
       }
+
       header {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        background: rgba(12, 16, 24, 0.85);
+        backdrop-filter: blur(14px);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        padding: 1.5rem clamp(1rem, 3vw, 2.5rem);
+      }
+
+      header h1 {
+        margin: 0;
+        font-size: clamp(1.9rem, 3vw, 2.6rem);
+        letter-spacing: -0.03em;
+      }
+
+      header nav {
+        margin-top: 0.6rem;
         display: flex;
-        flex-direction: column;
-        gap: 0.35rem;
-      }
-      .muted {
-        color: var(--text-muted);
-      }
-      .playback-frame {
-        width: 100%;
-        aspect-ratio: 16 / 9;
-        border-radius: 0.9rem;
-        border: 1px solid var(--border-subtle);
-        background: #000;
-      }
-      .meta-list {
-        display: flex;
+        gap: 0.75rem;
         flex-wrap: wrap;
-        gap: 0.75rem;
-        color: var(--text-muted);
-        font-size: 0.95rem;
       }
-      .meta-pill {
-        padding: 0.35rem 0.7rem;
-        border-radius: 999px;
-        background: rgba(255, 255, 255, 0.05);
-        border: 1px solid var(--border-subtle);
-      }
-      .status {
-        min-height: 1.25rem;
-      }
-      .status.error {
-        color: var(--danger);
-        font-weight: 600;
-      }
-      .video-actions {
-        display: flex;
-        flex-direction: column;
-        gap: 0.75rem;
-      }
-      .playback-toolbar {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 0.75rem;
-      }
-      .playback-progress {
-        display: flex;
-        align-items: center;
-        gap: 0.75rem;
-      }
-      .playback-progress .progress-time {
-        width: 3.25rem;
-        text-align: center;
-        font-variant-numeric: tabular-nums;
-        color: var(--text-muted);
-        font-size: 0.9rem;
-      }
-      #playback-progress {
-        flex: 1;
-        -webkit-appearance: none;
-        appearance: none;
-        height: 0.4rem;
-        border-radius: 999px;
-        background: rgba(255, 255, 255, 0.12);
-        outline: none;
-      }
-      #playback-progress:disabled {
-        opacity: 0.4;
-        cursor: not-allowed;
-      }
-      #playback-progress::-webkit-slider-runnable-track {
-        height: 0.4rem;
-        border-radius: 999px;
-        background: rgba(255, 255, 255, 0.12);
-      }
-      #playback-progress::-moz-range-track {
-        height: 0.4rem;
-        border-radius: 999px;
-        background: rgba(255, 255, 255, 0.12);
-      }
-      #playback-progress::-webkit-slider-thumb {
-        -webkit-appearance: none;
-        appearance: none;
-        width: 0.9rem;
-        height: 0.9rem;
-        border-radius: 50%;
-        background: var(--accent);
-        border: none;
-        box-shadow: 0 0 0 2px rgba(10, 132, 255, 0.3);
-        cursor: pointer;
-        transition: transform 0.15s ease, box-shadow 0.15s ease;
-      }
-      #playback-progress::-webkit-slider-thumb:hover {
-        transform: scale(1.1);
-        box-shadow: 0 0 0 4px rgba(10, 132, 255, 0.2);
-      }
-      #playback-progress::-moz-range-thumb {
-        width: 0.9rem;
-        height: 0.9rem;
-        border-radius: 50%;
-        background: var(--accent);
-        border: none;
-        box-shadow: 0 0 0 2px rgba(10, 132, 255, 0.3);
-        cursor: pointer;
-        transition: transform 0.15s ease, box-shadow 0.15s ease;
-      }
-      #playback-progress::-moz-range-thumb:hover {
-        transform: scale(1.1);
-        box-shadow: 0 0 0 4px rgba(10, 132, 255, 0.2);
-      }
-      #toggle-playback {
-        min-width: 6.5rem;
-        font-weight: 600;
-      }
-      #playback-mode {
-        flex: 1;
-        text-align: right;
-        font-size: 0.9rem;
-      }
-      button,
-      a.link {
-        font: inherit;
-        border: 1px solid var(--border-subtle);
-        background: rgba(255, 255, 255, 0.04);
-        color: var(--text-primary);
-        padding: 0.45rem 0.85rem;
-        border-radius: 999px;
-        cursor: pointer;
-        transition: background 0.15s ease, border-color 0.15s ease;
+
+      header nav a {
         text-decoration: none;
+        color: var(--foreground);
+        background: rgba(255, 255, 255, 0.08);
+        padding: 0.45rem 0.9rem;
+        border-radius: 999px;
+        font-size: 0.9rem;
       }
-      button:hover,
-      button:focus-visible,
-      a.link:hover,
-      a.link:focus-visible {
-        background: var(--accent-soft);
-        border-color: rgba(10, 132, 255, 0.55);
-        outline: none;
+
+      header nav a:hover {
+        background: rgba(255, 255, 255, 0.16);
       }
-      button:disabled {
-        cursor: not-allowed;
-        opacity: 0.55;
+
+      main {
+        max-width: 1100px;
+        margin: 2.5rem auto 4rem;
+        padding: 0 clamp(1rem, 3vw, 2.5rem);
+        display: grid;
+        gap: 1.5rem;
       }
-      .footer-links {
+
+      .card {
+        background: var(--card-bg);
+        border: 1px solid var(--card-border);
+        border-radius: 20px;
+        padding: clamp(1.4rem, 3vw, 2rem);
+        box-shadow: 0 24px 55px rgba(0, 0, 0, 0.35);
+      }
+
+      .player-wrapper {
+        position: relative;
+        background: rgba(0, 0, 0, 0.2);
+        border-radius: 18px;
+        overflow: hidden;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+      }
+
+      video {
+        width: 100%;
+        display: block;
+        background: black;
+      }
+
+      .player-overlay {
+        position: absolute;
+        top: 0.75rem;
+        left: 0.75rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+        font-size: 0.85rem;
+        color: rgba(255, 255, 255, 0.85);
+        pointer-events: none;
+      }
+
+      .status-banner {
+        margin-top: 0.75rem;
+        font-size: 0.9rem;
+        color: var(--muted);
+      }
+
+      .status-banner.is-error {
+        color: var(--danger);
+      }
+
+      .metadata-grid {
+        display: grid;
+        gap: 1rem;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      }
+
+      .metadata-item {
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 16px;
+        padding: 1rem;
+        display: grid;
+        gap: 0.3rem;
+      }
+
+      .metadata-item span {
+        font-size: 0.85rem;
+        color: var(--muted);
+      }
+
+      .metadata-item strong {
+        font-size: 1.1rem;
+      }
+
+      .actions {
         display: flex;
         gap: 0.75rem;
         flex-wrap: wrap;
-        align-items: center;
+        margin-top: 1rem;
+      }
+
+      .actions a,
+      .actions button {
+        border: 0;
+        border-radius: 12px;
+        padding: 0.65rem 1.1rem;
+        font: inherit;
+        cursor: pointer;
+        text-decoration: none;
+        background: rgba(255, 255, 255, 0.1);
+        color: var(--foreground);
+      }
+
+      .actions a.primary,
+      .actions button.primary {
+        background: linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%);
+        color: #fff;
+        box-shadow: 0 12px 30px rgba(29, 126, 240, 0.35);
+      }
+
+      .actions button:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+
+      dl {
+        display: grid;
+        gap: 0.6rem;
+      }
+
+      dt {
+        font-size: 0.85rem;
+        color: var(--muted);
+      }
+
+      dd {
+        margin: 0;
+        font-size: 1rem;
+      }
+
+      .chunk-list {
+        margin: 1rem 0 0 0;
+        padding: 0;
+        list-style: none;
+        display: grid;
+        gap: 0.5rem;
+      }
+
+      .chunk-list li {
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 12px;
+        padding: 0.6rem 0.75rem;
+        font-size: 0.9rem;
+      }
+
+      footer {
+        max-width: 1100px;
+        margin: 1.5rem auto 3rem;
+        padding: 0 clamp(1rem, 3vw, 2.5rem);
+        display: flex;
+        justify-content: space-between;
+        color: var(--muted);
+        font-size: 0.85rem;
+      }
+
+      @media (max-width: 720px) {
+        .metadata-grid {
+          grid-template-columns: 1fr;
+        }
       }
     </style>
   </head>
   <body>
-    <div class="player-card" role="document">
-      <header>
-        <h1 id="recording-title">Loading recording…</h1>
-        <div class="meta-list" id="recording-meta"></div>
-        <p id="status-text" class="status muted">Preparing playback…</p>
-      </header>
-      <video
-        id="playback-video"
-        class="playback-frame"
-        controls
-        preload="metadata"
-        hidden
-      >
-        <source id="playback-source" />
-        <p>Your browser does not support HTML5 video playback.</p>
-      </video>
-      <div class="video-actions" id="video-actions" hidden>
-        <div class="playback-toolbar">
-          <button type="button" id="toggle-playback" aria-label="Toggle playback">
-            ⏯
-          </button>
-          <span id="playback-mode" class="muted"></span>
+    <header>
+      <h1 id="recording-title">Surveillance recording</h1>
+      <nav>
+        <a href="/surveillance">Dashboard</a>
+        <a href="/surveillance/timeline">Timeline</a>
+        <a href="/surveillance/settings">Settings</a>
+      </nav>
+    </header>
+    <main>
+      <section class="card">
+        <div class="player-wrapper">
+          <video id="recording-video" controls preload="metadata"></video>
+          <div class="player-overlay" id="player-overlay"></div>
         </div>
-        <div class="playback-progress" id="progress-container" hidden>
-          <span class="progress-time" id="progress-current">0:00</span>
-          <input
-            type="range"
-            id="playback-progress"
-            min="0"
-            max="0"
-            step="0.01"
-            value="0"
-            aria-label="Seek within the recording"
-          />
-          <span class="progress-time" id="progress-total">0:00</span>
+        <p class="status-banner" id="status-banner">Preparing recording…</p>
+        <div class="actions">
+          <a id="download-link" class="primary" href="#" download>Download recording</a>
+          <button type="button" id="desktop-button">Save to desktop</button>
+          <button type="button" id="delete-button">Delete recording</button>
         </div>
-      </div>
-      <div class="footer-links muted">
-        <button type="button" id="save-to-desktop">Save to Desktop</button>
-        <span aria-hidden="true">·</span>
-        <a class="link" id="download-link" href="#" download>Download recording</a>
-        <span aria-hidden="true">·</span>
-        <a class="link" href="/surveillance">Back to surveillance</a>
-      </div>
-    </div>
+      </section>
+
+      <section class="card">
+        <h2>Recording details</h2>
+        <div class="metadata-grid" id="metadata-grid"></div>
+        <dl id="additional-details"></dl>
+        <ul class="chunk-list" id="chunk-list"></ul>
+      </section>
+    </main>
+    <footer>
+      <span id="footer-mode"></span>
+      <span id="footer-updated">Updated —</span>
+    </footer>
+
     <script>
       const params = new URLSearchParams(window.location.search);
       const recordingName = params.get("name");
       const title = document.getElementById("recording-title");
-      const metaList = document.getElementById("recording-meta");
-      const statusText = document.getElementById("status-text");
-      const video = document.getElementById("playback-video");
-      const source = document.getElementById("playback-source");
-      const actions = document.getElementById("video-actions");
-      const toggleButton = document.getElementById("toggle-playback");
-      const playbackMode = document.getElementById("playback-mode");
-      const progressContainer = document.getElementById("progress-container");
-      const progressSlider = document.getElementById("playback-progress");
-      const progressCurrent = document.getElementById("progress-current");
-      const progressTotal = document.getElementById("progress-total");
+      const video = document.getElementById("recording-video");
+      const overlay = document.getElementById("player-overlay");
+      const statusBanner = document.getElementById("status-banner");
       const downloadLink = document.getElementById("download-link");
-      const desktopButton = document.getElementById("save-to-desktop");
+      const desktopButton = document.getElementById("desktop-button");
+      const deleteButton = document.getElementById("delete-button");
+      const metadataGrid = document.getElementById("metadata-grid");
+      const additionalDetails = document.getElementById("additional-details");
+      const chunkList = document.getElementById("chunk-list");
+      const footerMode = document.getElementById("footer-mode");
+      const footerUpdated = document.getElementById("footer-updated");
 
-      let recordingMetadata = null;
-      let isScrubbing = false;
+      let currentMetadata = null;
 
-      function setStatus(message, kind = "info") {
-        if (!statusText) return;
-        statusText.textContent = message;
-        if (kind === "error") {
-          statusText.classList.add("error");
-          statusText.classList.remove("muted");
-        } else {
-          statusText.classList.remove("error");
-          statusText.classList.add("muted");
+      function setStatus(message, tone = "info") {
+        statusBanner.textContent = message;
+        statusBanner.classList.toggle("is-error", tone === "error");
+      }
+
+      function formatBytes(value) {
+        if (!Number.isFinite(value) || value <= 0) {
+          return "—";
         }
+        const units = ["B", "KB", "MB", "GB", "TB"];
+        const exponent = Math.min(units.length - 1, Math.floor(Math.log(value) / Math.log(1024)));
+        const num = value / Math.pow(1024, exponent);
+        return `${num.toFixed(num >= 10 ? 0 : 1)} ${units[exponent]}`;
       }
 
       function formatDuration(seconds) {
-        if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds <= 0) {
-          return "0s";
+        if (!Number.isFinite(seconds) || seconds <= 0) {
+          return "—";
         }
-        const hours = Math.floor(seconds / 3600);
-        const minutes = Math.floor((seconds % 3600) / 60);
-        const secs = Math.floor(seconds % 60);
-        const parts = [];
-        if (hours) parts.push(`${hours}h`);
-        if (minutes) parts.push(`${minutes}m`);
-        if (secs || !parts.length) parts.push(`${secs}s`);
-        return parts.join(" ");
+        if (seconds < 60) {
+          return `${seconds.toFixed(seconds < 10 ? 1 : 0)}s`;
+        }
+        const minutes = Math.floor(seconds / 60);
+        const secs = Math.round(seconds % 60);
+        if (minutes < 60) {
+          return `${minutes}m ${secs.toString().padStart(2, "0")}s`;
+        }
+        const hours = Math.floor(minutes / 60);
+        const remMinutes = minutes % 60;
+        return `${hours}h ${remMinutes}m`;
       }
 
-      function formatBytes(bytes) {
-        if (typeof bytes !== "number" || !Number.isFinite(bytes) || bytes <= 0) {
-          return "0 B";
-        }
-        const units = ["B", "KB", "MB", "GB", "TB"];
-        let value = bytes;
-        let unit = 0;
-        while (value >= 1024 && unit < units.length - 1) {
-          value /= 1024;
-          unit += 1;
-        }
-        const precision = value >= 10 || unit === 0 ? 0 : 1;
-        return `${value.toFixed(precision)} ${units[unit]}`;
-      }
-
-      const RESOLUTION_PATTERN = /^(\d+)\s*[x×]\s*(\d+)$/i;
-
-      function normaliseDimension(value) {
-        if (typeof value === "number") {
-          if (!Number.isFinite(value) || value <= 0) {
-            return null;
-          }
-          return Math.round(value);
-        }
-        if (typeof value === "string") {
-          const trimmed = value.trim();
-          if (!trimmed) {
-            return null;
-          }
-          const numeric = Number(trimmed);
-          if (!Number.isFinite(numeric) || numeric <= 0) {
-            return null;
-          }
-          return Math.round(numeric);
-        }
-        return null;
-      }
-
-      function parseResolutionValue(value) {
+      function formatDateTime(value) {
         if (!value) {
-          return null;
+          return "—";
         }
-        if (Array.isArray(value) && value.length >= 2) {
-          const width = normaliseDimension(value[0]);
-          const height = normaliseDimension(value[1]);
-          if (width && height) {
-            return { width, height };
-          }
+        const date = typeof value === "string" ? new Date(value) : value;
+        if (Number.isNaN(date.getTime())) {
+          return "—";
         }
-        if (typeof value === "object") {
-          const width = normaliseDimension(value.width ?? value.w);
-          const height = normaliseDimension(value.height ?? value.h);
-          if (width && height) {
-            return { width, height };
-          }
-          if ("resolution" in value) {
-            return parseResolutionValue(value.resolution);
-          }
-        }
-        if (typeof value === "string") {
-          const match = value.trim().match(RESOLUTION_PATTERN);
-          if (match) {
-            const width = normaliseDimension(match[1]);
-            const height = normaliseDimension(match[2]);
-            if (width && height) {
-              return { width, height };
-            }
-          }
-        }
-        return null;
+        return date.toLocaleString();
       }
 
-      function resolveRecordingResolution(recording) {
-        if (!recording || typeof recording !== "object") {
-          return null;
+      function renderOverlay(metadata) {
+        const segments = [];
+        if (metadata.duration_seconds) {
+          segments.push(`Duration ${formatDuration(metadata.duration_seconds)}`);
         }
-        const direct = parseResolutionValue(recording.resolution);
-        if (direct) {
-          return direct;
+        if (metadata.size_bytes) {
+          segments.push(formatBytes(metadata.size_bytes));
         }
-        const fallback = parseResolutionValue({
-          width: recording.width,
-          height: recording.height,
+        if (metadata.resolution?.width && metadata.resolution?.height) {
+          segments.push(`${metadata.resolution.width}×${metadata.resolution.height}`);
+        }
+        overlay.textContent = segments.join(" • ");
+      }
+
+      function renderMetadata(metadata) {
+        metadataGrid.innerHTML = "";
+        const started = metadata.started_at || metadata.startedAt;
+        const finished = metadata.finished_at || metadata.finishedAt;
+        const entries = [
+          { label: "Started", value: formatDateTime(started) },
+          { label: "Finished", value: formatDateTime(finished) },
+          { label: "Duration", value: formatDuration(metadata.duration_seconds) },
+          { label: "File size", value: formatBytes(metadata.size_bytes) },
+          {
+            label: "Recording mode",
+            value: metadata.motion_detection?.enabled ? "Motion" : "Continuous",
+          },
+        ];
+        entries.forEach((entry) => {
+          const card = document.createElement("div");
+          card.className = "metadata-item";
+          const label = document.createElement("span");
+          label.textContent = entry.label;
+          const strong = document.createElement("strong");
+          strong.textContent = entry.value;
+          card.append(label, strong);
+          metadataGrid.appendChild(card);
         });
-        if (fallback) {
-          return fallback;
+
+        additionalDetails.innerHTML = "";
+        if (metadata.stop_reason) {
+          const dt = document.createElement("dt");
+          dt.textContent = "Stop reason";
+          const dd = document.createElement("dd");
+          dd.textContent = metadata.stop_reason;
+          additionalDetails.append(dt, dd);
         }
-        return null;
+        if (metadata.motion_events && Number.isFinite(metadata.motion_events)) {
+          const dt = document.createElement("dt");
+          dt.textContent = "Motion events";
+          const dd = document.createElement("dd");
+          dd.textContent = metadata.motion_events;
+          additionalDetails.append(dt, dd);
+        }
+        if (metadata.notes) {
+          const dt = document.createElement("dt");
+          dt.textContent = "Notes";
+          const dd = document.createElement("dd");
+          dd.textContent = metadata.notes;
+          additionalDetails.append(dt, dd);
+        }
+
+        chunkList.innerHTML = "";
+        if (Array.isArray(metadata.chunks) && metadata.chunks.length) {
+          metadata.chunks.forEach((chunk, index) => {
+            const item = document.createElement("li");
+            const chunkDuration = formatDuration(chunk.duration_seconds);
+            const chunkSize = formatBytes(chunk.size_bytes);
+            item.textContent = `Chunk ${index + 1}: ${chunkDuration} • ${chunkSize}`;
+            chunkList.appendChild(item);
+          });
+        }
+
+        footerMode.textContent = metadata.motion_detection?.enabled
+          ? "Motion-triggered recording"
+          : "Continuous recording";
+        const now = new Date();
+        footerUpdated.textContent = `Updated ${now.toLocaleTimeString()}`;
       }
 
-      function formatClock(seconds, includeFraction = false) {
-        if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds < 0) {
-          return "0:00";
-        }
-        const whole = Math.floor(seconds);
-        const fraction = includeFraction ? Math.floor((seconds - whole) * 10) : 0;
-        const hours = Math.floor(whole / 3600);
-        const minutes = Math.floor((whole % 3600) / 60);
-        const secs = whole % 60;
-        const pad = (value) => value.toString().padStart(2, "0");
-        let base = `${minutes}:${pad(secs)}`;
-        if (hours > 0) {
-          base = `${hours}:${pad(minutes)}:${pad(secs)}`;
-        }
-        return fraction > 0 ? `${base}.${fraction}` : base;
-      }
-
-      function updateMetadataDisplay(recording) {
-        if (!metaList) return;
-        metaList.innerHTML = "";
-        const items = [];
-        if (typeof recording.duration_seconds === "number") {
-          items.push(`Duration ${formatDuration(recording.duration_seconds)}`);
-        }
-        if (typeof recording.size_bytes === "number") {
-          items.push(formatBytes(recording.size_bytes));
-        }
-        const resolution = resolveRecordingResolution(recording);
-        if (resolution) {
-          items.push(`${resolution.width}×${resolution.height}`);
-        }
-        if (recording.video_codec) {
-          items.push(String(recording.video_codec).toUpperCase());
-        }
-        if (recording.fps) {
-          items.push(`${recording.fps} fps`);
-        }
-        if (recording.frame_count) {
-          items.push(`${recording.frame_count} frames`);
-        }
-        items.forEach((text) => {
-          const span = document.createElement("span");
-          span.className = "meta-pill";
-          span.textContent = text;
-          metaList.appendChild(span);
-        });
-      }
-
-      function updateProgressUI(durationSeconds) {
-        if (!progressContainer || !progressSlider || !progressCurrent || !progressTotal) {
+      function configureVideo(metadata) {
+        if (!video || !metadata) {
           return;
         }
-        const duration = Number.isFinite(durationSeconds) && durationSeconds > 0 ? durationSeconds : 0;
-        progressContainer.hidden = false;
-        progressSlider.disabled = duration <= 0;
-        progressSlider.max = duration > 0 ? String(duration) : "0";
-        progressSlider.value = "0";
-        progressCurrent.textContent = "0:00";
-        progressTotal.textContent = duration > 0 ? formatClock(duration) : "0:00";
-      }
-
-      function updateToggleState() {
-        if (!toggleButton || !video) return;
-        const paused = video.paused || video.ended;
-        toggleButton.textContent = paused ? "▶︎ Play" : "⏸ Pause";
-        toggleButton.disabled = video.readyState < 2;
-      }
-
-      function attachVideoListeners() {
-        if (!video) return;
-        video.addEventListener("loadedmetadata", () => {
-          const duration = Number(video.duration);
-          updateProgressUI(Number.isFinite(duration) ? duration : (recordingMetadata?.duration_seconds ?? 0));
-          updateToggleState();
-          setStatus("Ready to play.");
-        });
-        video.addEventListener("timeupdate", () => {
-          if (!progressSlider || isScrubbing) return;
-          const time = Number(video.currentTime);
-          if (Number.isFinite(time)) {
-            progressSlider.value = String(time);
-            if (progressCurrent) {
-              progressCurrent.textContent = formatClock(time, true);
-            }
-          }
-        });
-        video.addEventListener("play", () => {
-          updateToggleState();
-          setStatus("Playing");
-        });
-        video.addEventListener("pause", () => {
-          updateToggleState();
-          setStatus("Paused");
-        });
-        video.addEventListener("ended", () => {
-          updateToggleState();
-          setStatus("Playback finished.");
-        });
-        video.addEventListener("error", () => {
-          setStatus("Unable to load recording media", "error");
-        });
-      }
-
-      function configureVideoSource(recording) {
-        if (!video || !source) return;
         const encodedName = encodeURIComponent(recordingName);
-        const mediaUrl = `/api/surveillance/recordings/${encodedName}/media?v=${Date.now()}`;
-        source.src = mediaUrl;
-        const mediaType = typeof recording.media_type === "string" ? recording.media_type : "video/mp4";
-        source.type = mediaType;
-        if (playbackMode) {
-          const codec = recording.video_codec ? String(recording.video_codec).toUpperCase() : "H.264";
-          playbackMode.textContent = `${codec} • ${mediaType}`;
+        const source = document.createElement("source");
+        source.src = `/api/surveillance/recordings/${encodedName}/media?v=${Date.now()}`;
+        if (metadata.media_type) {
+          source.type = metadata.media_type;
         }
-        video.hidden = false;
-        if (actions) {
-          actions.hidden = false;
-        }
+        video.innerHTML = "";
+        video.appendChild(source);
         video.load();
       }
 
-      function setupControls() {
-        if (toggleButton) {
-          toggleButton.addEventListener("click", async () => {
-            if (!video) return;
-            if (video.paused || video.ended) {
-              try {
-                await video.play();
-              } catch (error) {
-                setStatus("Unable to start playback", "error");
-              }
-            } else {
-              video.pause();
-            }
-          });
-        }
-        if (progressSlider) {
-          const stopScrubbing = (commit) => {
-            if (!progressSlider || !video) return;
-            const value = Number(progressSlider.value);
-            if (commit && Number.isFinite(value)) {
-              const target = Number(video.duration);
-              const clamped = Number.isFinite(target) && target > 0 ? Math.min(Math.max(value, 0), target) : Math.max(value, 0);
-              video.currentTime = clamped;
-            }
-            isScrubbing = false;
-          };
-          progressSlider.addEventListener("input", () => {
-            isScrubbing = true;
-            const value = Number(progressSlider.value);
-            if (progressCurrent) {
-              progressCurrent.textContent = formatClock(value, true);
-            }
-          });
-          progressSlider.addEventListener("change", () => stopScrubbing(true));
-          progressSlider.addEventListener("pointerdown", () => {
-            isScrubbing = true;
-          });
-          progressSlider.addEventListener("pointerup", () => stopScrubbing(true));
-          progressSlider.addEventListener("blur", () => stopScrubbing(false));
-        }
-        if (desktopButton) {
-          desktopButton.addEventListener("click", async () => {
-            if (!recordingName) return;
-            desktopButton.disabled = true;
-            setStatus("Saving to desktop…");
-            try {
-              const encodedName = encodeURIComponent(recordingName);
-              const response = await fetch(
-                `/api/surveillance/recordings/${encodedName}/export`,
-                { method: "POST" }
-              );
-              let payload = null;
-              try {
-                payload = await response.json();
-              } catch (error) {
-                payload = null;
-              }
-              if (!response.ok) {
-                const message =
-                  (payload && payload.detail) ||
-                  `Failed to save recording (${response.status})`;
-                throw new Error(message);
-              }
-              const exportedPath =
-                payload && typeof payload.path === "string" ? payload.path : null;
-              if (exportedPath) {
-                setStatus(`Saved to desktop: ${exportedPath}`);
-              } else {
-                setStatus("Saved to desktop.");
-              }
-            } catch (error) {
-              console.error(error);
-              setStatus("Unable to save to desktop", "error");
-            } finally {
-              desktopButton.disabled = false;
-            }
-          });
-        }
-      }
-
-      async function fetchRecording() {
+      async function loadMetadata() {
         if (!recordingName) {
           setStatus("No recording specified", "error");
           return;
         }
+        title.textContent = `Recording ${recordingName}`;
         const encodedName = encodeURIComponent(recordingName);
-        if (title) {
-          title.textContent = recordingName;
-        }
-        if (downloadLink) {
-          downloadLink.href = `/api/surveillance/recordings/${encodedName}/download`;
-        }
-        setStatus("Loading recording…");
+        downloadLink.href = `/api/surveillance/recordings/${encodedName}/download`;
+        setStatus("Loading recording metadata…");
         try {
           const response = await fetch(`/api/surveillance/recordings/${encodedName}`);
           if (!response.ok) {
-            throw new Error(`Failed to load recording: ${response.status}`);
+            throw new Error(`Request failed (${response.status})`);
           }
-          const data = await response.json();
-          recordingMetadata = data;
-          updateMetadataDisplay(data);
-          const duration = Number(data.duration_seconds);
-          updateProgressUI(Number.isFinite(duration) ? duration : 0);
-          configureVideoSource(data);
+          const payload = await response.json();
+          currentMetadata = payload;
+          renderOverlay(payload);
+          renderMetadata(payload);
+          configureVideo(payload);
           setStatus("Ready to play.");
         } catch (error) {
-          console.error(error);
-          setStatus("Unable to load recording metadata", "error");
+          console.error("Failed to load recording metadata", error);
+          setStatus(error.message || "Unable to load recording", "error");
         }
       }
 
-      (function initialise() {
+      async function exportToDesktop() {
         if (!recordingName) {
-          setStatus("No recording specified", "error");
           return;
         }
-        setupControls();
-        attachVideoListeners();
-        fetchRecording();
-      })();
+        desktopButton.disabled = true;
+        setStatus("Saving to desktop…");
+        const encodedName = encodeURIComponent(recordingName);
+        try {
+          const response = await fetch(`/api/surveillance/recordings/${encodedName}/export`, {
+            method: "POST",
+          });
+          if (!response.ok) {
+            let message = `Export failed (${response.status})`;
+            try {
+              const payload = await response.json();
+              if (payload?.detail) {
+                message = payload.detail;
+              }
+            } catch (error) {
+              /* ignore */
+            }
+            throw new Error(message);
+          }
+          setStatus("Saved to desktop", "success");
+        } catch (error) {
+          console.error("Failed to export recording", error);
+          setStatus(error.message || "Unable to save recording", "error");
+        } finally {
+          desktopButton.disabled = false;
+        }
+      }
+
+      async function deleteRecording() {
+        if (!recordingName) {
+          return;
+        }
+        const confirmed = window.confirm(`Delete recording ${recordingName}?`);
+        if (!confirmed) {
+          return;
+        }
+        try {
+          const encodedName = encodeURIComponent(recordingName);
+          const response = await fetch(`/api/surveillance/recordings/${encodedName}`, {
+            method: "DELETE",
+          });
+          if (!response.ok) {
+            throw new Error(`Delete failed (${response.status})`);
+          }
+          setStatus("Recording deleted", "success");
+          setTimeout(() => {
+            window.location.href = "/surveillance/timeline";
+          }, 1200);
+        } catch (error) {
+          console.error("Failed to delete recording", error);
+          setStatus(error.message || "Unable to delete recording", "error");
+        }
+      }
+
+      if (!recordingName) {
+        setStatus("No recording specified", "error");
+      } else {
+        loadMetadata();
+      }
+
+      desktopButton.addEventListener("click", exportToDesktop);
+      deleteButton.addEventListener("click", deleteRecording);
     </script>
   </body>
 </html>

@@ -61,9 +61,9 @@ DEFAULT_WIFI_OVERLAY_ENABLED = True
 DEFAULT_REVERSING_OVERLAY_ENABLED = True
 
 SURVEILLANCE_STANDARD_PRESETS: Mapping[str, tuple[int, int]] = {
-    "balanced": (6, 70),
-    "detail": (9, 85),
-    "endurance": (4, 60),
+    "balanced": (5, 65),
+    "detail": (8, 80),
+    "endurance": (3, 55),
 }
 
 DEFAULT_SURVEILLANCE_PROFILE: Literal["standard", "expert"] = "standard"
@@ -157,8 +157,9 @@ class SurveillanceSettings:
     profile: Literal["standard", "expert"] = DEFAULT_SURVEILLANCE_PROFILE
     preset: str = DEFAULT_SURVEILLANCE_PRESET
     expert_fps: int = 6
-    expert_jpeg_quality: int = 75
+    expert_jpeg_quality: int = 65
     chunk_duration_seconds: int | None = None
+    max_clip_megabytes: int | None = 50
     overlays_enabled: bool = True
     remember_recording_state: bool = False
     motion_detection_enabled: bool = False
@@ -254,9 +255,24 @@ class SurveillanceSettings:
         elif threshold_percent > 90:
             threshold_percent = 90.0
 
+        clip_limit_raw = self.max_clip_megabytes
+        if clip_limit_raw in (None, "", 0):
+            clip_limit: int | None = None
+        else:
+            try:
+                clip_limit_value = int(float(clip_limit_raw))
+            except (TypeError, ValueError) as exc:  # pragma: no cover - defensive branch
+                raise ValueError("Maximum clip size must be numeric") from exc
+            if clip_limit_value < 10:
+                clip_limit_value = 10
+            elif clip_limit_value > 1024:
+                clip_limit_value = 1024
+            clip_limit = clip_limit_value
+
         object.__setattr__(self, "expert_fps", fps)
         object.__setattr__(self, "expert_jpeg_quality", quality)
         object.__setattr__(self, "chunk_duration_seconds", chunk_duration)
+        object.__setattr__(self, "max_clip_megabytes", clip_limit)
         object.__setattr__(self, "motion_sensitivity", sensitivity)
         object.__setattr__(self, "motion_frame_decimation", decimation)
         object.__setattr__(self, "motion_post_event_seconds", float(post_seconds))
@@ -278,6 +294,12 @@ class SurveillanceSettings:
     def resolved_jpeg_quality(self) -> int:
         return self.resolved_values()[1]
 
+    @property
+    def resolved_chunk_byte_limit(self) -> int | None:
+        if self.max_clip_megabytes in (None, 0):
+            return None
+        return int(self.max_clip_megabytes) * 1024 * 1024
+
     def to_dict(self) -> dict[str, object]:
         return {
             "profile": self.profile,
@@ -285,6 +307,7 @@ class SurveillanceSettings:
             "expert_fps": int(self.expert_fps),
             "expert_jpeg_quality": int(self.expert_jpeg_quality),
             "chunk_duration_seconds": self.chunk_duration_seconds,
+            "max_clip_megabytes": self.max_clip_megabytes,
             "overlays_enabled": bool(self.overlays_enabled),
             "remember_recording_state": bool(self.remember_recording_state),
             "motion_detection_enabled": bool(self.motion_detection_enabled),
@@ -299,6 +322,11 @@ class SurveillanceSettings:
         fps, jpeg = self.resolved_values()
         payload = self.to_dict()
         payload.update({"fps": int(fps), "jpeg_quality": int(jpeg)})
+        payload["max_clip_bytes"] = (
+            int(self.resolved_chunk_byte_limit)
+            if self.resolved_chunk_byte_limit is not None
+            else None
+        )
         return payload
 
 
@@ -623,6 +651,7 @@ def _parse_surveillance_settings(
         "motion_post_event_seconds", current.motion_post_event_seconds
     )
     chunk_duration_raw = value.get("chunk_duration_seconds", current.chunk_duration_seconds)
+    clip_limit_raw = value.get("max_clip_megabytes", current.max_clip_megabytes)
     purge_days_raw = value.get("auto_purge_days", current.auto_purge_days)
     threshold_raw = value.get("storage_threshold_percent", current.storage_threshold_percent)
 
@@ -649,6 +678,7 @@ def _parse_surveillance_settings(
         motion_detection_enabled=motion_detection_enabled,
         motion_sensitivity=motion_sensitivity_raw,
         chunk_duration_seconds=chunk_duration_raw,
+        max_clip_megabytes=clip_limit_raw,
         motion_frame_decimation=motion_decimation_raw,
         motion_post_event_seconds=motion_post_event_raw,
         auto_purge_days=purge_days_raw,

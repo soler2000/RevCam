@@ -3,1223 +3,619 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Surveillance settings</title>
-    <link rel="icon" type="image/svg+xml" href="images/favicon.svg" />
+    <title>Surveillance settings · RevCam</title>
     <style>
       :root {
-        color-scheme: dark;
-        --font-family: "Inter", "Manrope", "Segoe UI", system-ui, -apple-system,
-          BlinkMacSystemFont, sans-serif;
-        --surface-0: rgba(14, 16, 22, 0.92);
-        --surface-1: rgba(24, 26, 34, 0.88);
-        --surface-2: rgba(36, 38, 48, 0.82);
-        --border-subtle: rgba(255, 255, 255, 0.14);
-        --border-strong: rgba(255, 255, 255, 0.26);
-        --text-primary: #f5f7fb;
-        --text-muted: rgba(245, 247, 250, 0.72);
-        --text-accent: #0a84ff;
-        --danger: #ff453a;
-        --success: #32d74b;
-        --radius-lg: 1.2rem;
-        --radius-md: 0.9rem;
-        --radius-sm: 0.6rem;
-        --space-xs: 0.4rem;
-        --space-sm: 0.6rem;
-        --space-md: 1rem;
-        --space-lg: 1.6rem;
-        --space-xl: 2.4rem;
-        --line-height: 1.55;
-        --shadow-lg: 0 32px 60px rgba(0, 0, 0, 0.5);
-        --shadow-md: 0 20px 40px rgba(0, 0, 0, 0.35);
-        --page-gradient: radial-gradient(120% 160% at top, #1b1e26 0%, #090b12 60%, #050609 100%);
+        color-scheme: dark light;
+        --background: #0f111a;
+        --foreground: #f5f7ff;
+        --muted: #9aa4c4;
+        --accent: #4aa8ff;
+        --accent-strong: #1d7ef0;
+        --card-bg: rgba(18, 22, 33, 0.9);
+        --card-border: rgba(255, 255, 255, 0.08);
+        --danger: #ff4d61;
+        --success: #38d996;
+        --font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
       }
-      *,
-      *::before,
-      *::after {
-        box-sizing: border-box;
-      }
+
       body {
         margin: 0;
+        background: radial-gradient(circle at 10% 10%, rgba(74, 168, 255, 0.18), transparent 60%),
+          radial-gradient(circle at 80% 0%, rgba(56, 217, 150, 0.12), transparent 65%),
+          var(--background);
+        color: var(--foreground);
         font-family: var(--font-family);
-        line-height: var(--line-height);
-        background: var(--page-gradient);
-        color: var(--text-primary);
         min-height: 100vh;
-        display: flex;
-        flex-direction: column;
       }
-      header,
-      footer {
-        padding: var(--space-md) var(--space-xl);
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: var(--space-lg);
-        background: var(--surface-0);
-        border-bottom: 1px solid var(--border-subtle);
-        backdrop-filter: blur(18px) saturate(130%);
-        -webkit-backdrop-filter: blur(18px) saturate(130%);
-        box-shadow: var(--shadow-md);
-      }
-      footer {
-        border-top: 1px solid var(--border-subtle);
-        border-bottom: none;
-        justify-content: center;
-        margin-top: auto;
-      }
-      main {
-        padding: var(--space-xl);
-        display: flex;
-        justify-content: center;
-      }
-      .brand-area {
-        display: flex;
-        align-items: center;
-        gap: var(--space-lg);
-        flex-wrap: wrap;
-      }
-      .brand {
-        font-size: 1.4rem;
-        font-weight: 700;
-      }
-      .settings-card {
-        width: min(960px, 100%);
-        background: var(--surface-1);
-        border-radius: var(--radius-lg);
-        border: 1px solid var(--border-subtle);
-        padding: var(--space-xl);
-        box-shadow: var(--shadow-lg);
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-lg);
-      }
-      .tablist {
-        display: flex;
-        gap: var(--space-sm);
-        margin-bottom: var(--space-lg);
-        flex-wrap: wrap;
-      }
-      .tab-button {
-        border: 1px solid var(--border-subtle);
-        background: var(--surface-soft);
-        color: var(--text-primary);
-        padding: 0.45rem 1.1rem;
-        border-radius: var(--radius-pill);
-        cursor: pointer;
-        font-weight: 600;
-        transition: border-color var(--transition), color var(--transition), background var(--transition);
-      }
-      .tab-button[aria-selected="true"] {
-        background: linear-gradient(135deg, #0a84ff, #54d1ff);
-        color: #041026;
-        border-color: transparent;
-        box-shadow: 0 12px 24px rgba(10, 132, 255, 0.25);
-      }
-      .tab-button:not([aria-selected="true"]):hover,
-      .tab-button:not([aria-selected="true"]):focus-visible {
-        border-color: var(--accent);
+
+      a {
         color: var(--accent);
-        outline: none;
       }
-      [data-tab-panel][hidden] {
-        display: none !important;
+
+      header {
+        padding: 1.5rem clamp(1rem, 3vw, 2.5rem);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        backdrop-filter: blur(12px);
+        background: rgba(12, 16, 25, 0.82);
+        position: sticky;
+        top: 0;
+        z-index: 10;
       }
-      .settings-card h1 {
+
+      header h1 {
         margin: 0;
+        font-size: clamp(1.9rem, 3vw, 2.6rem);
+        letter-spacing: -0.03em;
       }
-      .muted {
-        color: var(--text-muted);
+
+      .layout {
+        max-width: 980px;
+        margin: 2.5rem auto 4rem;
+        padding: 0 clamp(1rem, 3vw, 2.5rem);
+        display: grid;
+        gap: 1.75rem;
       }
-      .visually-hidden {
-        position: absolute;
-        width: 1px;
-        height: 1px;
-        padding: 0;
-        margin: -1px;
-        overflow: hidden;
-        clip: rect(0, 0, 0, 0);
-        border: 0;
+
+      .card {
+        background: var(--card-bg);
+        border: 1px solid var(--card-border);
+        border-radius: 20px;
+        padding: clamp(1.4rem, 3vw, 2rem);
+        box-shadow: 0 24px 55px rgba(0, 0, 0, 0.38);
       }
+
+      .card h2 {
+        margin-top: 0;
+        margin-bottom: 0.75rem;
+        letter-spacing: -0.01em;
+      }
+
+      .intro {
+        font-size: 1rem;
+        color: var(--muted);
+        margin-bottom: 1rem;
+      }
+
       form {
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-lg);
+        display: grid;
+        gap: 1.75rem;
       }
+
       fieldset {
-        border: 1px solid var(--border-subtle);
-        border-radius: var(--radius-md);
-        padding: var(--space-md);
+        border: 0;
+        padding: 0;
         margin: 0;
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-sm);
+        display: grid;
+        gap: 0.9rem;
       }
+
       legend {
-        padding: 0 var(--space-xs);
+        font-size: 1.1rem;
         font-weight: 600;
+        color: var(--foreground);
       }
-      label.option {
+
+      .radio-group {
         display: grid;
-        grid-template-columns: auto 1fr;
-        gap: var(--space-sm);
-        align-items: center;
-        padding: var(--space-sm);
-        border-radius: var(--radius-sm);
-        transition: background 140ms ease;
-      }
-      label.option:hover,
-      label.option:focus-within {
-        background: var(--surface-2);
-      }
-      label.option strong {
-        display: block;
-        font-weight: 600;
-      }
-      label.option span.helper {
-        font-size: 0.85rem;
-        color: var(--text-muted);
-      }
-      .option.inline-option {
-        grid-template-columns: auto 1fr;
-        align-items: center;
-        padding: var(--space-sm);
-      }
-      .option.inline-option > div {
-        margin-left: 0;
-      }
-      .preset-grid {
-        display: grid;
-        gap: var(--space-sm);
-      }
-      .preset-label {
-        display: grid;
-        grid-template-columns: auto 1fr;
-        gap: var(--space-sm);
-        align-items: start;
-        padding: var(--space-sm);
-        border-radius: var(--radius-sm);
-        border: 1px solid transparent;
-        transition: border-color 160ms ease, background 160ms ease;
-      }
-      .preset-label:hover,
-      .preset-label:focus-within {
-        background: rgba(255, 255, 255, 0.05);
-        border-color: var(--border-subtle);
-      }
-      .preset-label strong {
-        display: block;
-        font-weight: 600;
-      }
-      .preset-label span.meta {
-        display: block;
-        font-size: 0.85rem;
-        color: var(--text-muted);
-      }
-      .expert-grid {
-        display: grid;
-        gap: var(--space-md);
         grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 0.75rem;
       }
-      .expert-control {
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-xs);
-        padding: var(--space-sm);
-        border-radius: var(--radius-sm);
+
+      .radio-tile {
+        border-radius: 16px;
+        padding: 1rem;
+        border: 1px solid rgba(255, 255, 255, 0.12);
         background: rgba(255, 255, 255, 0.04);
-        border: 1px solid rgba(255, 255, 255, 0.1);
+        display: grid;
+        gap: 0.35rem;
+        cursor: pointer;
+        transition: border 0.2s ease, background 0.2s ease;
       }
-      .expert-control label {
+
+      .radio-tile:hover {
+        border-color: rgba(255, 255, 255, 0.22);
+      }
+
+      .radio-tile input {
+        appearance: none;
+        width: 1.1rem;
+        height: 1.1rem;
+        border-radius: 50%;
+        border: 2px solid rgba(255, 255, 255, 0.4);
+        display: inline-block;
+        margin-right: 0.5rem;
+        vertical-align: middle;
+        transition: border 0.2s ease, background 0.2s ease;
+      }
+
+      .radio-tile input:checked {
+        border-color: transparent;
+        background: radial-gradient(circle at center, var(--accent) 0%, var(--accent-strong) 70%);
+      }
+
+      .radio-tile span {
         font-weight: 600;
       }
-      .expert-control input[type="number"] {
-        padding: var(--space-sm);
-        border-radius: var(--radius-sm);
-        border: 1px solid var(--border-subtle);
-        background: rgba(0, 0, 0, 0.25);
-        color: var(--text-primary);
-        font-size: 1rem;
+
+      .radio-description {
+        color: var(--muted);
+        font-size: 0.9rem;
+        margin: 0;
       }
-      .summary {
-        padding: var(--space-md);
-        border-radius: var(--radius-md);
-        background: rgba(10, 132, 255, 0.16);
-        border: 1px solid rgba(10, 132, 255, 0.4);
-        font-weight: 600;
+
+      .input-grid {
+        display: grid;
+        gap: 1.25rem;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
       }
-      .motion-control {
-        margin-top: var(--space-md);
+
+      label {
         display: flex;
         flex-direction: column;
-        gap: 0.35rem;
+        gap: 0.4rem;
+        font-size: 0.95rem;
       }
-      .storage-grid {
+
+      label span {
+        font-weight: 600;
+      }
+
+      input[type="number"],
+      select {
+        background: rgba(255, 255, 255, 0.06);
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        border-radius: 12px;
+        padding: 0.65rem 0.75rem;
+        color: var(--foreground);
+        font: inherit;
+        min-height: 2.6rem;
+      }
+
+      input[type="number"]:focus,
+      select:focus {
+        outline: 2px solid rgba(74, 168, 255, 0.6);
+        outline-offset: 2px;
+      }
+
+      .checkbox-row {
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+      }
+
+      .checkbox-row input {
+        width: 1.1rem;
+        height: 1.1rem;
+        accent-color: var(--accent);
+      }
+
+      .hint {
+        color: var(--muted);
+        font-size: 0.85rem;
+        margin: 0;
+      }
+
+      .summary {
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 14px;
+        padding: 1rem 1.25rem;
         display: grid;
-        gap: var(--space-md);
-        margin-top: var(--space-md);
-        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 0.5rem;
+        font-size: 0.95rem;
       }
-      .storage-grid input {
-        width: 100%;
+
+      .actions {
+        display: flex;
+        gap: 1rem;
+        flex-wrap: wrap;
+        align-items: center;
       }
+
       button[type="submit"] {
-        align-self: flex-start;
-        padding: 0.75rem 1.8rem;
-        border-radius: 999px;
-        border: none;
-        background: linear-gradient(135deg, #0a84ff, #54d1ff);
-        color: #041026;
-        font-weight: 700;
-        font-size: 1rem;
+        background: linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%);
+        border: 0;
+        border-radius: 14px;
+        padding: 0.85rem 1.8rem;
+        font: inherit;
+        color: #fff;
         cursor: pointer;
-        box-shadow: 0 18px 36px rgba(10, 132, 255, 0.35);
-        transition: transform 160ms ease, box-shadow 160ms ease;
+        box-shadow: 0 16px 40px rgba(29, 126, 240, 0.35);
+        transition: transform 0.2s ease;
       }
-      button[type="submit"]:hover,
-      button[type="submit"]:focus-visible {
-        transform: translateY(-1px);
-        box-shadow: 0 22px 40px rgba(10, 132, 255, 0.45);
-      }
+
       button[type="submit"]:disabled {
         opacity: 0.6;
-        cursor: wait;
+        cursor: not-allowed;
+        transform: none;
       }
-      .status {
-        min-height: 1.4rem;
+
+      button[type="submit"]:hover:not(:disabled) {
+        transform: translateY(-1px);
       }
-      a.link {
-        color: var(--text-accent);
-        text-decoration: none;
-        font-weight: 600;
+
+      .status-text {
+        font-size: 0.9rem;
+        color: var(--muted);
       }
-      a.link:hover,
-      a.link:focus-visible {
-        text-decoration: underline;
+
+      .status-text.is-error {
+        color: var(--danger);
       }
+
+      footer {
+        margin: 2.5rem auto 3rem;
+        max-width: 980px;
+        padding: 0 clamp(1rem, 3vw, 2.5rem);
+        display: flex;
+        justify-content: space-between;
+        font-size: 0.85rem;
+        color: var(--muted);
+      }
+
       @media (max-width: 720px) {
-        header,
-        footer {
-          flex-direction: column;
-          align-items: stretch;
-          text-align: center;
-        }
-        main {
-          padding: var(--space-lg);
-        }
-        .settings-card {
-          padding: var(--space-lg);
+        .input-grid {
+          grid-template-columns: 1fr;
         }
       }
     </style>
   </head>
   <body>
     <header>
-      <div class="brand-area">
-        <strong class="brand">RevCam</strong>
-        <span class="muted">Surveillance mode</span>
-      </div>
-      <a class="link" href="/surveillance">Back to surveillance</a>
+      <h1>Surveillance settings</h1>
+      <p class="intro">
+        Configure how RevCam captures surveillance clips, manages motion detection,
+        and protects available storage. Fine-tuned defaults help keep file sizes in
+        check while remaining easy to override when you need more detail.
+      </p>
     </header>
-    <main>
-      <section class="settings-card">
-        <header>
-          <h1>Surveillance settings</h1>
-          <p class="muted">
-            Configure recording behaviour for standard deployments or switch to expert
-            mode for full control over frame rate and compression.
-          </p>
-        </header>
-        <form id="surveillance-settings-form">
-          <div class="tablist" role="tablist" aria-label="Surveillance settings sections">
-            <button class="tab-button" type="button" data-tab="recording" aria-selected="true">
-              Recording
-            </button>
-            <button class="tab-button" type="button" data-tab="motion" aria-selected="false">
-              Motion detection
-            </button>
-            <button class="tab-button" type="button" data-tab="storage" aria-selected="false">
-              Storage &amp; maintenance
-            </button>
-          </div>
-          <section class="tab-panel" data-tab-panel="recording">
-            <fieldset>
-              <legend>Configuration mode</legend>
-              <label class="option">
-                <input type="radio" name="profile" value="standard" />
+    <main class="layout">
+      <form id="surveillance-settings-form" novalidate>
+        <section class="card">
+          <h2>Capture profile</h2>
+          <fieldset>
+            <legend>Select a capture style</legend>
+            <div class="radio-group">
+              <label class="radio-tile">
+                <input type="radio" name="profile" value="standard" checked />
+                <span>Standard presets</span>
+                <p class="radio-description">
+                  Balanced combinations of frame rate and JPEG quality designed to keep
+                  recording sizes modest.
+                </p>
                 <div>
-                  <strong>Standard presets</strong>
-                  <span class="helper">Pick from tuned combinations for common setups.</span>
+                  <select id="preset-select">
+                    <option value="balanced">Balanced coverage</option>
+                    <option value="detail">High detail</option>
+                    <option value="endurance">Extended endurance</option>
+                  </select>
                 </div>
               </label>
-              <label class="option">
+              <label class="radio-tile">
                 <input type="radio" name="profile" value="expert" />
-                <div>
-                  <strong>Expert controls</strong>
-                  <span class="helper">Manually set capture frame rate and JPEG quality.</span>
+                <span>Expert tuning</span>
+                <p class="radio-description">
+                  Directly control frame rate and JPEG quality when you require a
+                  bespoke capture workflow.
+                </p>
+                <div class="input-grid" id="expert-inputs" hidden>
+                  <label>
+                    <span>Frame rate (fps)</span>
+                    <input type="number" id="expert-fps" min="1" max="30" step="1" value="6" />
+                    <p class="hint">Lower frame rates dramatically reduce file sizes.</p>
+                  </label>
+                  <label>
+                    <span>JPEG quality</span>
+                    <input type="number" id="expert-quality" min="30" max="100" step="1" value="65" />
+                    <p class="hint">Values between 55 and 75 keep clips lightweight.</p>
+                  </label>
                 </div>
               </label>
-            </fieldset>
-            <fieldset>
-              <legend>Recording resolution</legend>
-              <p class="muted">
-                Choose the capture resolution used for surveillance recordings and live
-                previews. Higher resolutions increase detail at the cost of storage size
-                and bandwidth.
-              </p>
-              <label class="visually-hidden" for="recording-resolution">
-                Recording resolution
-              </label>
-              <select id="recording-resolution"></select>
-              <p class="muted" id="active-resolution-label">Active resolution: —</p>
-              <p class="muted status" id="resolution-status" aria-live="polite"></p>
-            </fieldset>
-            <section id="standard-section" aria-live="polite">
-              <h2>Standard presets</h2>
-              <p class="muted">
-                Choose the preset that best reflects your surveillance needs. Presets adjust
-                both the capture frame rate and recording compression.
-              </p>
-              <div class="preset-grid">
-                <label class="preset-label">
-                  <input type="radio" name="preset" value="balanced" />
-                  <div>
-                    <strong>Balanced coverage</strong>
-                    <span class="meta">6 fps • JPEG quality 70 — ideal all-round coverage.</span>
-                  </div>
-                </label>
-                <label class="preset-label">
-                  <input type="radio" name="preset" value="detail" />
-                  <div>
-                    <strong>High detail</strong>
-                    <span class="meta">9 fps • JPEG quality 85 — more motion clarity indoors.</span>
-                  </div>
-                </label>
-                <label class="preset-label">
-                  <input type="radio" name="preset" value="endurance" />
-                  <div>
-                    <strong>Extended endurance</strong>
-                    <span class="meta">4 fps • JPEG quality 60 — longer recordings, smaller files.</span>
-                  </div>
-                </label>
-              </div>
-            </section>
-            <section id="expert-section" hidden>
-              <h2>Expert controls</h2>
-              <p class="muted">
-                Tune capture parameters precisely. Higher frame rates and JPEG quality increase
-                detail at the cost of storage and bandwidth.
-              </p>
-              <div class="expert-grid">
-                <div class="expert-control">
-                  <label for="expert-fps">Frame rate</label>
-                  <input id="expert-fps" type="number" min="1" max="30" step="1" />
-                  <span class="muted">Frames captured per second.</span>
-                </div>
-                <div class="expert-control">
-                  <label for="expert-quality">JPEG quality</label>
-                  <input id="expert-quality" type="number" min="30" max="100" step="1" />
-                  <span class="muted">Higher values increase detail while using more space.</span>
-                </div>
-              </div>
-            </section>
-            <label class="option inline-option">
-              <input type="checkbox" id="recording-overlays" />
-              <div>
-                <strong>Include overlays in recordings</strong>
-                <span class="helper">Uncheck to capture a clean video feed without UI overlays.</span>
-              </div>
+            </div>
+          </fieldset>
+        </section>
+
+        <section class="card">
+          <h2>Clip management</h2>
+          <div class="input-grid">
+            <label>
+              <span>Clip length (seconds)</span>
+              <input type="number" id="chunk-duration" min="0" step="1" />
+              <p class="hint">Use 0 to allow uninterrupted recording.</p>
             </label>
-            <label class="option inline-option">
-              <input type="checkbox" id="remember-recording" />
-              <div>
-                <strong>Resume recording after restart</strong>
-                <span class="helper">Return to surveillance mode and continue recording automatically.</span>
-              </div>
+            <label>
+              <span>Maximum clip size (MB)</span>
+              <input type="number" id="max-clip" min="0" step="1" />
+              <p class="hint">Recordings rotate when they reach this size. Use 0 for no limit.</p>
             </label>
-          </section>
-          <section class="tab-panel" data-tab-panel="motion" hidden>
-            <h2>Motion detection</h2>
-            <p class="muted">
-              Enable motion detection to reduce storage usage and focus recordings on activity.
-            </p>
-            <label class="option inline-option">
-              <input type="checkbox" id="motion-enabled" />
-              <div>
-                <strong>Enable motion detection</strong>
-                <span class="helper">Pause recording when no movement is detected and resume on motion.</span>
-              </div>
-            </label>
-            <div class="motion-control">
-              <label for="motion-sensitivity">Sensitivity</label>
-              <input id="motion-sensitivity" type="range" min="0" max="100" step="1" />
-              <span class="muted">Current sensitivity: <span id="motion-sensitivity-value">50</span>%</span>
-            </div>
-            <div class="motion-control">
-              <label for="motion-decimation">Record every Nth frame</label>
-              <input id="motion-decimation" type="number" min="1" max="30" step="1" />
-              <span class="muted">
-                Effective motion capture: <span id="motion-effective-fps">—</span> fps.
-                Aim for 8 fps or below to balance performance and detail.
-              </span>
-            </div>
-            <div class="motion-control">
-              <label for="motion-post-seconds">Continue recording after motion (seconds)</label>
-              <input id="motion-post-seconds" type="number" min="0" max="60" step="0.5" />
-              <span class="muted">
-                Avoids cutting off clips by holding the recording briefly once motion stops.
-              </span>
-            </div>
-          </section>
-          <section class="tab-panel" data-tab-panel="storage" hidden>
-            <h2>Storage &amp; maintenance</h2>
-            <p class="muted">
-              Automatically split recordings, protect storage capacity and remove old clips on a schedule.
-            </p>
-            <div class="storage-grid">
-              <div>
-                <label for="chunk-duration">Split recordings every (seconds)</label>
-                <input id="chunk-duration" type="number" min="0" max="86400" step="1" />
-                <span class="muted">Set to 0 to keep each recording as a single file.</span>
-              </div>
-              <div>
-                <label for="storage-threshold">Stop recording below free space (%)</label>
-                <input id="storage-threshold" type="number" min="1" max="90" step="1" />
-                <span class="muted">Recording stops automatically when free space drops below this value.</span>
-              </div>
-              <div>
-                <label for="auto-purge-days">Auto purge recordings after (days)</label>
-                <input id="auto-purge-days" type="number" min="0" max="3650" step="1" />
-                <span class="muted">Set to 0 to keep recordings indefinitely.</span>
-              </div>
-            </div>
-          </section>
-          <div class="summary" id="settings-summary" role="status" aria-live="polite">
-            Effective capture: —
           </div>
-          <p class="muted" id="system-temperature" aria-live="polite">
-            CPU temperature: —
-          </p>
-          <button type="submit">Save surveillance settings</button>
-          <p class="muted status" id="settings-status"></p>
-        </form>
-      </section>
+          <div class="summary" id="clip-summary"></div>
+        </section>
+
+        <section class="card">
+          <h2>Motion detection</h2>
+          <div class="checkbox-row">
+            <input type="checkbox" id="motion-enabled" />
+            <label for="motion-enabled">Enable motion-triggered recording</label>
+          </div>
+          <div class="input-grid">
+            <label>
+              <span>Motion sensitivity</span>
+              <input type="number" id="motion-sensitivity" min="1" max="100" step="1" />
+              <p class="hint">Higher values trigger recording more easily.</p>
+            </label>
+            <label>
+              <span>Frame decimation</span>
+              <input type="number" id="motion-decimation" min="1" max="30" step="1" />
+              <p class="hint">Process every Nth frame to reduce CPU usage.</p>
+            </label>
+            <label>
+              <span>Post-event duration (seconds)</span>
+              <input type="number" id="motion-post" min="0" max="60" step="0.5" />
+              <p class="hint">Continue recording after motion stops.</p>
+            </label>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2>Overlays & automation</h2>
+          <div class="checkbox-row">
+            <input type="checkbox" id="overlays-enabled" />
+            <label for="overlays-enabled">Include camera overlays in surveillance clips</label>
+          </div>
+          <div class="checkbox-row">
+            <input type="checkbox" id="remember-recording" />
+            <label for="remember-recording">Resume recording automatically when returning to surveillance mode</label>
+          </div>
+          <div class="input-grid">
+            <label>
+              <span>Auto purge after (days)</span>
+              <input type="number" id="auto-purge" min="0" step="1" />
+              <p class="hint">Set to 0 to keep clips until storage fills up.</p>
+            </label>
+            <label>
+              <span>Storage threshold (%)</span>
+              <input type="number" id="storage-threshold" min="1" max="90" step="0.5" />
+              <p class="hint">Recording pauses when free space drops below this value.</p>
+            </label>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2>Save changes</h2>
+          <p class="status-text" id="status-text">Loading settings…</p>
+          <div class="actions">
+            <button type="submit">Save surveillance settings</button>
+            <a href="/surveillance" class="status-text">Back to surveillance dashboard</a>
+          </div>
+        </section>
+      </form>
     </main>
     <footer>
-      <a class="link" href="/surveillance">Back to surveillance</a>
-      <a class="link" href="/">Back to live view</a>
+      <span>Need a quick view? Visit the <a href="/surveillance">surveillance dashboard</a>.</span>
+      <span id="summary-details"></span>
     </footer>
+
     <script>
-      const STANDARD_PRESETS = {
-        balanced: {
-          label: "Balanced coverage",
-          fps: 6,
-          jpeg_quality: 70,
-        },
-        detail: {
-          label: "High detail",
-          fps: 9,
-          jpeg_quality: 85,
-        },
-        endurance: {
-          label: "Extended endurance",
-          fps: 4,
-          jpeg_quality: 60,
-        },
+      const form = document.getElementById("surveillance-settings-form");
+      const presetSelect = document.getElementById("preset-select");
+      const profileField = form.elements.namedItem("profile");
+      const profileRadios =
+        profileField && typeof profileField.length === "number"
+          ? Array.from(profileField)
+          : [profileField].filter(Boolean);
+      const expertInputs = document.getElementById("expert-inputs");
+      const expertFps = document.getElementById("expert-fps");
+      const expertQuality = document.getElementById("expert-quality");
+      const chunkDuration = document.getElementById("chunk-duration");
+      const maxClip = document.getElementById("max-clip");
+      const clipSummary = document.getElementById("clip-summary");
+      const motionEnabled = document.getElementById("motion-enabled");
+      const motionSensitivity = document.getElementById("motion-sensitivity");
+      const motionDecimation = document.getElementById("motion-decimation");
+      const motionPost = document.getElementById("motion-post");
+      const overlaysEnabled = document.getElementById("overlays-enabled");
+      const rememberRecording = document.getElementById("remember-recording");
+      const autoPurge = document.getElementById("auto-purge");
+      const storageThreshold = document.getElementById("storage-threshold");
+      const statusText = document.getElementById("status-text");
+      const summaryDetails = document.getElementById("summary-details");
+
+      let presets = {
+        balanced: { label: "Balanced coverage", fps: 5, jpeg_quality: 65 },
+        detail: { label: "High detail", fps: 8, jpeg_quality: 80 },
+        endurance: { label: "Extended endurance", fps: 3, jpeg_quality: 55 },
       };
 
-      const form = document.getElementById("surveillance-settings-form");
-      const profileInputs = Array.from(form.querySelectorAll('input[name="profile"]'));
-      const presetInputs = Array.from(form.querySelectorAll('input[name="preset"]'));
-      const standardSection = document.getElementById("standard-section");
-      const expertSection = document.getElementById("expert-section");
-      const expertFpsInput = document.getElementById("expert-fps");
-      const expertQualityInput = document.getElementById("expert-quality");
-      const statusText = document.getElementById("settings-status");
-      const resolutionSelect = document.getElementById("recording-resolution");
-      const resolutionStatus = document.getElementById("resolution-status");
-      const activeResolutionLabel = document.getElementById("active-resolution-label");
-      const summary = document.getElementById("settings-summary");
-      const systemTemperatureText = document.getElementById("system-temperature");
-      const tabButtons = Array.from(document.querySelectorAll(".tab-button"));
-      const tabPanels = Array.from(document.querySelectorAll("[data-tab-panel]"));
-      const overlayCheckbox = document.getElementById("recording-overlays");
-      const rememberCheckbox = document.getElementById("remember-recording");
-      const chunkDurationInput = document.getElementById("chunk-duration");
-      const storageThresholdInput = document.getElementById("storage-threshold");
-      const autoPurgeInput = document.getElementById("auto-purge-days");
-      const motionEnabledInput = document.getElementById("motion-enabled");
-      const motionSensitivityInput = document.getElementById("motion-sensitivity");
-      const motionSensitivityValue = document.getElementById("motion-sensitivity-value");
-      const motionDecimationInput = document.getElementById("motion-decimation");
-      const motionEffectiveFpsText = document.getElementById("motion-effective-fps");
-      const motionPostSecondsInput = document.getElementById("motion-post-seconds");
-
-      let currentSettings = null;
-      let cameraConfig = null;
-      const resolutionLabels = new Map();
-
-      function setActiveTab(tab) {
-        const target = typeof tab === "string" && tab ? tab : "recording";
-        tabButtons.forEach((button) => {
-          const isActive = button.dataset.tab === target;
-          button.setAttribute("aria-selected", String(isActive));
-        });
-        tabPanels.forEach((panel) => {
-          const isActive = panel.dataset.tabPanel === target;
-          if (isActive) {
-            panel.removeAttribute("hidden");
-          } else {
-            panel.setAttribute("hidden", "hidden");
-          }
-        });
+      function currentProfile() {
+        const active = profileRadios.find((radio) => radio.checked);
+        return active ? active.value : "standard";
       }
 
-      function updateMotionSensitivityLabel(value) {
-        if (!motionSensitivityValue) {
-          return;
+      function formatBytes(bytes) {
+        if (!Number.isFinite(bytes) || bytes <= 0) {
+          return "unlimited";
         }
-        const numeric = Number.isFinite(value)
-          ? value
-          : Number.parseInt(motionSensitivityInput?.value ?? "50", 10) || 50;
-        motionSensitivityValue.textContent = String(Math.round(numeric));
+        const units = ["B", "KB", "MB", "GB"];
+        const exponent = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)));
+        const value = bytes / Math.pow(1024, exponent);
+        return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[exponent]}`;
       }
 
-      function getMotionDecimation() {
-        if (!motionDecimationInput) {
-          return 1;
-        }
-        const numeric = Number.parseInt(motionDecimationInput.value, 10);
-        if (!Number.isFinite(numeric) || numeric < 1) {
-          return 1;
-        }
-        if (numeric > 30) {
-          return 30;
-        }
-        return numeric;
+      function updateExpertVisibility() {
+        const isExpert = currentProfile() === "expert";
+        expertInputs.hidden = !isExpert;
       }
 
-      function formatFpsLabel(value) {
-        if (!Number.isFinite(value) || value <= 0) {
-          return "—";
-        }
-        if (value >= 10) {
-          return value.toFixed(0);
-        }
-        if (value >= 1) {
-          return value.toFixed(1).replace(/\.0$/, "");
-        }
-        return value.toFixed(2);
-      }
-
-      function formatDurationSeconds(seconds) {
-        if (!Number.isFinite(seconds) || seconds <= 0) {
-          return null;
-        }
-        const rounded = Math.round(seconds);
-        if (rounded < 60) {
-          return `${rounded}s`;
-        }
-        if (rounded % 3600 === 0) {
-          const hours = Math.round(rounded / 3600);
-          return `${hours} hr${hours === 1 ? "" : "s"}`;
-        }
-        if (rounded % 60 === 0) {
-          const minutes = Math.round(rounded / 60);
-          return `${minutes} min`;
-        }
-        const minutes = Math.floor(rounded / 60);
-        const remainder = rounded % 60;
-        if (minutes >= 60) {
-          const hours = Math.floor(minutes / 60);
-          const remainingMinutes = minutes % 60;
-          const parts = [];
-          if (hours > 0) {
-            parts.push(`${hours} hr${hours === 1 ? "" : "s"}`);
-          }
-          if (remainingMinutes > 0) {
-            parts.push(`${remainingMinutes} min`);
-          }
-          if (remainder > 0) {
-            parts.push(`${remainder}s`);
-          }
-          return parts.join(" ");
-        }
-        return `${minutes} min ${remainder}s`;
-      }
-
-      function formatTemperatureCelsius(value) {
-        if (typeof value !== "number" || !Number.isFinite(value)) {
-          return "";
-        }
-        const rounded = Math.round(value * 10) / 10;
-        let text = rounded.toFixed(1);
-        if (text.endsWith(".0")) {
-          text = text.slice(0, -2);
-        }
-        return `${text}°C`;
-      }
-
-      function normaliseResolutionLabel(value) {
-        if (!value) {
-          return null;
-        }
-        if (resolutionLabels.has(value)) {
-          return resolutionLabels.get(value);
-        }
-        return String(value).replace(/x/gi, "×");
-      }
-
-      function updateActiveResolutionDisplay(value) {
-        if (!activeResolutionLabel) {
-          return;
-        }
-        const label = normaliseResolutionLabel(value);
-        activeResolutionLabel.textContent = label
-          ? `Active resolution: ${label}`
-          : "Active resolution: —";
-      }
-
-      function populateResolutionOptions(camera) {
-        if (!resolutionSelect) {
-          return;
-        }
-        resolutionLabels.clear();
-        resolutionSelect.innerHTML = "";
-        const resolutionInfo =
-          camera && typeof camera === "object" && camera.resolution
-            ? camera.resolution
-            : null;
-        const options =
-          resolutionInfo && Array.isArray(resolutionInfo.options)
-            ? resolutionInfo.options
-            : [];
-        if (!options.length) {
-          const option = document.createElement("option");
-          option.value = "";
-          option.textContent = "No resolutions available";
-          resolutionSelect.appendChild(option);
-          resolutionSelect.disabled = true;
+      function updateSummary(settings) {
+        const profile = currentProfile();
+        let fps;
+        let quality;
+        if (profile === "expert") {
+          fps = Number.parseInt(expertFps.value, 10) || settings?.expert_fps || 6;
+          quality = Number.parseInt(expertQuality.value, 10) || settings?.expert_jpeg_quality || 65;
         } else {
-          for (const option of options) {
-            if (!option || typeof option !== "object") {
-              continue;
-            }
-            const value =
-              typeof option.value === "string" && option.value.trim()
-                ? option.value.trim()
-                : null;
-            const label =
-              typeof option.label === "string" && option.label.trim()
-                ? option.label.trim()
-                : null;
-            if (!value || !label) {
-              continue;
-            }
-            const opt = document.createElement("option");
-            opt.value = value;
-            opt.textContent = label;
-            resolutionLabels.set(value, label);
-            resolutionSelect.appendChild(opt);
-          }
-          resolutionSelect.disabled = false;
-          const selected =
-            resolutionInfo && typeof resolutionInfo.selected === "string"
-              ? resolutionInfo.selected
-              : null;
-          if (selected && resolutionLabels.has(selected)) {
-            resolutionSelect.value = selected;
-          } else if (resolutionSelect.options.length > 0) {
-            resolutionSelect.selectedIndex = 0;
-          }
+          const preset = presets[presetSelect.value] || presets.balanced;
+          fps = preset.fps;
+          quality = preset.jpeg_quality;
         }
-        const active =
-          resolutionInfo && typeof resolutionInfo.active === "string"
-            ? resolutionInfo.active
-            : null;
-        updateActiveResolutionDisplay(active);
-        if (resolutionStatus) {
-          resolutionStatus.textContent = "";
-        }
+        const durationSeconds = Number.parseInt(chunkDuration.value, 10) || 0;
+        const clipLimitMB = Number.parseInt(maxClip.value, 10) || 0;
+        const clipBytes = clipLimitMB > 0 ? clipLimitMB * 1024 * 1024 : NaN;
+        const durationLabel = durationSeconds > 0 ? `${durationSeconds}s` : "unlimited";
+        clipSummary.textContent = `Effective profile: ${fps} fps, JPEG ${quality}. Clips run for ${durationLabel} with a maximum size of ${formatBytes(clipBytes)}.`;
+        summaryDetails.textContent = `Profile ${profile} • ${fps} fps • JPEG ${quality}`;
       }
 
-      async function loadCameraConfig() {
-        if (!resolutionSelect) {
-          return;
-        }
-        resolutionSelect.disabled = true;
-        if (resolutionStatus) {
-          resolutionStatus.textContent = "Loading resolution options…";
-        }
-        try {
-          const response = await fetch("/api/camera", { cache: "no-store" });
-          if (!response.ok) {
-            throw new Error(`Request failed with ${response.status}`);
-          }
-          const payload = await response.json();
-          if (!payload || typeof payload !== "object") {
-            throw new Error("Invalid camera response");
-          }
-          cameraConfig = payload;
-          populateResolutionOptions(payload);
-        } catch (error) {
-          console.error("Failed to load camera configuration", error);
-          cameraConfig = null;
-          populateResolutionOptions(null);
-          if (resolutionStatus) {
-            resolutionStatus.textContent = "Unable to load resolution options.";
-          }
-        }
-      }
-
-      async function applyCameraResolution(value) {
-        if (!resolutionSelect || !value || !cameraConfig) {
-          return;
-        }
-        const selectedSource =
-          typeof cameraConfig.selected === "string" && cameraConfig.selected
-            ? cameraConfig.selected
-            : "auto";
-        resolutionSelect.disabled = true;
-        if (resolutionStatus) {
-          const label = normaliseResolutionLabel(value);
-          resolutionStatus.textContent = label
-            ? `Applying ${label}…`
-            : "Applying resolution…";
-        }
-        try {
-          const response = await fetch("/api/camera", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ source: selectedSource, resolution: value }),
-          });
-          if (!response.ok) {
-            let message = `Unable to apply resolution (${response.status})`;
-            try {
-              const detail = await response.json();
-              if (detail && detail.detail) {
-                message = detail.detail;
-              }
-            } catch (parseError) {
-              console.error(parseError);
-            }
-            throw new Error(message);
-          }
-          await loadCameraConfig();
-          if (resolutionStatus) {
-            const label = normaliseResolutionLabel(value);
-            resolutionStatus.textContent = label
-              ? `${label} applied.`
-              : "Resolution updated.";
-          }
-        } catch (error) {
-          console.error("Failed to apply camera resolution", error);
-          if (resolutionStatus) {
-            resolutionStatus.textContent =
-              error instanceof Error ? error.message : "Unable to update resolution.";
-          }
-        } finally {
-          if (resolutionSelect) {
-            const firstOption = resolutionSelect.options[0];
-            const hasChoice =
-              resolutionSelect.options.length > 0 && firstOption && firstOption.value;
-            resolutionSelect.disabled = !hasChoice;
-          }
-        }
-      }
-
-      function setSystemTemperatureLabel(text) {
-        if (!systemTemperatureText) {
-          return;
-        }
-        const suffix = text && text.length > 0 ? text : "—";
-        systemTemperatureText.textContent = `CPU temperature: ${suffix}`;
-      }
-
-      async function refreshSystemTemperature() {
-        if (!systemTemperatureText) {
-          return;
-        }
-        setSystemTemperatureLabel("Loading…");
-        try {
-          const response = await fetch("/api/diagnostics", { cache: "no-store" });
-          if (!response.ok) {
-            throw new Error(`Diagnostics request failed with ${response.status}`);
-          }
-          const payload = await response.json();
-          const system = payload && typeof payload.system === "object" ? payload.system : null;
-          const cpu = system && typeof system.cpu === "object" ? system.cpu : null;
-          const temperature =
-            cpu && typeof cpu.temperature_celsius === "number" && Number.isFinite(cpu.temperature_celsius)
-              ? cpu.temperature_celsius
-              : null;
-          if (temperature === null) {
-            setSystemTemperatureLabel("Unavailable");
-            return;
-          }
-          const formatted = formatTemperatureCelsius(temperature);
-          setSystemTemperatureLabel(formatted || "Unavailable");
-        } catch (error) {
-          console.error("Failed to load system diagnostics", error);
-          setSystemTemperatureLabel("Unable to load");
-        }
-      }
-
-      function updateMotionGuidance() {
-        if (!motionEffectiveFpsText) {
-          return;
-        }
-        const decimation = getMotionDecimation();
-        const effective = resolveEffectiveSettings();
-        const baseFps = Number.isFinite(effective.fps) ? effective.fps : null;
-        const motionFps = baseFps ? baseFps / Math.max(1, decimation) : null;
-        motionEffectiveFpsText.textContent = formatFpsLabel(motionFps ?? 0);
-      }
-
-      tabButtons.forEach((button) => {
-        button.addEventListener("click", () => {
-          setActiveTab(button.dataset.tab || "recording");
+      profileRadios.forEach((radio) => {
+        radio.addEventListener("change", () => {
+          updateExpertVisibility();
+          updateSummary();
         });
       });
-      setActiveTab("recording");
+      presetSelect.addEventListener("change", () => updateSummary());
+      [expertFps, expertQuality, chunkDuration, maxClip].forEach((input) => {
+        input.addEventListener("input", () => updateSummary());
+      });
 
-      if (resolutionSelect) {
-        resolutionSelect.addEventListener("change", () => {
-          const value = resolutionSelect.value;
-          if (!value) {
-            return;
+      async function loadSettings() {
+        try {
+          statusText.textContent = "Loading settings…";
+          const response = await fetch("/api/surveillance/settings", { cache: "no-store" });
+          if (!response.ok) {
+            throw new Error(`Request failed (${response.status})`);
           }
-          applyCameraResolution(value);
-        });
-      }
-
-      if (motionSensitivityInput) {
-        motionSensitivityInput.addEventListener("input", () => {
-          updateMotionSensitivityLabel(Number(motionSensitivityInput.value));
-          updateSummary();
-        });
-      }
-
-      if (motionDecimationInput) {
-        motionDecimationInput.addEventListener("input", () => {
-          updateMotionGuidance();
-          updateSummary();
-        });
-      }
-
-      if (motionPostSecondsInput) {
-        motionPostSecondsInput.addEventListener("input", updateSummary);
-      }
-
-      if (motionEnabledInput) {
-        motionEnabledInput.addEventListener("change", updateSummary);
-      }
-
-      if (chunkDurationInput) {
-        chunkDurationInput.addEventListener("input", updateSummary);
-      }
-
-      function getSelectedProfile() {
-        const selected = profileInputs.find((input) => input.checked);
-        return selected ? selected.value : "standard";
-      }
-
-      function getSelectedPreset() {
-        const selected = presetInputs.find((input) => input.checked);
-        return selected ? selected.value : "balanced";
-      }
-
-      function setProfile(profile) {
-        profileInputs.forEach((input) => {
-          input.checked = input.value === profile;
-        });
-        updateModeVisibility();
-      }
-
-      function setPreset(preset) {
-        let matched = false;
-        presetInputs.forEach((input) => {
-          const checked = input.value === preset;
-          input.checked = checked;
-          if (checked) {
-            matched = true;
+          const payload = await response.json();
+          if (payload?.presets) {
+            presets = {};
+            presetSelect.innerHTML = "";
+            payload.presets.forEach((preset) => {
+              if (!preset?.name) {
+                return;
+              }
+              presets[preset.name] = {
+                label: preset.name,
+                fps: preset.fps,
+                jpeg_quality: preset.jpeg_quality,
+              };
+              const option = document.createElement("option");
+              option.value = preset.name;
+              option.textContent = preset.name.replace(/\b\w/g, (char) => char.toUpperCase());
+              presetSelect.appendChild(option);
+            });
           }
-        });
-        if (!matched && presetInputs.length) {
-          presetInputs[0].checked = true;
+          applySettings(payload.settings);
+          statusText.textContent = "Settings loaded";
+        } catch (error) {
+          console.error("Failed to load surveillance settings", error);
+          statusText.textContent = error.message || "Unable to load surveillance settings.";
+          statusText.classList.add("is-error");
         }
-      }
-
-      function updateModeVisibility() {
-        const profile = getSelectedProfile();
-        const standard = profile === "standard";
-        standardSection.hidden = !standard;
-        expertSection.hidden = standard;
-        summary.dataset.profile = profile;
-        updateSummary();
-      }
-
-      function resolveEffectiveSettings() {
-        const profile = getSelectedProfile();
-        if (profile === "standard") {
-          const preset = getSelectedPreset();
-          const config = STANDARD_PRESETS[preset] || STANDARD_PRESETS.balanced;
-          return {
-            profile,
-            preset,
-            fps: config.fps,
-            jpeg_quality: config.jpeg_quality,
-          };
-        }
-        const fpsValue = parseInt(expertFpsInput.value, 10);
-        const qualityValue = parseInt(expertQualityInput.value, 10);
-        return {
-          profile,
-          preset: getSelectedPreset(),
-          fps: Number.isFinite(fpsValue) ? fpsValue : null,
-          jpeg_quality: Number.isFinite(qualityValue) ? qualityValue : null,
-        };
-      }
-
-      function updateSummary() {
-        const effective = resolveEffectiveSettings();
-        let text = "Effective capture: ";
-        if (effective.fps && effective.jpeg_quality) {
-          const prefix =
-            effective.profile === "standard"
-              ? `${STANDARD_PRESETS[effective.preset]?.label || "Preset"}: `
-              : "Expert configuration: ";
-          text += `${prefix}${effective.fps} fps, JPEG quality ${effective.jpeg_quality}`;
-        } else {
-          text += "—";
-        }
-        if (chunkDurationInput) {
-          const seconds = parseInt(chunkDurationInput.value, 10);
-          const durationLabel = formatDurationSeconds(Number.isFinite(seconds) ? seconds : 0);
-          if (durationLabel) {
-            text += ` • Split every ${durationLabel}`;
-          }
-        }
-        if (motionEnabledInput && motionEnabledInput.checked && effective.fps) {
-          const decimation = getMotionDecimation();
-          const motionFps = effective.fps / Math.max(1, decimation);
-          const motionLabel = formatFpsLabel(motionFps);
-          if (decimation > 1) {
-            text += ` • Motion capture ~${motionLabel} fps`;
-          } else {
-            text += ` • Motion capture ${motionLabel} fps`;
-          }
-          text += " (recommended ≤ 8 fps)";
-          if (motionPostSecondsInput) {
-            const lingerRaw = Number(motionPostSecondsInput.value);
-            if (Number.isFinite(lingerRaw) && lingerRaw > 0) {
-              const display = lingerRaw % 1 === 0 ? lingerRaw.toFixed(0) : lingerRaw.toFixed(1);
-              text += ` • Hold ${display}s post-motion`;
-            }
-          }
-        }
-        summary.textContent = text;
-        updateMotionGuidance();
       }
 
       function applySettings(settings) {
         if (!settings || typeof settings !== "object") {
           return;
         }
-        currentSettings = settings;
         const profile = settings.profile === "expert" ? "expert" : "standard";
-        setProfile(profile);
-        setPreset(settings.preset || "balanced");
-        expertFpsInput.value = settings.expert_fps ?? settings.fps ?? 6;
-        expertQualityInput.value = settings.expert_jpeg_quality ?? settings.jpeg_quality ?? 75;
-        updateModeVisibility();
-        if (overlayCheckbox) {
-          overlayCheckbox.checked = settings.overlays_enabled !== false;
-        }
-        if (rememberCheckbox) {
-          rememberCheckbox.checked = Boolean(settings.remember_recording_state);
-        }
-        if (chunkDurationInput) {
-          const seconds = Number(settings.chunk_duration_seconds ?? 0);
-          const normalised = Number.isFinite(seconds) && seconds > 0 ? Math.round(seconds) : 0;
-          chunkDurationInput.value = normalised;
-        }
-        if (storageThresholdInput) {
-          const threshold = Number(settings.storage_threshold_percent ?? 10);
-          storageThresholdInput.value = Number.isFinite(threshold) ? threshold : 10;
-        }
-        if (autoPurgeInput) {
-          const days = Number(settings.auto_purge_days ?? 0);
-          autoPurgeInput.value = Number.isFinite(days) && days > 0 ? Math.round(days) : 0;
-        }
-        if (motionEnabledInput) {
-          motionEnabledInput.checked = Boolean(settings.motion_detection_enabled);
-        }
-        if (motionSensitivityInput) {
-          const value = Number(settings.motion_sensitivity ?? 50);
-          motionSensitivityInput.value = Number.isFinite(value) ? value : 50;
-          updateMotionSensitivityLabel(Number(motionSensitivityInput.value));
-        }
-        if (motionDecimationInput) {
-          const decimation = Number(settings.motion_frame_decimation ?? 1);
-          const normalised =
-            Number.isFinite(decimation) && decimation > 0
-              ? Math.min(30, Math.max(1, Math.round(decimation)))
-              : 1;
-          motionDecimationInput.value = normalised;
-        }
-        if (motionPostSecondsInput) {
-          const linger = Number(settings.motion_post_event_seconds ?? 0);
-          const normalised =
-            Number.isFinite(linger) && linger >= 0
-              ? Math.min(60, Math.max(0, Math.round(linger * 2) / 2))
-              : 0;
-          motionPostSecondsInput.value = normalised;
-        }
-        updateSummary();
+        profileRadios.forEach((radio) => {
+          radio.checked = radio.value === profile;
+        });
+        presetSelect.value = settings.preset || "balanced";
+        expertFps.value = settings.expert_fps ?? settings.fps ?? 6;
+        expertQuality.value = settings.expert_jpeg_quality ?? settings.jpeg_quality ?? 65;
+        chunkDuration.value = settings.chunk_duration_seconds ?? "";
+        const clipMegabytes = settings.max_clip_megabytes ?? 0;
+        maxClip.value = clipMegabytes || "";
+        motionEnabled.checked = Boolean(settings.motion_detection_enabled);
+        motionSensitivity.value = settings.motion_sensitivity ?? 50;
+        motionDecimation.value = settings.motion_frame_decimation ?? 1;
+        motionPost.value = settings.motion_post_event_seconds ?? 2;
+        overlaysEnabled.checked = Boolean(settings.overlays_enabled);
+        rememberRecording.checked = Boolean(settings.remember_recording_state);
+        autoPurge.value = settings.auto_purge_days ?? "";
+        storageThreshold.value = settings.storage_threshold_percent ?? 10;
+        updateExpertVisibility();
+        updateSummary(settings);
       }
 
-      async function loadSettings() {
-        statusText.textContent = "Loading settings…";
-        try {
-          const response = await fetch("/api/surveillance/settings", { cache: "no-store" });
-          if (!response.ok) {
-            throw new Error(`Request failed with ${response.status}`);
-          }
-          const payload = await response.json();
-          if (!payload || typeof payload !== "object") {
-            throw new Error("Invalid response payload");
-          }
-          applySettings(payload.settings);
-          statusText.textContent = "";
-        } catch (error) {
-          console.error("Failed to load surveillance settings", error);
-          statusText.textContent = "Unable to load surveillance settings.";
+      function normaliseInt(input, { min, max, fallback = null }) {
+        const value = Number.parseInt(input.value, 10);
+        if (!Number.isFinite(value)) {
+          return fallback;
         }
+        const clamped = Math.min(max, Math.max(min, value));
+        return clamped;
       }
-
-      profileInputs.forEach((input) => {
-        input.addEventListener("change", () => {
-          updateModeVisibility();
-        });
-      });
-      presetInputs.forEach((input) => {
-        input.addEventListener("change", () => {
-          updateSummary();
-        });
-      });
-      expertFpsInput.addEventListener("input", updateSummary);
-      expertQualityInput.addEventListener("input", updateSummary);
 
       form.addEventListener("submit", async (event) => {
         event.preventDefault();
-        const profile = getSelectedProfile();
+        const profile = currentProfile();
         const payload = { profile };
         if (profile === "standard") {
-          payload.preset = getSelectedPreset();
+          payload.preset = presetSelect.value || "balanced";
         } else {
-          const fpsValue = parseInt(expertFpsInput.value, 10);
-          const qualityValue = parseInt(expertQualityInput.value, 10);
-          if (!Number.isFinite(fpsValue) || fpsValue < 1 || fpsValue > 30) {
-            statusText.textContent = "Enter a frame rate between 1 and 30 fps.";
-            expertFpsInput.focus();
-            return;
-          }
-          if (!Number.isFinite(qualityValue) || qualityValue < 30 || qualityValue > 100) {
-            statusText.textContent = "JPEG quality must be between 30 and 100.";
-            expertQualityInput.focus();
-            return;
-          }
+          const fpsValue = normaliseInt(expertFps, { min: 1, max: 30, fallback: 6 });
+          const qualityValue = normaliseInt(expertQuality, { min: 30, max: 100, fallback: 65 });
           payload.expert_fps = fpsValue;
           payload.expert_jpeg_quality = qualityValue;
         }
-        payload.overlays_enabled = overlayCheckbox ? overlayCheckbox.checked : true;
-        payload.remember_recording_state = rememberCheckbox ? rememberCheckbox.checked : false;
-        if (motionEnabledInput) {
-          payload.motion_detection_enabled = motionEnabledInput.checked;
+        const chunkSeconds = Number.parseInt(chunkDuration.value, 10);
+        payload.chunk_duration_seconds = Number.isFinite(chunkSeconds) && chunkSeconds > 0 ? chunkSeconds : 0;
+        const clipMegabytes = Number.parseInt(maxClip.value, 10);
+        payload.max_clip_megabytes = Number.isFinite(clipMegabytes) && clipMegabytes > 0 ? clipMegabytes : 0;
+        payload.overlays_enabled = overlaysEnabled.checked;
+        payload.remember_recording_state = rememberRecording.checked;
+        payload.motion_detection_enabled = motionEnabled.checked;
+        payload.motion_sensitivity = normaliseInt(motionSensitivity, { min: 1, max: 100, fallback: 50 });
+        payload.motion_frame_decimation = normaliseInt(motionDecimation, { min: 1, max: 30, fallback: 1 });
+        const postSeconds = Number.parseFloat(motionPost.value);
+        payload.motion_post_event_seconds = Number.isFinite(postSeconds) && postSeconds >= 0 && postSeconds <= 60 ? postSeconds : 0;
+        const thresholdValue = Number.parseFloat(storageThreshold.value);
+        if (!Number.isFinite(thresholdValue) || thresholdValue < 1 || thresholdValue > 90) {
+          statusText.textContent = "Storage threshold must be between 1 and 90%.";
+          statusText.classList.add("is-error");
+          storageThreshold.focus();
+          return;
         }
-        if (motionSensitivityInput) {
-          const motionValue = parseInt(motionSensitivityInput.value, 10);
-          payload.motion_sensitivity = Number.isFinite(motionValue) ? motionValue : 50;
-        }
-        if (motionDecimationInput) {
-          const decimationValue = parseInt(motionDecimationInput.value, 10);
-          const normalised =
-            Number.isFinite(decimationValue) && decimationValue > 0
-              ? Math.min(30, Math.max(1, decimationValue))
-              : 1;
-          payload.motion_frame_decimation = normalised;
-        }
-        if (motionPostSecondsInput) {
-          const lingerValue = parseFloat(motionPostSecondsInput.value);
-          if (
-            Number.isFinite(lingerValue) &&
-            lingerValue >= 0 &&
-            lingerValue <= 60
-          ) {
-            payload.motion_post_event_seconds = lingerValue;
-          } else if (motionPostSecondsInput.value !== "") {
-            statusText.textContent = "Post-motion recording must be between 0 and 60 seconds.";
-            motionPostSecondsInput.focus();
-            return;
-          } else {
-            payload.motion_post_event_seconds = 0;
-          }
-        }
-        if (chunkDurationInput) {
-          const chunkSeconds = parseInt(chunkDurationInput.value, 10);
-          if (Number.isFinite(chunkSeconds) && chunkSeconds > 0) {
-            if (chunkSeconds > 86400) {
-              statusText.textContent = "Chunk duration must be 86400 seconds or less.";
-              chunkDurationInput.focus();
-              return;
-            }
-            payload.chunk_duration_seconds = chunkSeconds;
-          } else {
-            payload.chunk_duration_seconds = 0;
-          }
-        }
-        if (storageThresholdInput) {
-          const thresholdValue = parseFloat(storageThresholdInput.value);
-          if (!Number.isFinite(thresholdValue) || thresholdValue < 1 || thresholdValue > 90) {
-            statusText.textContent = "Storage threshold must be between 1 and 90%.";
-            storageThresholdInput.focus();
-            return;
-          }
-          payload.storage_threshold_percent = thresholdValue;
-        }
-        if (autoPurgeInput) {
-          const purgeValue = parseInt(autoPurgeInput.value, 10);
-          payload.auto_purge_days = Number.isFinite(purgeValue) && purgeValue > 0 ? purgeValue : 0;
-        }
+        payload.storage_threshold_percent = thresholdValue;
+        const purgeValue = Number.parseInt(autoPurge.value, 10);
+        payload.auto_purge_days = Number.isFinite(purgeValue) && purgeValue > 0 ? purgeValue : 0;
+
         statusText.textContent = "Saving settings…";
+        statusText.classList.remove("is-error");
         form.querySelector("button[type='submit']").disabled = true;
         try {
           const response = await fetch("/api/surveillance/settings", {
-            method: "POST",
+            method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload),
           });
           if (!response.ok) {
-            const detail = await response.json().catch(() => null);
-            const message = detail && detail.detail ? detail.detail : "Unable to save settings.";
-            throw new Error(message);
+            let detail = "Unable to save settings.";
+            try {
+              const body = await response.json();
+              if (body?.detail) {
+                detail = body.detail;
+              }
+            } catch (error) {
+              /* ignore */
+            }
+            throw new Error(detail);
           }
           const result = await response.json();
           applySettings(result.settings);
           statusText.textContent = "Surveillance settings saved.";
-          updateSummary();
         } catch (error) {
           console.error("Failed to save surveillance settings", error);
-          statusText.textContent =
-            error instanceof Error ? error.message : "Unable to save surveillance settings.";
+          statusText.textContent = error.message || "Unable to save surveillance settings.";
+          statusText.classList.add("is-error");
         } finally {
           form.querySelector("button[type='submit']").disabled = false;
         }
       });
 
-      loadCameraConfig();
       loadSettings();
-      refreshSystemTemperature();
     </script>
   </body>
 </html>
