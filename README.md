@@ -89,55 +89,54 @@ src/
 
 RevCam targets Python 3.11+.
 
-### Cloning the repository
+### Installation (Raspberry Pi OS)
 
-If you have not already pulled the sources, make sure the Git tooling is
-available on your system. RevCam ships a helper script that installs Git using
-common package managers:
+Follow these steps on a Raspberry Pi running Raspberry Pi OS. They appear in
+the order you should run them so the packaged Picamera2 stack is available
+before you install the Python dependencies.
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/soler2000/RevCam/main/scripts/install_git_tools.sh | bash
-```
+1. **Install Git and clone the repository.** If Git is missing, run the helper
+   script that bootstraps common package managers:
 
-Review the script before running it. On Debian-based distributions you can also
-install Git directly with `sudo apt install git`. Then clone the repository and
-enter the project directory:
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/soler2000/RevCam/main/scripts/install_git_tools.sh | bash
+   ```
 
-```bash
-git clone https://github.com/soler2000/RevCam.git
-cd RevCam
-```
+   Review the script before executing it. On Debian-based distributions you can
+   also install Git directly with `sudo apt install git`. Then clone the
+   repository and enter the project directory (replace the URL with your own
+   fork when contributing changes):
 
-Replace the repository URL with your own fork when contributing changes.
+   ```bash
+   git clone https://github.com/soler2000/RevCam.git
+   cd RevCam
+   ```
 
-### Raspberry Pi installation
-
-The Raspberry Pi wheels for Picamera2 and its native dependencies are shipped
-through Raspberry Pi OS. Using them is much faster and more reliable than
-building everything from PyPI. Follow these steps on the Pi:
-
-1. Install the packaged Picamera2 stack and its helpers:
+2. **Install system packages.** Raspberry Pi OS ships Picamera2 wheels and their
+   native dependencies. Installing them through APT is faster and avoids
+   rebuilding heavy libraries from source:
 
    ```bash
    sudo apt update
    sudo apt install python3-picamera2 python3-prctl python3-simplejpeg
-  ```
+   ```
 
-   Prefer a single command? Run the bundled helper, which also installs
-   the native JPEG encoder used by the streaming pipeline:
-
-   > **Tip:** The SimpleJPEG package is published as `python3-simplejpeg` on
-   > Raspberry Pi OS. Running `sudo apt install simplejpeg` will fail with an
-   > "unable to locate package" error. If the package is unavailable from your
-   > mirror, install SimpleJPEG from PyPI after activating the virtual
-   > environment (see the next step).
+   Prefer a single command? Run the bundled helper, which also installs the
+   native JPEG encoder used by the streaming pipeline:
 
    ```bash
    ./scripts/install_prereqs.sh
    ```
 
-2. Create a virtual environment that can see the system packages you just
-   installed (this prevents `pip` from trying to rebuild Picamera2 and PiDNG):
+   > **Tip:** The SimpleJPEG package is published as `python3-simplejpeg` on
+   > Raspberry Pi OS. Running `sudo apt install simplejpeg` will fail with an
+   > "unable to locate package" error. If the package is unavailable from your
+   > mirror, install SimpleJPEG from PyPI after activating the virtual
+   > environment in the next step.
+
+3. **Create and activate the virtual environment.** Giving the virtual
+   environment access to system packages prevents `pip` from attempting to
+   rebuild Picamera2 and PiDNG:
 
    ```bash
    python3 -m venv --system-site-packages .venv
@@ -152,10 +151,10 @@ building everything from PyPI. Follow these steps on the Pi:
    pip install --prefer-binary --extra-index-url https://www.piwheels.org/simple simplejpeg
    ```
 
-3. Install RevCam from the source tree. On Pi hardware this step pulls
-   pre-built wheels from PiWheels, so it usually completes quickly. Seeing a
-   long list ending with `Successfully installed ...` means the step finished
-   successfully. You can either run the convenience script:
+4. **Install RevCam.** On Pi hardware this step pulls pre-built wheels from
+   PiWheels, so it usually completes quickly. Seeing a long list ending with
+   `Successfully installed ...` means the step finished successfully. Run either
+   the convenience script:
 
    ```bash
    ./scripts/install.sh --pi
@@ -169,13 +168,13 @@ building everything from PyPI. Follow these steps on the Pi:
 
    > **Note:** Older Raspberry Pi OS images bundle a `Send2Trash` build whose
    > metadata confuses modern versions of `pip`, yielding a warning such as
-   > `Error parsing dependencies of send2trash`. The install helper now
-   > replaces that wheel inside the virtual environment automatically. If
-   > network access is unavailable, rerun `pip install --upgrade
-   > Send2Trash>=1.8.3` once a connection is restored to silence the warning.
+   > `Error parsing dependencies of send2trash`. The install helper replaces that
+   > wheel inside the virtual environment automatically. If network access is
+   > unavailable, rerun `pip install --upgrade Send2Trash>=1.8.3` once a
+   > connection is restored to silence the warning.
 
-The `--prefer-binary` flag asks `pip` to fetch pre-built wheels when
-available, and the PiWheels index provides ARM builds for most dependencies.
+The `--prefer-binary` flag asks `pip` to fetch pre-built wheels when available,
+and the PiWheels index provides ARM builds for most dependencies.
 
 ### WebRTC requirements
 
