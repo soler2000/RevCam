@@ -730,9 +730,9 @@
         if (trailer) {
           const rollRad = THREE.MathUtils.degToRad(latestOrientation.roll);
           const pitchRad = THREE.MathUtils.degToRad(latestOrientation.pitch);
-          trailer.rotation.x = pitchRad;
+          trailer.rotation.x = rollRad;
           trailer.rotation.y = 0;
-          trailer.rotation.z = rollRad;
+          trailer.rotation.z = pitchRad;
         }
       }
 
