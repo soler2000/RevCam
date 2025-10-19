@@ -6,7 +6,8 @@ if [[ "${SERVICE_NAME}" != *.service ]]; then
     SERVICE_NAME="${SERVICE_NAME}.service"
 fi
 
-PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd -P)"
 RUNNER="${PROJECT_DIR}/scripts/run_with_sudo.sh"
 if [[ ! -x "${RUNNER}" ]]; then
     echo "Expected helper ${RUNNER} to exist" >&2
