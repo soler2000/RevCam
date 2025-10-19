@@ -17,7 +17,7 @@ from .mdns import MDNSAdvertiser
 from .system_log import SystemLog, SystemLogEntry
 
 
-DEFAULT_HOTSPOT_PASSWORD = "Reversing123"
+DEFAULT_HOTSPOT_PASSWORD = "RevCamRocks"
 
 
 class WiFiCredentialStore:
