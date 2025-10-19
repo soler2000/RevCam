@@ -96,20 +96,13 @@ class Gy85Sensor:
     def _create_bus(self, bus_number: int | None):
         if bus_number is not None:
             try:
-                from adafruit_extended_bus import ExtendedI2C  # type: ignore
-            except ModuleNotFoundError as exc:  # pragma: no cover - optional dependency
-                raise Gy85UnavailableError(
-                    "install adafruit-circuitpython-extended-bus for custom I2C buses"
-                ) from exc
-            except Exception as exc:  # pragma: no cover - optional dependency
-                raise Gy85UnavailableError(f"ExtendedI2C unavailable: {exc}") from exc
+                from .i2c_bus import I2CBusDependencyError, I2CBusRuntimeError, create_i2c_bus
 
-            try:
-                return ExtendedI2C(bus_number)  # type: ignore[call-arg]
-            except Exception as exc:  # pragma: no cover - hardware specific
-                raise Gy85UnavailableError(
-                    f"Unable to access I2C bus {bus_number}: {exc}"
-                ) from exc
+                return create_i2c_bus(bus_number)
+            except I2CBusDependencyError as exc:  # pragma: no cover - optional dependency
+                raise Gy85UnavailableError(exc.message) from exc
+            except I2CBusRuntimeError as exc:  # pragma: no cover - optional dependency
+                raise Gy85UnavailableError(exc.message) from exc
 
         try:
             import board  # type: ignore

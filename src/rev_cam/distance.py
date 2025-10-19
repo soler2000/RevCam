@@ -209,18 +209,15 @@ class DistanceMonitor:
 
         if self._i2c_bus is not None:
             try:  # pragma: no cover - optional dependency
-                from adafruit_extended_bus import ExtendedI2C  # type: ignore
-            except ModuleNotFoundError as exc:  # pragma: no cover - optional dependency
-                attempts.append("install adafruit-circuitpython-extended-bus for custom I2C buses")
-                _fail(exc)
-            except Exception as exc:  # pragma: no cover - optional dependency
-                attempts.append(f"ExtendedI2C unavailable: {exc}")
-                _fail(exc)
+                from .i2c_bus import I2CBusDependencyError, I2CBusRuntimeError, create_i2c_bus
 
-            try:  # pragma: no cover - hardware dependency
-                i2c = ExtendedI2C(self._i2c_bus)
-            except Exception as exc:  # pragma: no cover - hardware dependency
-                raise RuntimeError(f"Unable to access I2C bus {self._i2c_bus}: {exc}") from exc
+                i2c = create_i2c_bus(self._i2c_bus)
+            except I2CBusDependencyError as exc:
+                attempts.append(exc.message)
+                _fail(exc)
+            except I2CBusRuntimeError as exc:
+                attempts.append(exc.message)
+                _fail(exc)
             self._owned_i2c_bus = i2c
             self._owns_i2c_bus = True
         else:
