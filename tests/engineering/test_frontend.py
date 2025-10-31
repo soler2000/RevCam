@@ -8,6 +8,11 @@ def test_navigation_contains_work_centres_entry():
     assert "Work Centres" in labels
 
 
+def test_navigation_includes_engineering_dashboard_first():
+    labels = [item.label for item in ENGINEERING_NAVIGATION]
+    assert labels[0] == "Engineering Dashboard"
+
+
 def test_work_centre_form_integration(client):
     form = WorkCentreForm(client)
 
