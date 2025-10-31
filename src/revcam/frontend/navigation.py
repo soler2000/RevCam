@@ -11,7 +11,7 @@ class NavigationItem:
 
 
 ENGINEERING_NAVIGATION: List[NavigationItem] = [
-    NavigationItem(label="Dashboard", path="/engineering/dashboard"),
+    NavigationItem(label="Engineering Dashboard", path="/engineering/dashboard"),
     NavigationItem(label="Processes", path="/engineering/processes"),
     NavigationItem(label="Work Centres", path="/engineering/work-centres"),
 ]

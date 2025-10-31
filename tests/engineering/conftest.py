@@ -11,6 +11,7 @@ from rev_cam.engineering_api import (
     WorkCentreCreatePayload,
     WorkCentreUpdatePayload,
     create_work_centre,
+    get_engineering_dashboard,
     list_work_centres,
     update_work_centre,
 )
@@ -55,6 +56,9 @@ class SimpleAPIClient:
             if "?name=" in path:
                 query = path.split("?name=")[1]
             data = list_work_centres(name=query)
+            return _Response(200, data)
+        if path == "/engineering/dashboard":
+            data = get_engineering_dashboard().model_dump()
             return _Response(200, data)
         if path.startswith("/sop/procedures"):
             query = None
