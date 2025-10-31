@@ -16,12 +16,21 @@ def test_work_centre_crud_flow(client):
     assert payload["results"][0]["name"] == "Assembly"
 
     work_centre_id = created["id"]
+    response = client.get(f"/engineering/work-centres/{work_centre_id}/")
+    assert response.status_code == 200
+    detail = response.json()
+    assert detail["name"] == "Assembly"
+
     response = client.patch(
         f"/engineering/work-centres/{work_centre_id}/",
         json={"description": "Updated description"},
     )
     assert response.status_code == 200, response.content
     assert response.json()["description"] == "Updated description"
+
+    missing = client.get("/engineering/work-centres/999/")
+    assert missing.status_code == 404
+    assert "not found" in missing.json()["detail"].lower()
 
     response = client.post(
         "/engineering/work-centres/",

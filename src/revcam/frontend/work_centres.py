@@ -18,6 +18,12 @@ class WorkCentreForm:
         payload = response.json()
         return payload.get("results", [])
 
+    def retrieve(self, work_centre_id: int) -> dict[str, Any] | None:
+        response = self.client.get(f"/engineering/work-centres/{work_centre_id}/")
+        if response.status_code == 200:
+            return response.json()
+        return None
+
     def create(self, *, name: str, code: str | None = None, description: str | None = None) -> tuple[bool, str]:
         name = (name or "").strip()
         if not name:

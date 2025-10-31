@@ -32,6 +32,10 @@ def test_work_centre_form_integration(client):
     assert updated is True
     assert "updated" in update_message.lower()
 
+    detail = form.retrieve(centre_id)
+    assert detail is not None
+    assert detail["description"] == "Metal fabrication"
+
 
 def test_sop_form_uses_work_centres(client):
     work_form = WorkCentreForm(client)

@@ -12,6 +12,7 @@ from rev_cam.engineering_api import (
     WorkCentreUpdatePayload,
     create_work_centre,
     get_engineering_dashboard,
+    get_work_centre,
     list_work_centres,
     update_work_centre,
 )
@@ -51,6 +52,15 @@ class _Response:
 
 class SimpleAPIClient:
     def get(self, path: str):
+        if path.startswith("/engineering/work-centres/") and path.rstrip("/").split("/")[-1].isdigit():
+            work_centre_id = int(path.rstrip("/").split("/")[-1])
+            try:
+                data = get_work_centre(work_centre_id)
+            except HTTPException as exc:
+                detail = getattr(exc, "detail", None) or str(exc)
+                status = getattr(exc, "status_code", 404)
+                return _Response(status, {"detail": detail})
+            return _Response(200, data.model_dump())
         if path.startswith("/engineering/work-centres"):
             query = None
             if "?name=" in path:
