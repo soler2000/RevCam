@@ -72,6 +72,8 @@ from .system_log import SystemLog
 from .version import APP_VERSION
 from .wifi import WiFiCredentialStore, WiFiError, WiFiManager, WiFiStatus
 from .trailer_leveling import evaluate_leveling
+from .engineering_api import router as engineering_router
+from .sop_api import router as sop_router
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 RECORDINGS_DIR = Path(os.environ.get("REVCAM_RECORDINGS_DIR", STATIC_DIR / "recordings"))
@@ -357,6 +359,8 @@ def create_app(
     wifi_manager: WiFiManager | None = None,
 ) -> FastAPI:
     app = FastAPI(title="RevCam", version=APP_VERSION)
+    app.include_router(engineering_router)
+    app.include_router(sop_router)
 
     logger = logging.getLogger(__name__)
 
